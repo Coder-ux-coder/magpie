@@ -11,11 +11,16 @@ Two layers:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger(__name__)
+
+LOG_LEVELS = ("critical", "error", "warning", "info", "debug")
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 Proactivity = Literal["quiet", "balanced", "proactive"]
@@ -89,7 +94,25 @@ class Settings(BaseSettings):
     @field_validator("base_url")
     @classmethod
     def _strip_slash(cls, value: str) -> str:
-        return value.rstrip("/")
+        return value.strip().rstrip("/")
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_timezone(cls, value: str) -> str:
+        from magpie.timeutil import is_valid_timezone
+
+        value = value.strip()
+        if not is_valid_timezone(value):
+            # A typo here must not stop the app; the dashboard can set it later.
+            log.warning("Unknown time zone %r in MAGPIE_TIMEZONE; using UTC", value)
+            return "UTC"
+        return value
+
+    @field_validator("log_level")
+    @classmethod
+    def _known_log_level(cls, value: str) -> str:
+        value = value.strip().lower()
+        return value if value in LOG_LEVELS else "info"
 
     @property
     def db_path(self) -> Path:
@@ -103,18 +126,20 @@ class Settings(BaseSettings):
 class Prefs(BaseModel):
     """User preferences, stored in the database and edited from the dashboard."""
 
-    timezone: str = "UTC"
+    timezone: str = Field(default="UTC", max_length=64)
     proactivity: Proactivity = "balanced"
-    about_me: str = ""
+    about_me: str = Field(default="", max_length=2000)
+    instructions: str = Field(default="", max_length=2000)
     morning_time: str = "09:00"
     digest_time: str = "08:00"
     weekly_review_day: Weekday = "sun"
     weekly_review_time: str = "18:00"
-    speech_lang: str = ""
-    wake_phrase: str = "notes on"
-    stop_phrase: str = "notes off"
+    speech_lang: str = Field(default="", max_length=35)
+    wake_phrase: str = Field(default="notes on", max_length=60)
+    stop_phrase: str = Field(default="notes off", max_length=60)
     silence_seconds: int = Field(default=8, ge=0, le=120)
-    channels: dict[str, bool] = Field(default_factory=dict)
+    snooze_minutes: int = Field(default=60, ge=5, le=1440)
+    channels: dict[str, bool] = Field(default_factory=dict, max_length=20)
     web_search: bool = True
     telegram_chat_id: int | None = None
 

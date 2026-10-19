@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 PAIR_TTL = timedelta(minutes=15)
+STRANGER_QUIET = 600  # seconds between replies to the same stranger
+MAX_VOICE_BYTES = 20 * 1024 * 1024
 VERDICTS = {"must": "must see", "worth_it": "worth it", "skim": "skim it", "skip": "skip it"}
 COMMANDS = [
     ("today", "What's scheduled today"),
@@ -57,10 +59,11 @@ class TelegramBot:
     # ------------------------------------------------------------- lifecycle
 
     async def run(self) -> None:
+        """Long-poll Telegram until cancelled. Only a rejected token stops it."""
         while True:
             try:
                 me = await self.api.call("getMe")
-                self.username = me.get("username")
+                self.username = me.get("username") if isinstance(me, dict) else None
                 await self.api.call("deleteWebhook", drop_pending_updates=False)
                 await self.api.call(
                     "setMyCommands",
@@ -72,9 +75,15 @@ class TelegramBot:
                     log.error("Telegram rejected the bot token; the bot is disabled")
                     return
                 log.warning("Telegram start-up failed (%s); retrying in 30s", exc)
-                await asyncio.sleep(30)
+                await asyncio.sleep(exc.retry_after or 30)
+            except Exception:
+                log.exception("Telegram start-up failed; retrying in 60s")
+                await asyncio.sleep(60)
         log.info("Telegram bot @%s is listening", self.username)
-        offset = int(self.app.store.get_kv("telegram_offset", 0))
+        try:
+            offset = int(self.app.store.get_kv("telegram_offset", 0))
+        except (TypeError, ValueError):
+            offset = 0
         while True:
             try:
                 updates = await self.api.call(
@@ -85,14 +94,29 @@ class TelegramBot:
                     allowed_updates=["message", "callback_query"],
                 )
             except TelegramError as exc:
-                log.warning("Telegram polling error: %s", exc)
-                await asyncio.sleep(5)
+                if exc.status == 401:
+                    log.error("Telegram rejected the bot token; the bot is disabled")
+                    return
+                if exc.status == 409:
+                    log.warning(
+                        "Another program is reading this bot's messages (two Magpie servers "
+                        "with the same bot token?); retrying in 30s"
+                    )
+                else:
+                    log.warning("Telegram polling error: %s", exc)
+                await asyncio.sleep(exc.retry_after or (30 if exc.status == 409 else 5))
                 continue
-            for update in updates or []:
-                offset = max(offset, int(update["update_id"]) + 1)
-                self.app.store.set_kv("telegram_offset", offset)
+            except Exception:
+                log.exception("Telegram polling failed; retrying in 10s")
+                await asyncio.sleep(10)
+                continue
+            for update in updates if isinstance(updates, list) else []:
                 try:
+                    offset = max(offset, int(update["update_id"]) + 1)
+                    self.app.store.set_kv("telegram_offset", offset)
                     await self.handle_update(update)
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
                     log.exception("Failed to handle Telegram update")
 
@@ -110,9 +134,14 @@ class TelegramBot:
 
     def _consume_code(self, code: str) -> bool:
         pending = self.app.store.get_kv("telegram_pair")
-        if not pending or not secrets.compare_digest(str(pending.get("code")), code.strip()):
+        if not isinstance(pending, dict) or not secrets.compare_digest(
+            str(pending.get("code")).encode(), code.strip().encode()
+        ):
             return False
-        if parse_iso(pending["expires"]) < now_utc():
+        try:
+            if parse_iso(pending["expires"]) < now_utc():
+                return False
+        except (KeyError, TypeError, ValueError):
             return False
         self.app.store.delete_kv("telegram_pair")
         return True
@@ -124,9 +153,11 @@ class TelegramBot:
             await self.handle_callback(update["callback_query"])
             return
         message = update.get("message")
-        if not message:
+        if not isinstance(message, dict):
             return
-        chat_id = message["chat"]["id"]
+        chat_id = (message.get("chat") or {}).get("id")
+        if not isinstance(chat_id, int):
+            return
         text = (message.get("text") or message.get("caption") or "").strip()
         paired = self.chat_id()
 
@@ -170,10 +201,17 @@ class TelegramBot:
         )
 
     async def _stranger(self, chat_id: int, unpaired: bool) -> None:
-        last = self._stranger_replies.get(chat_id, 0)
-        if time.monotonic() - last < 600:
+        now = time.monotonic()
+        last = self._stranger_replies.get(chat_id)
+        if last is not None and now - last < STRANGER_QUIET:
             return
-        self._stranger_replies[chat_id] = time.monotonic()
+        if len(self._stranger_replies) > 1000:
+            self._stranger_replies = {
+                chat: seen
+                for chat, seen in self._stranger_replies.items()
+                if now - seen < STRANGER_QUIET
+            }
+        self._stranger_replies[chat_id] = now
         if unpaired:
             text = (
                 "👋 This is a private Magpie bot. To connect it, open your Magpie dashboard → "
@@ -195,11 +233,22 @@ class TelegramBot:
                 "Groq) to your Magpie settings, or type the note instead.",
             )
             return
+        if (voice.get("file_size") or 0) > MAX_VOICE_BYTES:
+            await self.reply(
+                chat_id,
+                "🎙 That recording is too long for Telegram bots (over 20 MB). Try a "
+                "shorter one, or split it in two.",
+            )
+            return
         try:
             audio = await self.api.download_file(voice["file_id"])
-            transcript = await self.app.stt.transcribe(audio, voice.get("mime_type", "audio/ogg"))
+            transcript = await self.app.stt.transcribe(audio, voice.get("mime_type") or "audio/ogg")
         except (TelegramError, TranscriptionError) as exc:
             await self.reply(chat_id, f"🎙 I couldn't transcribe that: {escape(str(exc))}")
+            return
+        except Exception:
+            log.exception("Voice note failed")
+            await self.reply(chat_id, "🎙 Something went wrong with that recording. Try again.")
             return
         if not transcript:
             await self.reply(chat_id, "🎙 I couldn't hear anything in that recording.")
@@ -237,14 +286,17 @@ class TelegramBot:
                 return
             try:
                 answer = await self.app.ask(argument)
-                await self.reply(chat_id, escape(answer.answer), reply_to=message_id)
             except BrainError as exc:
                 await self.reply(chat_id, f"Couldn't answer: {escape(str(exc))}")
+                return
+            await self.reply(
+                chat_id, escape(markdown_to_plain(answer.answer)) or "…", reply_to=message_id
+            )
         elif command in ("digest", "week"):
             kind = "weekly" if command == "week" else "daily"
             digest = await self.app.digests.run(kind, send=False, force=True)
-            if digest:
-                await self.reply(chat_id, escape(markdown_to_plain(digest.content)))
+            text = markdown_to_plain(digest.content) if digest else ""
+            await self.reply(chat_id, escape(text) or "Nothing to report yet.")
         else:
             await self.reply(chat_id, "I don't know that command. Try /help.")
 
@@ -266,11 +318,16 @@ class TelegramBot:
     # ------------------------------------------------------------- callbacks
 
     async def handle_callback(self, query: dict[str, Any]) -> None:
-        chat_id = query.get("message", {}).get("chat", {}).get("id")
-        data = query.get("data", "")
+        chat_id = ((query.get("message") or {}).get("chat") or {}).get("id")
+        data = query.get("data") or ""
         toast = "Done"
         if chat_id is None or chat_id != self.chat_id():
-            await self.api.call("answerCallbackQuery", callback_query_id=query["id"])
+            with contextlib.suppress(TelegramError):
+                await self.api.call("answerCallbackQuery", callback_query_id=query.get("id"))
+            return
+        if data == "noop":
+            with contextlib.suppress(TelegramError):
+                await self.api.call("answerCallbackQuery", callback_query_id=query.get("id"))
             return
         parts = data.split(":")
         try:
@@ -289,11 +346,18 @@ class TelegramBot:
             elif parts[0] == "n":
                 action, note_id = parts[1], int(parts[2])
                 if action == "undo":
-                    self.app.store.delete_note(note_id)
-                    toast = "Deleted"
+                    deleted = self.app.store.delete_note(note_id)
+                    toast = "Deleted" if deleted else "That note is already gone."
         except (KeyError, ValueError, IndexError):
             toast = "That item no longer exists."
-        await self.api.call("answerCallbackQuery", callback_query_id=query["id"], text=toast)
+        except Exception:
+            log.exception("Telegram button %r failed", data)
+            toast = "Something went wrong. Try again from the dashboard."
+        # Telegram stops accepting answers after a while (e.g. while the server was down).
+        with contextlib.suppress(TelegramError):
+            await self.api.call(
+                "answerCallbackQuery", callback_query_id=query.get("id"), text=toast
+            )
         message = query.get("message") or {}
         if message.get("message_id"):
             with contextlib.suppress(TelegramError):
@@ -308,6 +372,8 @@ class TelegramBot:
 
     async def on_event(self, event: str, note: Note, link: Link | None = None) -> None:
         origin = note.meta.get("telegram") if note.source.startswith("telegram") else None
+        if not isinstance(origin, dict):
+            origin = None
         chat_id = origin.get("chat_id") if origin else self.chat_id()
         if chat_id is None or chat_id != self.chat_id():
             return

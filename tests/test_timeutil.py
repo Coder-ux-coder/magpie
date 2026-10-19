@@ -95,3 +95,72 @@ def test_tomorrow_at_and_hhmm():
     assert parse_hhmm("7:05") == (7, 5)
     assert parse_hhmm("24:00") is None
     assert tomorrow_at("09:00", "UTC", now) - now == timedelta(hours=13)
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "FREQ=WEEKLY;INTERVAL=0",  # dateutil loops forever on this
+        "FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30",  # never happens: years of scanning
+        "FREQ=HOURLY;BYMONTH=4;BYMONTHDAY=31",
+        "FREQ=HOURLY;BYMINUTE=0,30",  # twice an hour
+        "FREQ=DAILY;BYSECOND=0,1",
+        "FREQ=MINUTELY",
+        "FREQ=WEEKLY;BYDAY=XX",
+        "FREQ=WEEKLY;COUNT=0",
+        "FREQ=WEEKLY;COUNT=2;UNTIL=20300101",
+        "FREQ=MONTHLY;BYDAY=5MO;BYMONTHDAY=1,2,3,4,5,6,7",
+        "FREQ=DAILY;INTERVAL=7;BYDAY=TU,WE",
+        "FREQ=MONTHLY;BYDAY=MO;BYSETPOS=9",
+        "FREQ=WEEKLY;UNTIL=20200101",  # already over
+        "FREQ=DAILY;DTSTART=20260101T090000",
+        "FREQ=DAILY;FOO=1",
+        "garbage",
+        "FREQ=DAILY;" * 100,
+    ],
+)
+def test_unsafe_or_impossible_repeat_rules_are_rejected_quickly(rule):
+    import time
+
+    started = time.perf_counter()
+    assert validate_rrule(rule) is None
+    start = datetime(2026, 10, 19, 4, 0, tzinfo=UTC)
+    assert next_occurrence(rule, start, start, "Asia/Karachi") is None
+    assert time.perf_counter() - started < 0.5
+
+
+def test_safe_repeat_rules_are_kept_and_normalised():
+    assert validate_rrule("rrule:freq=daily") == "FREQ=DAILY"
+    assert (
+        validate_rrule("FREQ=WEEKLY;UNTIL=20991231T235959Z") == "FREQ=WEEKLY;UNTIL=20991231T235959"
+    )
+    last_weekday = "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1"
+    assert validate_rrule(last_weekday) == last_weekday
+    assert validate_rrule("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29")  # leap day: rare but real
+    assert validate_rrule("FREQ=HOURLY;INTERVAL=2")
+
+
+def test_count_becomes_an_end_date():
+    from magpie.timeutil import anchor_rrule
+
+    first = datetime(2026, 10, 19, 4, 0, tzinfo=UTC)  # 09:00 in Karachi
+    anchored = anchor_rrule("FREQ=DAILY;COUNT=3", first, "Asia/Karachi")
+    assert anchored == "FREQ=DAILY;UNTIL=20261021T090000"
+    third = datetime(2026, 10, 21, 4, 0, tzinfo=UTC)
+    assert next_occurrence(anchored, third, third, "Asia/Karachi") is None
+    assert anchor_rrule("FREQ=DAILY", first, "Asia/Karachi") == "FREQ=DAILY"
+
+
+@pytest.mark.parametrize(
+    "value", ["9999-12-31T23:59", "0001-01-01T00:00", "2026-02-30T10:00", "2026-10-19T24:00"]
+)
+def test_out_of_range_times_are_value_errors(value):
+    for zone in ("America/New_York", "Asia/Tokyo"):
+        with pytest.raises(ValueError):
+            local_to_utc(value, zone)
+
+
+def test_parse_hhmm_tolerates_missing_values():
+    assert parse_hhmm(None) is None
+    assert parse_hhmm("") is None
+    assert parse_hhmm("24:00") is None

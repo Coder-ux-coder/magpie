@@ -135,3 +135,33 @@ def test_digest_flags(store: Store):
     assert [n.id for n in store.digest_notes()] == [note.id]
     store.clear_digest_flags([note.id])
     assert store.digest_notes() == []
+
+
+def test_damaged_rows_are_skipped_not_fatal(store):
+    good = store.create_note("fine")
+    bad = store.create_note("broken")
+    store.db.execute("UPDATE notes SET kind = 'mystery', tags = 'not json' WHERE id = ?", (bad.id,))
+    assert [n.id for n in store.list_notes(view="all")] == [good.id]
+    assert store.get_note(bad.id) is None
+    store.add_reminder(good.id, now_utc(), "ok")
+    store.db.execute(
+        "INSERT INTO reminders (note_id, due_at, message, created_at, updated_at)"
+        " VALUES (?, 'yesterday', 'bad', 'x', 'x')",
+        (good.id,),
+    )
+    assert [r.message for r in store.due_reminders(now_utc() + timedelta(seconds=1))] == ["ok"]
+
+
+def test_impossible_ids_return_nothing(store):
+    huge = 10**25
+    assert store.get_note(huge) is None
+    assert store.get_link(huge) is None
+    assert store.get_reminder(huge) is None
+    assert store.delete_note(huge) is False
+    assert store.delete_reminder(-1) is False
+    assert store.list_notes(offset=10**30) == []
+
+
+def test_damaged_settings_values_are_ignored(store):
+    store.db.execute("INSERT INTO kv (key, value) VALUES ('calendar_token', '{not json')")
+    assert store.get_kv("calendar_token", "fallback") == "fallback"

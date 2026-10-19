@@ -1,5 +1,6 @@
-# Quick start:   cp .env.example .env   (fill in at least ANTHROPIC_API_KEY and MAGPIE_PASSWORD)
-#                docker compose up -d   then open http://localhost:8000
+# Quick start:   ./setup.sh             (asks a few questions, writes .env, starts Magpie)
+#           or:  docker compose up -d   then open http://localhost:8000 and paste your
+#                Claude key in Settings (the password is in: docker compose logs magpie)
 # With HTTPS:    set MAGPIE_DOMAIN and MAGPIE_BASE_URL in .env, point the domain at this
 #                server, then: docker compose --profile https up -d
 services:

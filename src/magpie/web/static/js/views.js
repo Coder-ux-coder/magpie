@@ -5,7 +5,7 @@ import { noteActions, reminderActions } from "./actions.js";
 import { KINDS, noteCard } from "./cards.js";
 import { renderMarkdown } from "./markdown.js";
 import { speak } from "./speech.js";
-import { emit, local, on, speechLang, state, tz } from "./state.js";
+import { emit, local, on, snoozeLabel, speechLang, state, tz } from "./state.js";
 import { clear, clock, dayLabel, h, icon, toast, when } from "./ui.js";
 
 const PAGE = 40;
@@ -58,9 +58,11 @@ function emptyState(route, q) {
   return h("div", { class: "empty" }, h("p", {}, messages[route.view] || `No ${kind || ""} notes yet.`));
 }
 
-export async function renderNotes(container, route, q) {
+export async function renderNotes(container, route, q, isCurrent = () => true) {
   const key = JSON.stringify([route, q]);
-  const params = new URLSearchParams({ limit: String(PAGE) });
+  // A refresh of the same list keeps the pages already loaded.
+  const loaded = key === list.key && list.container ? list.notes.length : 0;
+  const params = new URLSearchParams({ limit: String(Math.min(200, Math.max(PAGE, loaded))) });
   if (q) {
     params.set("q", q);
     params.set("view", "all");
@@ -69,14 +71,17 @@ export async function renderNotes(container, route, q) {
     if (route.kind) params.set("kind", route.kind);
   }
   const data = await api(`/api/notes?${params}`);
+  if (!isCurrent()) return;
   emit("counts", data.counts);
-  list = { notes: data.notes, hasMore: data.notes.length === PAGE, key, container, route, q, params };
+  params.set("limit", String(PAGE));
+  list = { notes: data.notes, hasMore: data.notes.length >= PAGE, key, container, route, q, params };
   draw();
 }
 
 function draw() {
   const { container, notes, route, q } = list;
   if (!container) return;
+  const focusedId = document.activeElement?.closest?.(".note-card")?.dataset.id;
   clear(container);
   if (!notes.length) {
     container.append(emptyState(route, q));
@@ -86,18 +91,26 @@ function draw() {
   if (list.hasMore) {
     container.append(h("button", { type: "button", class: "btn load-more", onclick: loadMore }, "Show more"));
   }
+  if (focusedId) container.querySelector(`.note-card[data-id="${focusedId}"] .note-title a`)?.focus({ preventScroll: true });
 }
 
+let loadingMore = false;
 async function loadMore() {
+  if (loadingMore) return;
+  loadingMore = true;
+  const { key } = list;
   const params = new URLSearchParams(list.params);
   params.set("offset", String(list.notes.length));
   try {
     const data = await api(`/api/notes?${params}`);
+    if (key !== list.key) return;
     list.notes.push(...data.notes);
     list.hasMore = data.notes.length === PAGE;
     draw();
   } catch (error) {
     toast(error.message, { error: true });
+  } finally {
+    loadingMore = false;
   }
 }
 
@@ -106,15 +119,21 @@ function replaceCard(note) {
   const index = list.notes.findIndex((n) => n.id === note.id);
   const keep = belongs(note, list.route, list.q);
   if (index === -1) {
-    if (keep && list.route.view !== "done" && list.route.view !== "archived") {
+    if (keep) {
       list.notes.unshift(note);
       draw();
     }
     return;
   }
   if (!keep) {
+    const hadFocus = list.container.querySelector(`.note-card[data-id="${note.id}"]`)?.contains(document.activeElement);
     list.notes.splice(index, 1);
     draw();
+    if (hadFocus) {
+      // Keep the keyboard user's place: focus the card that moved up, or the last one.
+      const next = list.notes[Math.min(index, list.notes.length - 1)];
+      if (next) list.container.querySelector(`.note-card[data-id="${next.id}"] .note-title a`)?.focus();
+    }
     return;
   }
   list.notes[index] = note;
@@ -168,7 +187,7 @@ function reminderCard(reminder) {
       ),
       h("div", { class: "actions" },
         h("button", { type: "button", class: "btn small", onclick: () => reminderActions.done(reminder) }, icon("check"), "Done"),
-        h("button", { type: "button", class: "btn small", onclick: () => reminderActions.snooze(reminder, 60) }, "+1 h"),
+        h("button", { type: "button", class: "btn small", onclick: () => reminderActions.snooze(reminder), "aria-label": `Snooze for ${snoozeLabel()}` }, `+${snoozeLabel()}`),
         h("button", { type: "button", class: "btn small", onclick: () => reminderActions.tomorrow(reminder) }, "Tomorrow"),
         sent ? null : h("button", { type: "button", class: "btn small danger", onclick: () => reminderActions.cancel(reminder), "aria-label": `Cancel reminder: ${reminder.message}` }, "Cancel"),
       ),
@@ -176,11 +195,12 @@ function reminderCard(reminder) {
   );
 }
 
-export async function renderScheduled(container) {
+export async function renderScheduled(container, isCurrent = () => true) {
   const [upcoming, sent] = await Promise.all([
     api("/api/reminders?status=scheduled&limit=300"),
     api("/api/reminders?status=sent&limit=30"),
   ]);
+  if (!isCurrent()) return;
   clear(container);
   const recent = sent.reminders.filter((r) => Date.now() - new Date(r.sent_at || r.due_at) < 7 * 86400000);
   if (recent.length) {
@@ -215,8 +235,9 @@ export async function renderScheduled(container) {
 
 // ---------------------------------------------------------------- digests
 
-export async function renderDigests(container) {
+export async function renderDigests(container, isCurrent = () => true) {
   const data = await api("/api/digests");
+  if (!isCurrent()) return;
   clear(container);
   const send = h("input", { type: "checkbox", id: "digest-send" });
   const busy = (button, label) => {
@@ -226,13 +247,14 @@ export async function renderDigests(container) {
   const run = async (kind, button) => {
     busy(button, kind === "weekly" ? "Writing your review…" : "Writing your digest…");
     try {
-      await api("/api/digests", { method: "POST", body: { kind, send: send.checked } });
+      // Claude writes it on the spot, which can take a minute or two.
+      await api("/api/digests", { method: "POST", body: { kind, send: send.checked }, timeout: 240000 });
       toast(send.checked ? "Done, and sent to your channels." : "Done.");
-      await renderDigests(container);
     } catch (error) {
       toast(error.message, { error: true });
-      await renderDigests(container);
     }
+    // Only redraw if the digests view is still on screen.
+    if (button.isConnected) await renderDigests(container).catch(() => {});
   };
   const daily = h("button", { type: "button", class: "btn primary", onclick: () => run("daily", daily) }, icon("sun"), "Daily digest now");
   const weekly = h("button", { type: "button", class: "btn", onclick: () => run("weekly", weekly) }, icon("sparkles"), "Weekly review now");
@@ -266,6 +288,7 @@ export async function renderDigests(container) {
 // -------------------------------------------------------------------- ask
 
 const conversation = [];
+let redrawAnswers = () => {};
 const SUGGESTIONS = [
   "What do I need to do this week?",
   "Which saved videos are worth watching?",
@@ -306,13 +329,13 @@ export function renderAsk(container) {
     conversation.push(item);
     drawAnswers();
     try {
-      const result = await api("/api/ask", { method: "POST", body: { question } });
+      const result = await api("/api/ask", { method: "POST", body: { question }, timeout: 240000 });
       Object.assign(item, { pending: false, answer: result.answer, notes: result.notes });
       if (local.readAloud) speak(result.answer, { lang: speechLang() });
     } catch (error) {
       Object.assign(item, { pending: false, error: error.message });
     }
-    drawAnswers();
+    redrawAnswers();
   };
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -331,6 +354,7 @@ export function renderAsk(container) {
     ),
     answers,
   );
+  redrawAnswers = drawAnswers;
   drawAnswers();
   input.focus();
 }

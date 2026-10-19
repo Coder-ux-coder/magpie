@@ -96,6 +96,10 @@ class RateLimiter:
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
+        if len(self._hits) > 10_000:
+            # Forget clients whose attempts have all expired, so memory stays bounded.
+            for stale in [k for k, h in self._hits.items() if not h or now - h[-1] > self.window]:
+                del self._hits[stale]
         hits = self._hits[key]
         while hits and now - hits[0] > self.window:
             hits.popleft()

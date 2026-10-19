@@ -21,6 +21,8 @@ USER_AGENT = "Mozilla/5.0 (compatible; MagpieNotes/0.1; +https://github.com/Code
 MAX_HTML_BYTES = 5 * 1024 * 1024
 MAX_PDF_BYTES = 20 * 1024 * 1024
 MAX_REDIRECTS = 5
+# httpx timeouts apply to each read; a server that trickles bytes needs an overall limit.
+DOWNLOAD_SECONDS = 90
 WORDS_PER_MINUTE = 230
 TRANSCRIPT_LANGUAGES = ("en", "en-US", "en-GB", "ur", "hi", "es", "fr", "de", "ar", "pt")
 
@@ -49,10 +51,10 @@ class Fetcher:
                 params={"url": canonical, "format": "json"},
                 timeout=15,
             )
-            if response.status_code == 200:
-                data = response.json()
-                content.title = data.get("title", "")
-                content.author = data.get("author_name", "")
+            data = response.json() if response.status_code == 200 else None
+            if isinstance(data, dict):
+                content.title = str(data.get("title") or "")
+                content.author = str(data.get("author_name") or "")
         except (httpx2.HTTPError, ValueError) as exc:
             log.info("YouTube oEmbed failed for %s: %s", video, exc)
         try:
@@ -72,7 +74,15 @@ class Fetcher:
     # ------------------------------------------------------- articles and PDFs
 
     async def fetch_page(self, url: str) -> LinkContent:
-        response, body = await self._download(url)
+        try:
+            async with asyncio.timeout(DOWNLOAD_SECONDS):
+                response, body = await self._download(url)
+        except TimeoutError as exc:
+            raise FetchError("The page took too long to download.") from exc
+        except httpx2.HTTPError as exc:
+            raise FetchError(f"Could not download the page ({type(exc).__name__}).") from exc
+        except (ValueError, UnicodeError) as exc:  # e.g. a host name httpx can't encode
+            raise FetchError(f"Could not download the page: {exc}") from exc
         final_url = str(response.url)
         content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
         if content_type == "application/pdf" or body[:5] == b"%PDF-":
@@ -86,7 +96,10 @@ class Fetcher:
             content_type.startswith("text/") or "html" in content_type or "xml" in content_type
         ):
             raise FetchError(f"Unsupported content type: {content_type}")
-        html = body.decode(response.encoding or "utf-8", errors="replace")
+        try:
+            html = body.decode(response.encoding or "utf-8", errors="replace")
+        except LookupError:  # an unknown charset name
+            html = body.decode("utf-8", errors="replace")
         text, title, author, site = await asyncio.to_thread(_extract_article, html, final_url)
         words = len(text.split())
         return LinkContent(
@@ -152,16 +165,20 @@ def _youtube_transcript(video: str) -> tuple[str, int | None, str]:
 
 
 def _extract_article(html: str, url: str) -> tuple[str, str, str, str]:
-    text = (
-        trafilatura.extract(
-            html,
-            url=url,
-            include_comments=False,
-            include_tables=True,
-            favor_precision=True,
+    try:
+        text = (
+            trafilatura.extract(
+                html,
+                url=url,
+                include_comments=False,
+                include_tables=True,
+                favor_precision=True,
+            )
+            or ""
         )
-        or ""
-    )
+    except Exception as exc:  # odd markup can trip the parser; Claude can still try
+        log.info("Could not extract the article text from %s: %s", url, exc)
+        text = ""
     title = author = site = ""
     try:
         metadata = trafilatura.extract_metadata(html, default_url=url)

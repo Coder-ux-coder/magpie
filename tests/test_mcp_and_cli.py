@@ -124,3 +124,95 @@ def test_cli_backup(tmp_path, monkeypatch, capsys):
     assert code.value.code == 0
     rows = sqlite3.connect(target).execute("SELECT raw_text FROM notes").fetchall()
     assert rows == [("keep me safe",)]
+
+
+async def test_mcp_explains_when_magpie_is_unreachable(router):
+    from magpie.mcp_server import build
+
+    def down(request):
+        raise httpx2.ConnectError("refused")
+
+    router.add("GET", "https://magpie.example.com", down)
+    client = httpx2.AsyncClient(
+        base_url="https://magpie.example.com", transport=httpx2.MockTransport(router)
+    )
+    server = build("https://magpie.example.com", "mgp_x", client=client)
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    # A ToolError's message is shown to Claude; any other exception is hidden as a crash.
+    with pytest.raises(ToolError, match="Could not reach Magpie"):
+        await server.call_tool("recent_notes", {"limit": -5})
+
+
+def test_cli_explains_invalid_settings(monkeypatch, capsys):
+    monkeypatch.setenv("MAGPIE_PORT", "eighty")
+    with pytest.raises(SystemExit) as code:
+        cli.main(["doctor"])
+    assert code.value.code == 2
+    assert "MAGPIE_PORT" in capsys.readouterr().err
+
+
+def test_cli_explains_a_damaged_database(tmp_path, monkeypatch, capsys):
+    (tmp_path / "magpie.db").write_bytes(b"this is not a database" * 100)
+    monkeypatch.setenv("MAGPIE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MAGPIE_BRAIN", "fake")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as code:
+        cli.main(["doctor"])
+    assert code.value.code == 1
+    assert "can't be opened" in capsys.readouterr().err
+
+
+def test_backup_never_overwrites(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MAGPIE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MAGPIE_BRAIN", "fake")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit):
+        cli.main(["add", "keep me", "--no-review"])
+    precious = tmp_path / "precious.txt"
+    precious.write_text("do not touch")
+    with pytest.raises(SystemExit) as code:
+        cli.main(["backup", str(precious)])
+    assert code.value.code == 1
+    assert precious.read_text() == "do not touch"
+    with pytest.raises(SystemExit) as code:
+        cli.main(["backup", str(tmp_path / "missing" / "copy.db")])
+    assert code.value.code == 1
+
+
+def test_setup_writes_env_and_keeps_what_is_there(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TZ", "Asia/Karachi")
+    env = tmp_path / ".env"
+    env.write_text("# mine\nMAGPIE_PORT=9000\n# MAGPIE_TIMEZONE=UTC\nOTHER=keep\n")
+    with pytest.raises(SystemExit) as code:
+        cli.main(["setup", "--yes", "--password", "a b c d e f", "--telegram-token", "1:x"])
+    assert code.value.code == 0
+    text = env.read_text()
+    assert "MAGPIE_TIMEZONE=Asia/Karachi" in text and "# MAGPIE_TIMEZONE" not in text
+    assert "MAGPIE_PASSWORD='a b c d e f'" in text and "OTHER=keep" in text
+    assert "MAGPIE_TELEGRAM_BOT_TOKEN=1:x" in text and "ANTHROPIC_API_KEY" not in text
+    assert oct(env.stat().st_mode & 0o777) == "0o600"
+    settings = Settings(_env_file=str(env))
+    assert settings.password == "a b c d e f" and settings.port == 9000
+    assert "localhost:9000" in capsys.readouterr().out
+
+
+def test_setup_generates_a_password_and_refuses_bad_zones(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as code:
+        cli.main(["setup", "--yes", "--timezone", "Europe/London"])
+    assert code.value.code == 0
+    out = capsys.readouterr().out
+    password = out.split("Your password: ")[1].split()[0]
+    assert f"MAGPIE_PASSWORD={password}" in (tmp_path / ".env").read_text()
+    with pytest.raises(SystemExit) as code:
+        cli.main(["setup", "--yes", "--timezone", "Mars/Olympus"])
+    assert code.value.code == 2
+
+
+def test_detect_timezone(monkeypatch):
+    monkeypatch.setenv("TZ", ":Europe/Paris")
+    assert cli.detect_timezone() == "Europe/Paris"
+    monkeypatch.setenv("TZ", "Not/AZone")
+    assert cli.detect_timezone()  # falls back to the system's zone or UTC

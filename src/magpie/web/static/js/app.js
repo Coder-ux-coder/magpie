@@ -6,7 +6,7 @@ import { setupCapture, startVoiceFromShortcut, stopVoice, toggleHandsFree, toggl
 import { closeNote, openNote } from "./note-dialog.js";
 import { openSettings, refreshStatus } from "./settings.js";
 import { applyLocal, deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
-import { clear, debounce, h, icon, iconButton, toast } from "./ui.js";
+import { clear, copyText, debounce, h, icon, iconButton, toast } from "./ui.js";
 import { detachList, renderAsk, renderDigests, renderNotes, renderScheduled, visibleNotes } from "./views.js";
 
 const $ = (id) => document.getElementById(id);
@@ -38,8 +38,26 @@ const TITLES = {
 
 let counts = {};
 let currentView = "inbox";
+let started = false;
+let pendingShare = null; // also kept here in case session storage is blocked
+
+// Session storage can throw (private windows, blocked site data).
+function sessionGet(key) { try { return sessionStorage.getItem(key); } catch { return null; } }
+function sessionSet(key, value) { try { sessionStorage.setItem(key, value); } catch { /* blocked */ } }
+function sessionRemove(key) { try { sessionStorage.removeItem(key); } catch { /* blocked */ } }
 
 // ------------------------------------------------------------------- boot
+
+// Every form is handled in script. Until it is wired up (or if start-up failed), a
+// press of Enter must not reload the page and lose what was typed.
+document.addEventListener("submit", (event) => event.preventDefault());
+
+// Any action that fails without its own message still says what went wrong.
+window.addEventListener("unhandledrejection", (event) => {
+  const error = event.reason;
+  if (error?.name === "AbortError") return;
+  toast(error?.message || "Something went wrong.", { error: true });
+});
 
 async function boot() {
   applyLocal();
@@ -48,13 +66,34 @@ async function boot() {
   let session;
   try {
     session = await api("/api/session");
-  } catch {
-    document.body.append(h("p", { class: "empty", style: "margin:2rem" }, "Can't reach your Magpie server. Check your connection and reload."));
+  } catch (error) {
+    if (error.offline) return startOffline();
+    document.body.append(h("p", { class: "empty", style: "margin:2rem" }, `Can't reach your Magpie server (${error.message}). Reload to try again.`));
     return;
   }
   if (location.pathname === "/share") return handleShare(session.authenticated);
   if (!session.authenticated) return showLogin();
   return startApp();
+}
+
+// Opened without a connection (an installed app, a share): typing still works.
+// Notes wait on this device, and Magpie starts properly once the connection is back.
+function startOffline() {
+  $("login").hidden = true;
+  $("app").hidden = false;
+  window.addEventListener("online", () => location.reload(), { once: true });
+  if (location.pathname === "/share") {
+    const shared = shareText(new URLSearchParams(location.search));
+    if (shared.text) {
+      $("app").hidden = true;
+      return finishShare(shared);
+    }
+  }
+  setupCapture();
+  $("view-title").textContent = "Offline";
+  clear($("view")).append(h("div", { class: "empty" },
+    h("h3", {}, "You're offline"),
+    h("p", {}, "You can still type notes. They stay on this device and are sent as soon as you're back online.")));
 }
 
 function registerServiceWorker() {
@@ -66,6 +105,8 @@ function registerServiceWorker() {
 // ------------------------------------------------------------------ login
 
 function showLogin() {
+  // A dialog left open (the session ended while reading a note) would cover the form.
+  document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
   $("app").hidden = true;
   $("share").hidden = true;
   $("login").hidden = false;
@@ -74,20 +115,25 @@ function showLogin() {
   input.focus();
   form.onsubmit = async (event) => {
     event.preventDefault();
+    const button = form.querySelector("button[type=submit]");
+    if (button.disabled) return;
+    button.disabled = true;
     $("login-error").textContent = "";
     try {
       await api("/api/login", { method: "POST", body: { password: input.value } });
       input.value = "";
       $("login").hidden = true;
-      const pending = sessionStorage.getItem("magpie.pendingShare");
-      if (pending) {
-        sessionStorage.removeItem("magpie.pendingShare");
-        return finishShare(JSON.parse(pending));
-      }
+      const pending = sessionGet("magpie.pendingShare");
+      sessionRemove("magpie.pendingShare");
+      const shared = pending ? JSON.parse(pending) : pendingShare;
+      pendingShare = null;
+      if (shared) return finishShare(shared);
       startApp();
     } catch (error) {
       $("login-error").textContent = error.message;
       input.select();
+    } finally {
+      button.disabled = false;
     }
   };
 }
@@ -111,7 +157,8 @@ async function handleShare(authenticated) {
   history.replaceState(null, "", "/");
   if (!shared.text) return authenticated ? startApp() : showLogin();
   if (!authenticated) {
-    sessionStorage.setItem("magpie.pendingShare", JSON.stringify(shared));
+    pendingShare = shared;
+    sessionSet("magpie.pendingShare", JSON.stringify(shared));
     return showLogin();
   }
   return finishShare(shared);
@@ -142,7 +189,7 @@ function finishShare(shared) {
       const result = await createNote(text, shared.source);
       $("share-title").textContent = result.queued ? "Saved on this device" : "Saved";
       status.textContent = result.queued
-        ? "You're offline. It will sync when you're back online."
+        ? "Magpie can't be reached right now. It will sync when you open Magpie again."
         : "Claude is filing it and will review any link.";
       input.hidden = true;
       $("share-save").hidden = true;
@@ -164,10 +211,22 @@ async function startApp() {
   try {
     await refreshStatus();
   } catch (error) {
-    toast(error.message, { error: true });
+    if (error.status === 401) return; // the login form is showing
+    clear($("view")).append(h("div", { class: "empty" },
+      h("p", {}, `Magpie couldn't load: ${error.message}`),
+      h("button", { type: "button", class: "btn", onclick: startApp }, "Try again")));
     return;
   }
+  if (started) {
+    // Logged in again after the session ended: everything is already wired up.
+    renderBanners();
+    route();
+    syncOutbox();
+    return;
+  }
+  started = true;
   $("version").textContent = state.status.version;
+  await adoptDeviceTimeZone();
   setupCapture();
   setupSearch();
   setupKeyboard();
@@ -181,8 +240,14 @@ async function startApp() {
   on("status", () => renderBanners());
   on("prefs", () => renderBanners());
   on("refresh", () => renderView());
+  on("reminders-changed", () => {
+    if (currentView === "scheduled" && !state.q) renderView();
+  });
   on("shortcuts", showShortcuts);
-  on("settings-closed", () => renderView());
+  on("settings-closed", () => {
+    if (location.hash === "#/settings") history.replaceState(null, "", `#/${currentView}`);
+    renderView();
+  });
   window.addEventListener("hashchange", route);
   window.addEventListener("online", syncOutbox);
   document.addEventListener("visibilitychange", () => !document.hidden && quietRefresh());
@@ -198,12 +263,35 @@ async function startApp() {
   }
 }
 
+// On a fresh install nobody has chosen a time zone yet: use this device's, once.
+async function adoptDeviceTimeZone() {
+  const device = deviceTimeZone();
+  if (!state.status.timezone_unset || device === state.prefs.timezone) return;
+  try {
+    state.prefs = await api("/api/prefs", { method: "PUT", body: { timezone: device } });
+    state.status.timezone_unset = false;
+    toast(`Reminders use your time zone, ${device.replaceAll("_", " ")}. Change it in Settings.`);
+  } catch {
+    // The banner below still offers the switch.
+  }
+}
+
 async function syncOutbox() {
   if (!outbox().length) return;
-  const sent = await flushOutbox();
+  const { sent, rejected } = await flushOutbox();
   if (sent) {
     toast(`Synced ${sent} note${sent > 1 ? "s" : ""} saved while offline.`);
     renderView();
+  }
+  for (const item of rejected) {
+    // Never drop a note silently: give it back to the user to fix or copy.
+    const area = $("compose-text");
+    if (area && !area.value.trim()) {
+      area.value = item.text;
+      toast(`A note saved offline couldn't be filed (${item.reason}). It's back in the text box.`, { error: true, timeout: 15000 });
+    } else {
+      toast(`A note saved offline couldn't be filed (${item.reason}).`, { error: true, timeout: 15000, action: "Copy it", onAction: () => copyText(item.text, "Note copied") });
+    }
   }
   renderBanners();
 }
@@ -213,14 +301,17 @@ async function syncOutbox() {
 function parseHash() {
   const hash = location.hash.replace(/^#\/?/, "");
   const [first, second] = hash.split("/");
-  if (first === "note" && second) return { view: currentView, note: Number(second) };
+  const id = Number(second);
+  if (first === "note" && Number.isInteger(id) && id > 0) return { view: currentView, note: id };
   if (first === "settings") return { view: currentView, settings: true };
-  if (first === "kind" && second) return { view: `kind/${second}` };
+  if (first === "kind" && VIEWS.some((v) => v.hash === `kind/${second}`)) return { view: `kind/${second}` };
   if (TITLES[first]) return { view: first };
   return { view: "inbox" };
 }
 
 function route() {
+  // In-page anchors such as the "Skip to notes" link are not views.
+  if (location.hash && !location.hash.startsWith("#/")) return;
   const parsed = parseHash();
   if (parsed.note) {
     if (!$("app").hidden && !document.querySelector("#view .list, #view .empty")) renderView();
@@ -265,31 +356,43 @@ function renderTabs() {
       ),
     );
   }
-  list.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // Scroll the tab strip sideways only: scrollIntoView() would also scroll the page.
+  const active = list.querySelector('[aria-current="page"]');
+  const strip = list.closest(".views");
+  if (active && strip && strip.scrollWidth > strip.clientWidth) {
+    const a = active.getBoundingClientRect();
+    const s = strip.getBoundingClientRect();
+    if (a.left < s.left) strip.scrollLeft -= s.left - a.left;
+    else if (a.right > s.right) strip.scrollLeft += a.right - s.right;
+  }
 }
 
 let renderToken = 0;
 async function renderView() {
   const token = ++renderToken;
+  const current = () => token === renderToken;
   const container = $("view");
   const title = $("view-title");
   renderTabs();
+  if (!container.firstElementChild || container.querySelector(".empty .btn")) {
+    clear(container).append(h("p", { class: "muted", role: "status" }, "Loading…"));
+  }
   try {
     if (state.q) {
       title.textContent = `Search: “${state.q}”`;
-      await renderNotes(container, { view: "all" }, state.q);
+      await renderNotes(container, { view: "all" }, state.q, current);
       return;
     }
     const view = currentView;
     if (view === "scheduled") {
       title.textContent = TITLES.scheduled;
       detachList();
-      await renderScheduled(container);
+      await renderScheduled(container, current);
       api("/api/notes?limit=1").then((d) => emit("counts", d.counts)).catch(() => {});
     } else if (view === "digests") {
       title.textContent = TITLES.digests;
       detachList();
-      await renderDigests(container);
+      await renderDigests(container, current);
     } else if (view === "ask") {
       title.textContent = TITLES.ask;
       detachList();
@@ -297,10 +400,10 @@ async function renderView() {
     } else if (view.startsWith("kind/")) {
       const kind = view.split("/")[1];
       title.textContent = viewInfo(view).label;
-      await renderNotes(container, { view: "kind", kind }, "");
+      await renderNotes(container, { view: "kind", kind }, "", current);
     } else {
       title.textContent = TITLES[view] || "Inbox";
-      await renderNotes(container, { view }, "");
+      await renderNotes(container, { view }, "", current);
     }
   } catch (error) {
     if (token !== renderToken) return;
@@ -365,16 +468,24 @@ function renderBanners() {
   const status = state.status;
   if (!status) return;
   if (!status.brain.available) {
+    const fromEnv = status.brain.key_source === "env";
     box.append(h("div", { class: "banner" }, icon("alert"),
-      h("p", {}, "Claude isn't connected yet. Notes are saved and will be filed once ANTHROPIC_API_KEY is set on the server.")));
+      h("p", {}, fromEnv
+        ? "Anthropic rejected the API key set on the server (ANTHROPIC_API_KEY). Notes are saved and will be filed once it's fixed."
+        : "Claude isn't connected yet. Your notes are saved and will be filed as soon as you add an API key."),
+      fromEnv ? null : h("button", { type: "button", class: "btn small primary", onclick: () => openSettings("claude") }, "Add API key")));
   }
   const device = deviceTimeZone();
   if (state.prefs && state.prefs.timezone !== device) {
     add(dismissible(`tz-${device}`, "info", `Your device is in ${device.replaceAll("_", " ")}, but reminders use ${state.prefs.timezone}.`,
       h("button", { type: "button", class: "btn small primary", onclick: async () => {
-        state.prefs = await api("/api/prefs", { method: "PUT", body: { timezone: device } });
-        emit("prefs", state.prefs);
-        toast(`Reminders now use ${device}.`);
+        try {
+          state.prefs = await api("/api/prefs", { method: "PUT", body: { timezone: device } });
+          emit("prefs", state.prefs);
+          toast(`Reminders now use ${device}.`);
+        } catch (error) {
+          toast(error.message, { error: true });
+        }
       } }, `Use ${device.split("/").pop().replaceAll("_", " ")}`)));
   }
   const configured = status.channels.filter((c) => c.configured && c.enabled);

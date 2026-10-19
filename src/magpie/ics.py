@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from magpie.models import Note, Reminder
-from magpie.timeutil import now_utc, to_local
+from magpie.timeutil import localize, now_utc, to_local
 
 EVENT_LENGTH = timedelta(minutes=15)
+# Control characters are not allowed in iCalendar text (tabs and newlines are handled).
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def _escape(text: str) -> str:
     return (
-        text.replace("\\", "\\\\")
+        _CONTROL.sub("", text)
+        .replace("\\", "\\\\")
         .replace(";", "\\;")
         .replace(",", "\\,")
         .replace("\r\n", "\\n")
@@ -41,6 +45,23 @@ def _fold(line: str) -> str:
 
 def _utc(dt) -> str:
     return dt.strftime("%Y%m%dT%H%M%SZ")
+
+
+def _rule(rule: str, timezone: str) -> str:
+    """Magpie keeps UNTIL in local time; with a TZID start, RFC 5545 wants it in UTC."""
+    parts = []
+    for part in rule.split(";"):
+        name, _, value = part.partition("=")
+        if name.upper() == "UNTIL" and not value.endswith("Z"):
+            try:
+                if "T" not in value:
+                    value += "T235959"
+                local = datetime.strptime(value, "%Y%m%dT%H%M%S")
+                value = _utc(localize(local, timezone).astimezone(UTC))
+            except ValueError:
+                continue
+        parts.append(f"{name}={value}")
+    return ";".join(parts)
 
 
 def reminders_calendar(
@@ -72,7 +93,7 @@ def reminders_calendar(
             end = start + EVENT_LENGTH
             lines.append(f"DTSTART;TZID={timezone}:{start.strftime('%Y%m%dT%H%M%S')}")
             lines.append(f"DTEND;TZID={timezone}:{end.strftime('%Y%m%dT%H%M%S')}")
-            lines.append(f"RRULE:{reminder.rrule}")
+            lines.append(f"RRULE:{_rule(reminder.rrule, timezone)}")
         else:
             lines.append(f"DTSTART:{_utc(reminder.due_at)}")
             lines.append(f"DTEND:{_utc(reminder.due_at + EVENT_LENGTH)}")

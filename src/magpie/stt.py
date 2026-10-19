@@ -77,7 +77,8 @@ class Transcriber:
             log.warning("Transcription failed (%s): %s", response.status_code, response.text[:300])
             raise TranscriptionError(f"The transcription service returned {response.status_code}.")
         try:
-            text = response.json().get("text", "")
+            data = response.json()
         except ValueError:
-            text = response.text
-        return text.strip()
+            data = response.text
+        text = data.get("text") if isinstance(data, dict) else data
+        return text.strip() if isinstance(text, str) else ""

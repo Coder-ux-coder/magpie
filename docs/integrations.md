@@ -230,4 +230,9 @@ curl -s "$URL/api/notes/audio?wait=true" -H "Authorization: Bearer $TOKEN" \
 ```
 
 `source` is a short label shown with the note (`api`, `siri`, `shortcut`, …). Notes made
-offline can pass `captured_at` (ISO 8601) so “in 20 minutes” counts from when you said it.
+offline can pass `captured_at` (ISO 8601) so “in 20 minutes” counts from when you said it,
+and a random `client_id` (8 to 64 letters, digits, `-` or `_`): sending the same one again
+returns the note already saved instead of making a copy, so retries are safe.
+
+Errors come back as JSON with a readable `detail` sentence, for example
+`{"detail": "text: The note is empty."}`.

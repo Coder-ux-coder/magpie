@@ -19,7 +19,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from magpie import __version__
 from magpie.auth import RateLimiter
@@ -29,7 +29,7 @@ from magpie.core import Magpie
 from magpie.export import export_json, export_markdown, import_json
 from magpie.ics import reminders_calendar
 from magpie.models import Note, NoteKind, NoteStatus, ProcState, ReminderStatus
-from magpie.notify import Notification
+from magpie.notify import Notification, snooze_label
 from magpie.stt import MAX_AUDIO_BYTES, TranscriptionError
 from magpie.timeutil import humanize, now_utc
 
@@ -73,12 +73,27 @@ class LoginIn(BaseModel):
     password: str = Field(max_length=500)
 
 
+def _not_blank(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("The note is empty.")
+    return value
+
+
 class NoteIn(BaseModel):
     text: str = Field(min_length=1, max_length=50_000)
-    source: str = "api"
+    source: str = Field(default="api", max_length=100)
     captured_at: datetime | None = Field(
         default=None, description="When the note was captured, for notes queued offline."
     )
+    client_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9_-]{8,64}$",
+        description="A random id chosen by the client. Sending the same id again (a retry after "
+        "a lost answer) returns the note already saved instead of a copy.",
+    )
+
+    _text = field_validator("text")(_not_blank)
 
 
 class NotePatch(BaseModel):
@@ -91,17 +106,21 @@ class NotePatch(BaseModel):
 
 
 class ReminderIn(BaseModel):
-    when: str = Field(description="Local time, YYYY-MM-DDTHH:MM")
+    when: str = Field(max_length=40, description="Local time, YYYY-MM-DDTHH:MM")
     message: str = Field(default="", max_length=500)
-    repeat: str | None = Field(default=None, description="Optional RRULE, e.g. FREQ=DAILY")
+    repeat: str | None = Field(
+        default=None, max_length=300, description="Optional RRULE, e.g. FREQ=DAILY"
+    )
 
 
 class RescheduleIn(BaseModel):
-    when: str
+    when: str = Field(max_length=40)
 
 
 class SnoozeIn(BaseModel):
-    minutes: int = Field(default=60, ge=1, le=60 * 24 * 30)
+    minutes: int | None = Field(
+        default=None, ge=1, le=60 * 24 * 30, description="Defaults to the snooze length in Settings"
+    )
 
 
 class DigestIn(BaseModel):
@@ -117,9 +136,21 @@ class TestIn(BaseModel):
     channel: str | None = None
 
 
+class ClaudeKeyIn(BaseModel):
+    key: str = Field(min_length=10, max_length=300)
+
+    @field_validator("key")
+    @classmethod
+    def _one_word(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(char.isspace() for char in value):
+            raise ValueError("Paste the key on its own, without spaces.")
+        return value
+
+
 class PushSubscriptionIn(BaseModel):
     endpoint: str = Field(max_length=2_000)
-    keys: dict[str, str]
+    keys: dict[str, str] = Field(max_length=10)
 
 
 class PushEndpointIn(BaseModel):
@@ -172,7 +203,12 @@ async def status(app: User) -> dict[str, Any]:
             "available": app.brain.available,
             "model": app.settings.model if app.brain.name == "claude" else app.brain.name,
             "usage": app.brain.usage(),
+            "key_source": app.claude_key_source() if app.brain.name == "claude" else None,
         },
+        # A fresh install with no time zone chosen anywhere yet: the dashboard
+        # adopts the browser's zone once.
+        "timezone_unset": "timezone" not in app.settings.model_fields_set
+        and "timezone" not in (app.store.get_kv("prefs") or {}),
         "stt": {"enabled": app.stt.enabled},
         "web_search": app.settings.web_search,
         "channels": [
@@ -209,9 +245,20 @@ def _source(value: str, default: str) -> str:
 
 
 async def _create(
-    app: Magpie, text: str, source: str, wait: bool, captured_at: datetime | None = None
+    app: Magpie,
+    text: str,
+    source: str,
+    wait: bool,
+    captured_at: datetime | None = None,
+    client_id: str | None = None,
 ) -> dict[str, Any]:
-    note = app.store.create_note(text.strip(), source)
+    if client_id:
+        earlier = app.store.note_by_client_id(client_id, now_utc() - timedelta(days=30))
+        if earlier is not None:
+            return {"note": earlier.model_dump(mode="json"), "reply": earlier.reply or "Saved."}
+    note = app.store.create_note(
+        text.strip(), source, {"client_id": client_id} if client_id else None
+    )
     if captured_at is not None:
         captured = captured_at if captured_at.tzinfo else captured_at.replace(tzinfo=UTC)
         if now_utc() - timedelta(days=7) < captured < now_utc():
@@ -238,7 +285,7 @@ async def list_notes(
     kind: NoteKind | None = None,
     q: str | None = Query(default=None, max_length=300),
     limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0, le=10_000_000),
 ) -> dict[str, Any]:
     # A search covers every note unless a view is asked for explicitly.
     view = view or ("all" if q else "inbox")
@@ -253,7 +300,9 @@ async def list_notes(
 
 @router.post("/notes", status_code=201)
 async def create_note(app: User, body: NoteIn, wait: bool = False) -> dict[str, Any]:
-    return await _create(app, body.text, _source(body.source, "api"), wait, body.captured_at)
+    return await _create(
+        app, body.text, _source(body.source, "api"), wait, body.captured_at, body.client_id
+    )
 
 
 @router.post("/notes/audio", status_code=201)
@@ -383,7 +432,9 @@ async def list_reminders(
     }
 
 
-def _reminder_action(app: Magpie, reminder_id: int, action: str, minutes: int = 60) -> dict:
+def _reminder_action(
+    app: Magpie, reminder_id: int, action: str, minutes: int | None = None
+) -> dict:
     try:
         if action == "done":
             reminder = app.reminders.done(reminder_id)
@@ -410,7 +461,7 @@ async def reminder_done(app: User, reminder_id: int) -> dict:
 
 @router.post("/reminders/{reminder_id}/snooze")
 async def reminder_snooze(app: User, reminder_id: int, body: SnoozeIn | None = None) -> dict:
-    return _reminder_action(app, reminder_id, "snooze", (body or SnoozeIn()).minutes)
+    return _reminder_action(app, reminder_id, "snooze", body.minutes if body else None)
 
 
 @router.post("/reminders/{reminder_id}/tomorrow")
@@ -510,6 +561,34 @@ async def update_prefs(app: User, body: dict[str, Any] = Body(...)) -> Prefs:
     return app.store.save_prefs(prefs)
 
 
+# -------------------------------------------------------------------- Claude
+
+
+@router.put("/claude/key")
+async def save_claude_key(app: User, body: ClaudeKeyIn) -> dict[str, Any]:
+    if app.settings.brain != "claude":
+        raise HTTPException(409, "Magpie runs with MAGPIE_BRAIN=fake; remove it to use Claude.")
+    if app.claude_key_source() == "env":
+        raise HTTPException(
+            409, "The key is set by ANTHROPIC_API_KEY on the server; change it there."
+        )
+    try:
+        warning = await app.set_claude_key(body.key)
+    except BrainError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"available": app.brain.available, "warning": warning}
+
+
+@router.delete("/claude/key")
+async def forget_claude_key(app: User) -> dict[str, Any]:
+    if app.claude_key_source() == "env":
+        raise HTTPException(
+            409, "The key is set by ANTHROPIC_API_KEY on the server; change it there."
+        )
+    await app.set_claude_key(None)
+    return {"available": app.brain.available}
+
+
 # ------------------------------------------------------------- notifications
 
 
@@ -536,7 +615,13 @@ async def push_key(app: User) -> dict[str, str]:
 @router.post("/push/subscribe", status_code=201)
 async def push_subscribe(request: Request, app: User, body: PushSubscriptionIn) -> dict:
     p256dh, auth = body.keys.get("p256dh"), body.keys.get("auth")
-    if not body.endpoint.startswith("https://") or not p256dh or not auth:
+    if (
+        not body.endpoint.startswith("https://")
+        or not p256dh
+        or not auth
+        or len(p256dh) > 200
+        or len(auth) > 100
+    ):
         raise HTTPException(422, "Invalid push subscription.")
     app.store.add_push_subscription(
         body.endpoint, p256dh, auth, request.headers.get("user-agent", "")
@@ -619,9 +704,14 @@ async def export(app: User, format: Literal["json", "markdown"] = "json") -> Res
     )
 
 
+MAX_IMPORT_BYTES = 50 * 1024 * 1024
+
+
 @router.post("/import")
 async def import_notes(app: User, file: UploadFile = File(...)) -> dict[str, int]:
-    raw = await file.read(50 * 1024 * 1024)
+    raw = await file.read(MAX_IMPORT_BYTES + 1)
+    if len(raw) > MAX_IMPORT_BYTES:
+        raise HTTPException(413, "The file is larger than 50 MB.")
     try:
         return import_json(app.store, raw)
     except ValueError as exc:
@@ -640,7 +730,9 @@ async def healthz() -> dict[str, str]:
 async def calendar_feed(request: Request, token: str) -> Response:
     app = get_magpie(request)
     expected = app.store.get_kv("calendar_token")
-    if not expected or not secrets.compare_digest(expected, token):
+    if not isinstance(expected, str) or not secrets.compare_digest(
+        expected.encode(), token.encode()
+    ):
         raise HTTPException(404)
     since = now_utc() - timedelta(days=14)
     reminders = [
@@ -664,7 +756,7 @@ async def calendar_feed(request: Request, token: str) -> Response:
 
 ACTION_LABELS = {
     "done": "Mark as done",
-    "snooze": "Snooze for 1 hour",
+    "snooze": "Snooze for {snooze}",
     "tomorrow": "Remind me tomorrow",
 }
 
@@ -690,13 +782,13 @@ async def action_confirm(request: Request, token: str) -> HTMLResponse:
     try:
         reminder_id, action = app.signer.load(token)
         reminder = app.reminders.get(reminder_id)
-    except (ValueError, KeyError) as exc:
-        return _action_page("Link not valid", str(exc) or "This reminder is gone.", status=404)
+    except ValueError as exc:
+        return _action_page("Link not valid", str(exc), status=404)
+    except KeyError:
+        return _action_page("Not found", "This reminder no longer exists.", status=404)
     # GET only confirms: link scanners and previews must not change anything.
-    form = (
-        f'<form method="post"><button type="submit">{html.escape(ACTION_LABELS[action])}'
-        "</button></form>"
-    )
+    label = ACTION_LABELS[action].format(snooze=snooze_label(app.prefs().snooze_minutes))
+    form = f'<form method="post"><button type="submit">{html.escape(label)}</button></form>'
     return _action_page(reminder.message, "Confirm the action below.", form)
 
 

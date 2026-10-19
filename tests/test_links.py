@@ -180,3 +180,57 @@ async def test_youtube_without_transcript_still_returns_metadata(monkeypatch, ro
     assert content.title == "Quiet video"
     assert content.text == ""
     assert "No transcript" in content.note
+
+
+def test_malformed_urls_are_ignored_not_fatal():
+    from magpie.content.links import is_http_url, normalize_url
+
+    text = "see http://[::1 and http://example.com:99999/x and https://ok.example.com/a"
+    assert extract_urls(text) == ["https://ok.example.com/a"]
+    assert not is_http_url("http://[::1")
+    assert youtube_id("http://[::1") is None
+    assert link_kind("http://[::1/x.pdf") == "article"
+    assert normalize_url("http://[::1") == "http://[::1"
+
+
+async def test_ensure_public_refuses_malformed_urls():
+    for url in ("http://[::1", "http://example.com:99999/", "ftp://example.com", "notaurl"):
+        with pytest.raises(FetchError):
+            await ensure_public(url)
+
+
+def test_url_trimming_is_fast_on_huge_input():
+    import time
+
+    started = time.perf_counter()
+    assert extract_urls("http://a.example.com/" + ")" * 300_000) == ["http://a.example.com/"]
+    assert time.perf_counter() - started < 1
+
+
+async def test_download_failures_become_fetch_errors(router):
+    def refuse(request):
+        raise httpx2.ConnectError("connection refused")
+
+    router.add("GET", "https://down.example.com", refuse)
+    fetcher = Fetcher(
+        httpx2.AsyncClient(transport=httpx2.MockTransport(router)),
+        Settings(_env_file=None, allow_private_urls=True),
+    )
+    with pytest.raises(FetchError, match="Could not download"):
+        await fetcher.fetch("https://down.example.com/post")
+
+
+async def test_unknown_charsets_still_decode(router):
+    router.add(
+        "GET",
+        "https://odd.example.com",
+        lambda r: httpx2.Response(
+            200, content=ARTICLE.encode(), headers={"content-type": "text/html; charset=klingon"}
+        ),
+    )
+    fetcher = Fetcher(
+        httpx2.AsyncClient(transport=httpx2.MockTransport(router)),
+        Settings(_env_file=None, allow_private_urls=True),
+    )
+    content = await fetcher.fetch("https://odd.example.com/post")
+    assert "Y Combinator" in content.text

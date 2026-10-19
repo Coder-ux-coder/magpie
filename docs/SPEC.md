@@ -57,6 +57,11 @@ up and summarised without filing anything by hand.
    reminders, reviews, and daily and weekly digests, and ask questions across all
    of your notes.
 
+7. **Make it yours.** Setup takes one command and three answers (API key, password,
+   time zone), and the key can also be pasted in the dashboard. Users can give Claude
+   standing instructions ("tag shop notes #shop", "remind me 30 minutes before
+   meetings"), choose the snooze length, and adjust everything else in Settings.
+
 ### Constraints
 
 - **Easy to run.** One process, one SQLite file, Docker or Python 3.11+. The

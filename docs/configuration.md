@@ -8,7 +8,13 @@ Magpie has two kinds of settings:
   Some have a server-setting default, such as the time zone.
 
 Empty values are treated as unset. [`.env.example`](../.env.example) lists everything with
-comments.
+comments. You rarely need to edit `.env` by hand: `./setup.sh` (Docker) or `magpie setup`
+asks for the few settings that matter and writes the file for you, and the Claude API key
+can also be pasted in the dashboard.
+
+A mistyped value never stops Magpie quietly: an unknown time zone falls back to UTC with a
+warning in the log, and a value that can't be read at all (for example `MAGPIE_PORT=eighty`)
+makes `magpie` exit with a message that names the variable.
 
 ## Server settings
 
@@ -16,7 +22,7 @@ comments.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | | Claude API key. Without one, notes are saved and processed later. |
+| `ANTHROPIC_API_KEY` | | Claude API key. You can paste it in **Settings → Claude** instead; a key set here always wins. Without one, notes are saved and filed once a key is added. |
 | `MAGPIE_PASSWORD` | generated | Dashboard password. If unset, one is generated, logged at start-up and shown by `magpie password`. |
 | `MAGPIE_TIMEZONE` | `UTC` | Default time zone (IANA name) for new installs. Change it later in Settings. |
 | `MAGPIE_BASE_URL` | | Public address, e.g. `https://notes.example.com`. Enables links and one-tap buttons in notifications, and secure cookies when it starts with `https://`. |
@@ -82,11 +88,14 @@ Generated secrets are stored in the database, so they survive restarts.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| Claude API key | | Paste it here instead of setting `ANTHROPIC_API_KEY`. Magpie checks it with Anthropic, keeps it on your server and never shows it again. |
 | Proactivity | Balanced | *Quiet*: only reminders you ask for. *Balanced*: also before clear deadlines and appointments. *Proactive*: suggests reminders for anything actionable. |
-| About you | | Free text Claude reads with every note: working hours, names, “don't ping me after 10 pm”. |
+| About you | | Free text Claude reads with every note: working hours, names, family. Up to 2,000 characters. |
+| Your rules for Claude | | Standing instructions Claude follows when filing notes, writing digests and answering questions: “tag shop notes #shop”, “remind me 30 minutes before meetings”, “keep titles in Urdu”. Up to 2,000 characters. |
 | Web search | on | Find videos and articles mentioned without a link. |
-| Time zone | `MAGPIE_TIMEZONE` | Used for every reminder and digest. |
+| Time zone | `MAGPIE_TIMEZONE`, else your browser's | Used for every reminder and digest. On a fresh install the dashboard picks up your device's time zone the first time you open it. |
 | Your morning | 09:00 | What “tomorrow morning” and the Tomorrow button mean. |
+| Snooze for | 1 hour | Length of every Snooze button: dashboard, Telegram, push, ntfy and email (5 minutes to 1 day). Snoozing a reminder that isn't due yet moves it later, never earlier. |
 | Voice language | browser default | Language for speech recognition. |
 | Wake / stop phrase | “notes on” / “notes off” | Any phrase, in any language. |
 | Silence timeout | 8 s | Save a voice note after this much silence (0 = only when you say the stop phrase). |

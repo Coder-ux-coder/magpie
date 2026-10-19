@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx2
 
 from magpie import __version__
 from magpie.auth import ActionSigner, Secrets
-from magpie.brain import Brain, Context, make_brain
+from magpie.brain import Brain, BrainError, Context, make_brain
 from magpie.config import Prefs, Settings
 from magpie.content.fetch import Fetcher
 from magpie.db import Database
@@ -59,7 +62,7 @@ class Magpie:
         self.http = http or httpx2.AsyncClient(
             headers={"User-Agent": f"Magpie/{__version__}"}, timeout=30
         )
-        self.brain: Brain = brain or make_brain(settings)
+        self.brain: Brain = brain or make_brain(settings, api_key=self._saved_claude_key())
         self.fetcher = Fetcher(self.http, settings)
         self.stt = Transcriber(self.http, settings)
         self.reminders = Reminders(self.store, self.prefs)
@@ -86,6 +89,44 @@ class Magpie:
         if self.bot is not None:
             self.pipeline.listeners.append(self.bot.on_event)
         self._tasks: list[asyncio.Task[Any]] = []
+
+    # ------------------------------------------------------------ Claude key
+
+    def _saved_claude_key(self) -> str | None:
+        key = self.store.get_kv("anthropic_api_key")
+        return key if isinstance(key, str) and key else None
+
+    def claude_key_source(self) -> str | None:
+        """Where the API key comes from: "env", "dashboard" or None."""
+        if self.settings.anthropic_api_key or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            return "env"
+        return "dashboard" if self._saved_claude_key() else None
+
+    async def set_claude_key(self, key: str | None) -> str | None:
+        """Save (or with None, forget) a key entered in the dashboard and start using it.
+
+        Returns a warning when the key could not be checked. Raises BrainError when
+        Anthropic refuses it, in which case nothing is saved.
+        """
+        warning = None
+        if key:
+            candidate = make_brain(self.settings, api_key=key)
+            check = getattr(candidate, "check", None)
+            if check is not None:
+                try:
+                    await check()
+                except BrainError as exc:
+                    if not exc.retryable:
+                        raise
+                    warning = f"{exc} Saved anyway; notes will be filed once it's reachable."
+            self.store.set_kv("anthropic_api_key", key)
+        else:
+            self.store.delete_kv("anthropic_api_key")
+        if self.claude_key_source() != "env":
+            self.brain = make_brain(self.settings, api_key=key)
+            if self.brain.available:
+                self.pipeline.resume()  # file the notes that waited for a key
+        return warning
 
     # --------------------------------------------------------------- helpers
 
@@ -117,6 +158,7 @@ class Magpie:
             about_me=prefs.about_me,
             morning_time=prefs.morning_time,
             source=source,
+            instructions=prefs.instructions,
         )
 
     async def ask(self, question: str) -> Answer:
@@ -136,19 +178,47 @@ class Magpie:
 
     # ------------------------------------------------------------- lifecycle
 
+    def _supervise(self, name: str, run: Callable[[], Awaitable[None]]) -> asyncio.Task[None]:
+        """Run a background loop forever: if it crashes, log it and start it again.
+
+        Reminders must keep firing even after an unexpected error. A loop that
+        returns (the Telegram bot after its token was rejected) stays stopped.
+        """
+
+        async def keep_running() -> None:
+            delay = 5.0
+            while True:
+                started = time.monotonic()
+                try:
+                    await run()
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("The %s stopped unexpectedly; restarting it", name)
+                if time.monotonic() - started > 600:
+                    delay = 5.0
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 300.0)
+
+        return asyncio.get_running_loop().create_task(keep_running(), name=f"magpie-{name}")
+
     async def start(self) -> None:
-        loop = asyncio.get_running_loop()
         self.pipeline.resume()
-        self._tasks.append(loop.create_task(self.scheduler.run(), name="magpie-scheduler"))
+        self._tasks.append(self._supervise("scheduler", self.scheduler.run))
         if self.bot is not None:
-            self._tasks.append(loop.create_task(self.bot.run(), name="magpie-telegram"))
+            self._tasks.append(self._supervise("Telegram bot", self.bot.run))
         if self.secrets.password_generated:
             log.warning(
-                "No MAGPIE_PASSWORD set. Log in with the generated password: %s",
+                "\n\n    Log in to Magpie with this password:  %s\n"
+                "    (set MAGPIE_PASSWORD to choose your own; `magpie password` shows it again)\n",
                 self.secrets.password,
             )
         if not self.brain.available:
-            log.warning("ANTHROPIC_API_KEY is not set: notes will be saved but not processed.")
+            log.warning(
+                "Claude isn't connected yet: notes are saved and filed once you add an API key "
+                "(Settings → Claude in the dashboard, or ANTHROPIC_API_KEY)."
+            )
 
     async def stop(self) -> None:
         for task in self._tasks:

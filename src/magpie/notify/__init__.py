@@ -17,6 +17,9 @@ from magpie.config import Prefs
 
 log = logging.getLogger(__name__)
 
+# A channel that hangs (an SMTP server that never answers) must not hold up the rest.
+CHANNEL_TIMEOUT = 90
+
 
 @dataclass
 class Notification:
@@ -28,10 +31,22 @@ class Notification:
     note_id: int | None = None
     # Signed one-click action URLs, e.g. {"done": ..., "snooze": ..., "tomorrow": ...}
     actions: dict[str, str] = field(default_factory=dict)
+    snooze_minutes: int = 60
 
     @property
     def text(self) -> str:
         return f"{self.title}\n\n{self.body}".strip() if self.body else self.title
+
+
+def snooze_label(minutes: int) -> str:
+    """ "15 min", "1 hour", "2 hours", "1 day": for snooze buttons."""
+    if minutes % 1440 == 0:
+        days = minutes // 1440
+        return f"{days} day" + ("s" if days > 1 else "")
+    if minutes % 60 == 0:
+        hours = minutes // 60
+        return f"{hours} hour" + ("s" if hours > 1 else "")
+    return f"{minutes} min"
 
 
 class Channel(Protocol):
@@ -88,8 +103,11 @@ class Notifier:
 
         async def deliver(channel: Channel) -> None:
             try:
-                await channel.send(notification)
+                await asyncio.wait_for(channel.send(notification), CHANNEL_TIMEOUT)
                 report.results[channel.name] = "ok"
+            except TimeoutError:
+                log.warning("Notification via %s timed out", channel.name)
+                report.results[channel.name] = "timed out"
             except Exception as exc:  # one broken channel must not block the others
                 log.warning("Notification via %s failed: %s", channel.name, exc)
                 report.results[channel.name] = str(exc)[:300] or type(exc).__name__

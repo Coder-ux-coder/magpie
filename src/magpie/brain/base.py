@@ -41,6 +41,7 @@ class Context:
     about_me: str = ""
     morning_time: str = "09:00"
     source: str = "web"
+    instructions: str = ""
 
 
 @dataclass

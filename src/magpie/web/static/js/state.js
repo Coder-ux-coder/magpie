@@ -74,6 +74,17 @@ export function tz() {
   return state.prefs?.timezone || deviceTimeZone();
 }
 
+export function snoozeMinutes() {
+  return state.prefs?.snooze_minutes || 60;
+}
+
+/** "15 min", "1 hour", "2 hours", "1 day": the same words the server uses. */
+export function snoozeLabel(minutes = snoozeMinutes()) {
+  if (minutes % 1440 === 0) return `${minutes / 1440} day${minutes > 1440 ? "s" : ""}`;
+  if (minutes % 60 === 0) return `${minutes / 60} hour${minutes > 60 ? "s" : ""}`;
+  return `${minutes} min`;
+}
+
 export function speechLang() {
   return state.prefs?.speech_lang || navigator.language || "en-US";
 }

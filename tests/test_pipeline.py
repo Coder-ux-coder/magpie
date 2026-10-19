@@ -259,3 +259,87 @@ async def test_listeners_get_events(core, brain):
 def test_reminder_status_enum_is_text():
     assert ReminderStatus.SCHEDULED == "scheduled"
     assert datetime(2026, 1, 1, tzinfo=UTC).tzinfo is UTC
+
+
+async def test_an_unexpected_error_fails_the_note_instead_of_leaving_it_stuck(core, brain):
+    brain.raise_on_triage = RuntimeError("surprise")
+    note = core.store.create_note("call ahmed")
+    result = await core.pipeline.process(note.id)
+    assert result.state == ProcState.FAILED
+    assert "surprise" in result.error
+    assert core.store.note_ids_in_state(ProcState.PROCESSING) == []
+
+
+async def test_a_note_deleted_during_triage_is_left_alone(core, brain):
+    note = core.store.create_note("call ahmed tomorrow at 5")
+    triage = make_triage(reminders=[reminder(tomorrow_local(17))], ping="explicit")
+
+    async def triage_then_delete(text, ctx):
+        core.store.delete_note(note.id)
+        return triage
+
+    brain.triage = triage_then_delete
+    assert await core.pipeline.process(note.id) is None
+    assert core.store.list_reminders() == []
+
+
+async def test_reprocessing_during_a_run_does_not_duplicate_reminders(core, brain):
+    import asyncio
+
+    note = core.store.create_note("call ahmed tomorrow at 5")
+    triage = make_triage(reminders=[reminder(tomorrow_local(17))], ping="explicit")
+
+    async def slow_triage(text, ctx):
+        await asyncio.sleep(0.05)
+        return triage
+
+    brain.triage = slow_triage
+    await asyncio.gather(core.pipeline.process(note.id), core.pipeline.process(note.id))
+    scheduled = core.store.list_reminders([ReminderStatus.SCHEDULED])
+    assert len(scheduled) == 1
+
+
+async def test_an_empty_clean_up_keeps_what_the_user_said(core, brain):
+    brain.next_triage = make_triage(text="   ")
+    note = core.store.create_note("buy milk")
+    result = await core.pipeline.process(note.id)
+    assert result.text == "buy milk"
+
+
+async def test_odd_reminder_plans_from_claude_are_handled(core, brain):
+    when = tomorrow_local(9)
+    brain.next_triage = make_triage(
+        reminders=[
+            reminder(when, repeat="FREQ=WEEKLY;INTERVAL=0"),  # would hang: kept as a one-off
+            reminder(when),  # duplicate of the first: merged
+            reminder("9999-12-31T23:59", message="Far away"),  # out of range: dropped
+            reminder("tomorrow 5pm", message="Unreadable"),  # not a time: dropped
+        ],
+        ping="explicit",
+    )
+    note = core.store.create_note("check the plan")
+    result = await core.pipeline.process(note.id)
+    assert result.state == ProcState.READY
+    assert [(r.message, r.rrule) for r in result.reminders] == [("Call Ahmed", None)]
+
+
+async def test_an_unexpected_review_error_fails_the_link(core, brain, monkeypatch):
+    brain.next_triage = make_triage(kind="link", urls=["https://example.com/post"])
+
+    async def broken_fetch(url):
+        raise RuntimeError("parser exploded")
+
+    monkeypatch.setattr(core.fetcher, "fetch", broken_fetch)
+    note = core.store.create_note("read https://example.com/post")
+    await core.pipeline.process(note.id)
+    await core.pipeline.drain()
+    link = core.store.get_note(note.id).links[0]
+    assert link.state == ProcState.FAILED
+    assert "parser exploded" in link.error
+
+
+def test_empty_notes_are_refused(core):
+    import pytest
+
+    with pytest.raises(ValueError):
+        core.pipeline.submit("   ")

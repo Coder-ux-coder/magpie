@@ -9,6 +9,7 @@ tracked with ``PRAGMA user_version``.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import threading
 from collections.abc import Iterator, Sequence
@@ -17,6 +18,21 @@ from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+# JSON allows "\ud800" on its own, but SQLite (UTF-8) can't store half a character.
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
+
+
+def _clean(params: Sequence[Any] | dict[str, Any]) -> Sequence[Any] | dict[str, Any]:
+    def fix(value: Any) -> Any:
+        if isinstance(value, str) and _SURROGATE.search(value):
+            return _SURROGATE.sub("\ufffd", value)
+        return value
+
+    if isinstance(params, dict):
+        return {key: fix(value) for key, value in params.items()}
+    return [fix(value) for value in params]
+
 
 MIGRATIONS: list[str] = [
     # 1: initial schema
@@ -177,15 +193,15 @@ class Database:
 
     def execute(self, sql: str, params: Sequence[Any] | dict[str, Any] = ()) -> sqlite3.Cursor:
         with self._lock:
-            return self._conn.execute(sql, params)
+            return self._conn.execute(sql, _clean(params))
 
     def query(self, sql: str, params: Sequence[Any] | dict[str, Any] = ()) -> list[sqlite3.Row]:
         with self._lock:
-            return self._conn.execute(sql, params).fetchall()
+            return self._conn.execute(sql, _clean(params)).fetchall()
 
     def one(self, sql: str, params: Sequence[Any] | dict[str, Any] = ()) -> sqlite3.Row | None:
         with self._lock:
-            return self._conn.execute(sql, params).fetchone()
+            return self._conn.execute(sql, _clean(params)).fetchone()
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

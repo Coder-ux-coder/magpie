@@ -4,7 +4,7 @@ import { api } from "./api.js";
 import { noteActions, reminderActions, watchNote } from "./actions.js";
 import { KINDS, SOURCES, isWorking, kindBadge, noteTitle, reviewBlock, reviewSpeech } from "./cards.js";
 import { speak, stopSpeaking } from "./speech.js";
-import { emit, on, speechLang, tz } from "./state.js";
+import { emit, on, snoozeLabel, speechLang, tz } from "./state.js";
 import { clear, copyText, fullDate, h, icon, iconButton, localInputValue, toast, when } from "./ui.js";
 
 const dialog = () => document.getElementById("note-dialog");
@@ -53,9 +53,14 @@ function close() {
 function setup() {
   const el = dialog();
   el.addEventListener("close", () => {
+    const id = current?.id;
     current = null;
     onClose?.();
-    returnFocus?.focus?.();
+    // The card that opened the dialog may have been redrawn meanwhile: find it again.
+    const target = returnFocus?.isConnected
+      ? returnFocus
+      : document.querySelector(`.note-card[data-id="${id}"] .note-title a`) || document.getElementById("main");
+    target?.focus?.({ preventScroll: true });
   });
   // Clicking the backdrop closes the dialog.
   el.addEventListener("click", (event) => {
@@ -70,11 +75,11 @@ on("reminders-changed", (noteId) => {
   if (current && noteId === current.id) load(current.id);
 });
 
-function render(note, { keepScroll = false } = {}) {
+function render(note, { keepScroll = false, force = false } = {}) {
   const el = dialog();
   const scroll = el.querySelector(".sheet-body")?.scrollTop || 0;
   const editing = el.querySelector("textarea.note-editor");
-  if (keepScroll && editing && current?.id === note.id) {
+  if (!force && keepScroll && editing && current?.id === note.id) {
     // Don't wipe out an edit in progress; just refresh the rest next time.
     current = note;
     return;
@@ -179,6 +184,8 @@ function body(note) {
 
 function textSection(note) {
   const section = h("section", { class: "section", "aria-labelledby": "note-text-heading" });
+  // The newest version of the note: it may have changed while the editor was open.
+  const latest = () => (current?.id === note.id ? current : note);
   const show = () => {
     clear(section);
     section.append(
@@ -186,23 +193,27 @@ function textSection(note) {
         h("h3", { id: "note-text-heading" }, "Note"),
         h("button", { type: "button", class: "btn small", onclick: edit }, icon("edit"), "Edit"),
       ),
-      h("p", { class: "note-text", dir: "auto" }, note.text || note.raw_text),
+      h("p", { class: "note-text", dir: "auto" }, latest().text || latest().raw_text),
     );
   };
   const edit = () => {
     clear(section);
-    const area = h("textarea", { class: "note-editor", rows: 6, dir: "auto", "aria-labelledby": "note-text-heading" });
-    area.value = note.text || note.raw_text;
+    const area = h("textarea", { class: "note-editor", rows: 6, dir: "auto", maxlength: 50000, "aria-labelledby": "note-text-heading" });
+    area.value = latest().text || latest().raw_text;
+    let saving = false;
     const save = async () => {
       const text = area.value.trim();
-      if (!text) return;
+      if (!text || saving) return;
+      saving = true;
       try {
         const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { text } });
         emit("note-updated", updated);
-        render(updated, { keepScroll: true });
+        render(updated, { keepScroll: true, force: true });
         toast("Saved. Use “Ask Claude again” to re-file it with your changes.");
       } catch (error) {
         toast(error.message, { error: true });
+      } finally {
+        saving = false;
       }
     };
     section.append(
@@ -246,7 +257,7 @@ function remindersSection(note) {
         live
           ? h("div", { class: "actions" },
               h("button", { type: "button", class: "btn small", onclick: () => reminderActions.done(reminder) }, icon("check"), "Done"),
-              h("button", { type: "button", class: "btn small", onclick: () => reminderActions.snooze(reminder, 60) }, "+1 h"),
+              h("button", { type: "button", class: "btn small", onclick: () => reminderActions.snooze(reminder), "aria-label": `Snooze for ${snoozeLabel()}` }, `+${snoozeLabel()}`),
               h("button", { type: "button", class: "btn small", onclick: () => reminderActions.tomorrow(reminder) }, "Tomorrow"),
               reminder.status === "scheduled"
                 ? h("button", { type: "button", class: "btn small danger", onclick: () => reminderActions.cancel(reminder) }, "Cancel")
@@ -271,16 +282,20 @@ function remindersSection(note) {
   );
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const button = form.querySelector("button[type=submit]");
+    if (button.disabled) return; // a double click must not add it twice
+    button.disabled = true;
     try {
       const updated = await api(`/api/notes/${note.id}/reminders`, {
         method: "POST",
         body: { when: whenInput.value, message: message.value.trim(), repeat: repeat.value || null },
       });
       emit("note-updated", updated);
-      render(updated, { keepScroll: true });
+      render(updated, { keepScroll: true, force: true });
       toast("Reminder added.");
     } catch (error) {
       toast(error.message, { error: true });
+      button.disabled = false;
     }
   });
   section.append(h("details", {}, h("summary", {}, "Add a reminder"), form));
@@ -292,17 +307,27 @@ function detailsSection(note) {
     Object.entries(KINDS).map(([value, info]) => h("option", { value, selected: value === note.kind }, info.label)),
   );
   kind.addEventListener("change", async () => {
-    const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { kind: kind.value } });
-    emit("note-updated", updated);
-    toast("Kind updated.");
+    try {
+      const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { kind: kind.value } });
+      emit("note-updated", updated);
+      toast("Kind updated.");
+    } catch (error) {
+      kind.value = note.kind; // show what is actually saved
+      toast(error.message, { error: true });
+    }
   });
   const tags = h("input", { type: "text", id: "note-tags", placeholder: "work, family", dir: "auto" });
   tags.value = (note.tags || []).join(", ");
   tags.addEventListener("change", async () => {
     const list = tags.value.split(",").map((t) => t.trim()).filter(Boolean);
-    const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { tags: list } });
-    emit("note-updated", updated);
-    toast("Tags saved.");
+    try {
+      const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { tags: list } });
+      emit("note-updated", updated);
+      toast("Tags saved.");
+    } catch (error) {
+      tags.value = (note.tags || []).join(", ");
+      toast(error.message, { error: true });
+    }
   });
   return h("section", { class: "section" },
     h("h3", {}, "Details"),

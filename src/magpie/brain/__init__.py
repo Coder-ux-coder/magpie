@@ -13,14 +13,14 @@ from magpie.brain.base import (
 from magpie.config import Settings
 
 
-def make_brain(settings: Settings) -> Brain:
+def make_brain(settings: Settings, api_key: str | None = None) -> Brain:
     if settings.brain == "fake":
         from magpie.brain.fake import FakeBrain
 
         return FakeBrain()
     from magpie.brain.claude import ClaudeBrain
 
-    return ClaudeBrain(settings)
+    return ClaudeBrain(settings, api_key=api_key)
 
 
 __all__ = [

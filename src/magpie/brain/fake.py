@@ -101,8 +101,10 @@ def _plan_reminders(text: str, ctx: Context) -> list[PlannedReminder]:
 
     rel = TIME_IN.search(lowered)
     at = TIME_AT.search(lowered)
+    if at and int(at.group(2) or 0) > 59:
+        at = None  # "at 12:99" is not a time
     if rel:
-        amount = _number(rel.group(1))
+        amount = min(_number(rel.group(1)), 10_000)
         unit = rel.group(2)
         when = now + (
             timedelta(hours=amount) if unit.startswith("hour") else timedelta(minutes=amount)

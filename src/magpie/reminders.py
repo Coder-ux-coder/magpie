@@ -10,7 +10,14 @@ from magpie.config import Prefs
 from magpie.models import NoteKind, NoteStatus, Reminder, ReminderStatus
 from magpie.schemas import PlannedReminder
 from magpie.store import Store
-from magpie.timeutil import local_to_utc, next_occurrence, now_utc, tomorrow_at, validate_rrule
+from magpie.timeutil import (
+    anchor_rrule,
+    local_to_utc,
+    next_occurrence,
+    now_utc,
+    tomorrow_at,
+    validate_rrule,
+)
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +41,7 @@ class Reminders:
         self, note_id: int, planned: list[PlannedReminder], prefs: Prefs, now: datetime
     ) -> list[Reminder]:
         created: list[Reminder] = []
+        seen: set[tuple[datetime, str]] = set()
         for item in planned[:MAX_PER_NOTE]:
             if item.origin == "suggested" and prefs.proactivity == "quiet":
                 continue
@@ -43,6 +51,10 @@ class Reminders:
                 log.warning("Ignoring reminder with unreadable time %r", item.when)
                 continue
             rule = validate_rrule(item.repeat)
+            if item.repeat and rule is None:
+                log.info("Ignoring an unusable repeat rule %r", item.repeat)
+            if rule:
+                rule = anchor_rrule(rule, due, prefs.timezone)
             if due < now - timedelta(minutes=1):
                 if rule:
                     following = next_occurrence(rule, due, now, prefs.timezone)
@@ -54,7 +66,10 @@ class Reminders:
                     continue
                 else:
                     due = now + timedelta(minutes=1)
-            message = (item.message or "Reminder").strip()[:500]
+            message = item.message.strip()[:500] or "Reminder"
+            if (due, message.casefold()) in seen:
+                continue  # the same reminder twice would ping twice
+            seen.add((due, message.casefold()))
             created.append(
                 self.store.add_reminder(
                     note_id,
@@ -74,7 +89,9 @@ class Reminders:
         due = local_to_utc(when_local, prefs.timezone)
         rule = validate_rrule(repeat)
         if repeat and rule is None:
-            raise ValueError("That repeat rule is not valid.")
+            raise ValueError("That repeat rule is not valid, or repeats more than once an hour.")
+        if rule:
+            rule = anchor_rrule(rule, due, prefs.timezone)
         return self.store.add_reminder(
             note_id, due, message.strip()[:500] or "Reminder", origin="manual", rrule=rule
         )
@@ -115,13 +132,24 @@ class Reminders:
             sent_at=None,
         )
 
-    def snooze(self, reminder_id: int, minutes: int = 60) -> Reminder:
-        minutes = max(1, min(minutes, 60 * 24 * 30))
-        return self.snooze_until(reminder_id, now_utc() + timedelta(minutes=minutes))
+    def _base(self, reminder_id: int) -> datetime:
+        """Postpone from the due time if it is still ahead, so a snooze never moves it earlier."""
+        reminder = self.get(reminder_id)
+        now = now_utc()
+        if reminder.status == ReminderStatus.SCHEDULED and reminder.due_at > now:
+            return reminder.due_at
+        return now
+
+    def snooze(self, reminder_id: int, minutes: int | None = None) -> Reminder:
+        """Snooze for ``minutes``, or for the length chosen in Settings."""
+        minutes = max(1, min(minutes or self._prefs().snooze_minutes, 60 * 24 * 30))
+        return self.snooze_until(reminder_id, self._base(reminder_id) + timedelta(minutes=minutes))
 
     def tomorrow(self, reminder_id: int) -> Reminder:
+        """The morning after today, or after the due day if that is later."""
         prefs = self._prefs()
-        return self.snooze_until(reminder_id, tomorrow_at(prefs.morning_time, prefs.timezone))
+        due = tomorrow_at(prefs.morning_time, prefs.timezone, now=self._base(reminder_id))
+        return self.snooze_until(reminder_id, due)
 
     def cancel(self, reminder_id: int) -> Reminder:
         self.get(reminder_id)

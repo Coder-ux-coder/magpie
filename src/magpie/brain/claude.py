@@ -69,6 +69,16 @@ MAX_TOKENS = {
     "ask": 16_000,
 }
 MAX_CONTINUATIONS = 4
+# Seconds per request. The SDK default (10 minutes) would hold a pipeline slot
+# for that long when a connection stalls; reviews that fetch pages need longer.
+TIMEOUTS = {
+    "triage": 120,
+    "review": 300,
+    "find": 240,
+    "digest": 180,
+    "weekly": 240,
+    "ask": 180,
+}
 
 
 @cache
@@ -94,10 +104,17 @@ def _extract_json(text: str) -> str | None:
 class ClaudeBrain:
     name = "claude"
 
-    def __init__(self, settings: Settings, client: AsyncAnthropic | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        client: AsyncAnthropic | None = None,
+        *,
+        api_key: str | None = None,
+    ) -> None:
         self.settings = settings
         self.model = settings.model
-        key = settings.anthropic_api_key
+        # The environment wins over a key saved from the dashboard.
+        key = settings.anthropic_api_key or api_key
         has_credentials = bool(
             key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
         )
@@ -117,6 +134,24 @@ class ClaudeBrain:
 
     def usage(self) -> dict[str, int]:
         return dict(self._usage)
+
+    async def check(self) -> None:
+        """Make sure the key works and can use the model (a free API call)."""
+        if self._client is None:
+            raise BrainUnavailable("No API key.")
+        try:
+            await self._client.models.retrieve(self.model, timeout=20)
+        except anthropic.AuthenticationError as exc:
+            raise BrainUnavailable("Anthropic rejected that API key.") from exc
+        except anthropic.PermissionDeniedError as exc:
+            raise BrainError(f"That key isn't allowed to use {self.model}.") from exc
+        except anthropic.NotFoundError as exc:
+            raise BrainError(
+                f"That key works, but the model {self.model} isn't available to it. "
+                "Choose another with MAGPIE_MODEL."
+            ) from exc
+        except anthropic.APIError as exc:
+            raise BrainError("Couldn't reach Anthropic to check the key.", retryable=True) from exc
 
     # ------------------------------------------------------------ public API
 
@@ -207,6 +242,7 @@ class ClaudeBrain:
             if self._fallbacks:
                 kwargs["betas"] = [FALLBACK_BETA]
                 kwargs["fallbacks"] = "default"
+            kwargs.setdefault("timeout", TIMEOUTS.get(task, 180))
             try:
                 response = await self._client.beta.messages.create(**kwargs)
             except anthropic.BadRequestError as exc:
@@ -236,6 +272,8 @@ class ClaudeBrain:
                 ) from exc
             except anthropic.APIConnectionError as exc:
                 raise BrainError("Could not reach the Claude API.", retryable=True) from exc
+            except anthropic.APIError as exc:  # e.g. a response the SDK couldn't read
+                raise BrainError(f"Unexpected answer from the Claude API: {exc}") from exc
             self._record_usage(response)
             return response
 
@@ -250,7 +288,7 @@ class ClaudeBrain:
             response = await self._create(task, schema, **{**params, "messages": messages})
         if response.stop_reason == "refusal":
             raise BrainRefused("Claude declined to process this.")
-        if response.stop_reason == "max_tokens":
+        if response.stop_reason in ("max_tokens", "model_context_window_exceeded"):
             raise BrainError("Claude's answer was cut off before it finished.")
         if response.stop_reason == "pause_turn":
             raise BrainError("Claude's web lookup did not finish.", retryable=True)
@@ -287,7 +325,11 @@ class ClaudeBrain:
             )
             params["system"] = [{"type": "text", "text": system + instruction}]
             response = await self._run(task, None, **params)
-        texts = [block.text for block in response.content if block.type == "text" and block.text]
+        texts = [
+            block.text
+            for block in response.content or []
+            if getattr(block, "type", None) == "text" and getattr(block, "text", None)
+        ]
         # The structured answer is the final text block; earlier text (if any)
         # can be commentary around server-tool calls.
         for text in reversed(texts):
@@ -310,7 +352,9 @@ class ClaudeBrain:
             messages=[{"role": "user", "content": content}],
         )
         text = "\n".join(
-            block.text for block in response.content if block.type == "text" and block.text
+            block.text
+            for block in response.content or []
+            if getattr(block, "type", None) == "text" and getattr(block, "text", None)
         ).strip()
         if not text:
             raise BrainError("Claude returned an empty answer.")

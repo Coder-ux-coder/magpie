@@ -102,6 +102,7 @@ class Digests:
             proactivity=prefs.proactivity,
             about_me=prefs.about_me,
             morning_time=prefs.morning_time,
+            instructions=prefs.instructions,
         )
         local = to_local(now, tz)
         end_of_day = at_local_time(local.date() + timedelta(days=1), "00:00", tz)

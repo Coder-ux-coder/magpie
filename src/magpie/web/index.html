@@ -79,7 +79,7 @@
       </div>
       <form id="compose" class="compose">
         <label for="compose-text" class="sr-only">Type a note</label>
-        <textarea id="compose-text" rows="1" dir="auto" placeholder="Type a note or paste a link…  (“remind me to call Ahmed at 5 pm”)" enterkeyhint="send"></textarea>
+        <textarea id="compose-text" rows="1" dir="auto" maxlength="50000" placeholder="Type a note or paste a link…  (“remind me to call Ahmed at 5 pm”)" enterkeyhint="send"></textarea>
         <button id="compose-dictate" class="icon-btn" type="button" aria-label="Dictate into the text box" title="Dictate into the box (review before saving)">
           <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#dictate"></use></svg>
         </button>
@@ -111,7 +111,7 @@
       <img src="/static/icons/logo.svg" alt="" width="56" height="56">
       <h1 id="share-title">Save to Magpie</h1>
       <label for="share-input">Add a few words if you like, then save.</label>
-      <textarea id="share-input" rows="5" dir="auto"></textarea>
+      <textarea id="share-input" rows="5" dir="auto" maxlength="50000"></textarea>
       <p id="share-text" class="muted" role="status" aria-live="polite"></p>
       <button id="share-save" class="btn primary block" type="submit">Save</button>
       <a id="share-cancel" class="btn block" href="/">Cancel</a>

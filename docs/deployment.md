@@ -16,18 +16,19 @@ It runs happily on a small VPS, a home server or a Raspberry Pi 4/5, using well 
 ```bash
 git clone https://github.com/Coder-ux-coder/magpie.git
 cd magpie
-cp .env.example .env
+./setup.sh
 ```
 
-Edit `.env` and set at least:
+`setup.sh` builds the image, asks for your Claude API key, a password and your time zone,
+writes them to `.env` and starts Magpie. Run it again to change the answers.
+
+To do it by hand instead, copy `.env.example` to `.env`, set at least these, and start it:
 
 ```dotenv
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...      # or paste it later in Settings → Claude
 MAGPIE_PASSWORD=a-long-password
 MAGPIE_TIMEZONE=Asia/Karachi
 ```
-
-Then:
 
 ```bash
 docker compose up -d
@@ -181,7 +182,8 @@ Start with `magpie doctor` (in Docker: `docker compose exec magpie magpie doctor
 | --- | --- |
 | The mic button is greyed out or nothing happens | Use HTTPS (or `localhost`) and allow the microphone. Firefox has no built-in speech recognition: set `MAGPIE_STT_API_KEY` or use Chrome, Edge or Safari. |
 | Hands-free stops listening | Browsers may pause recognition in background tabs and after errors; keep the tab open, or use Telegram / Siri on phones. |
-| Notes stay “Waiting for Claude” | `ANTHROPIC_API_KEY` is missing or invalid. Fix it and restart; waiting notes are processed automatically. |
+| Notes stay “Waiting for Claude” | No working API key. Paste one in Settings → Claude (or fix `ANTHROPIC_API_KEY` and restart); waiting notes are processed automatically. |
+| Magpie won't start | It prints what's wrong: a setting it can't read (it names the variable), a data folder it can't write to (in Docker the volume must be writable by uid 1000), or a damaged database (restore a backup). |
 | Reminder times are off by hours | Set your time zone in Settings → Time (or `MAGPIE_TIMEZONE`). |
 | No reminders arrive | Settings → Notifications: make sure a channel is set up and switched on, and press **Test**. |
 | Telegram bot doesn't answer | Check the token with `magpie doctor`. Only one program can poll a bot: stop other copies of Magpie using the same token. |

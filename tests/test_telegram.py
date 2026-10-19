@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 import httpx2
@@ -229,3 +230,160 @@ def test_review_formatting():
     assert "📺 <b>A &lt;great&gt; talk</b>" in text
     assert "worth it · 4/5 · 12 min" in text
     assert "• One" in text
+
+
+async def test_strangers_get_a_reply_right_after_a_reboot(tg, router, monkeypatch):
+    from magpie import telegram
+
+    monkeypatch.setattr(telegram.time, "monotonic", lambda: 5.0)  # the machine just booted
+    pair(tg)
+    await tg.bot.handle_update(message("hi", chat=999))
+    assert sum("private Magpie bot" in text for text in sent_texts(router)) == 1
+
+
+def _polling_script(router, *answers):
+    """Make getUpdates return each answer in turn, then stop the bot."""
+    import asyncio
+
+    answers = list(answers)
+
+    def handler(request):
+        if not answers:
+            raise asyncio.CancelledError  # stands in for shutdown
+        answer = answers.pop(0)
+        if isinstance(answer, httpx2.Response):
+            return answer
+        return httpx2.Response(200, json=answer)
+
+    router.add(
+        "POST",
+        "https://api.telegram.org/bot123:abc/getMe",
+        {"ok": True, "result": {"username": "magpie_test_bot"}},
+    )
+    router.add("POST", "https://api.telegram.org/bot123:abc/getUpdates", handler)
+
+
+async def test_polling_survives_errors_and_odd_updates(tg, router, monkeypatch):
+    import asyncio
+
+    from magpie import telegram
+
+    real_sleep = asyncio.sleep
+
+    async def no_wait(_seconds):
+        await real_sleep(0)
+
+    monkeypatch.setattr(telegram.asyncio, "sleep", no_wait)
+    pair(tg)
+    good = message("buy milk")
+    good["update_id"] = 7
+    _polling_script(
+        router,
+        httpx2.Response(502, text="<html>Bad Gateway</html>"),
+        {"ok": False, "error_code": 409, "description": "Conflict: terminated by other getUpdates"},
+        {"ok": False, "error_code": 429, "parameters": {"retry_after": 3}},
+        {"ok": True, "result": {"not": "a list"}},
+        {"ok": True, "result": [{"no_update_id": True}, {"update_id": 6, "message": "odd"}, good]},
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await tg.bot.run()
+    await tg.pipeline.drain()
+    assert [n.raw_text for n in tg.store.list_notes()] == ["buy milk"]
+    assert tg.store.get_kv("telegram_offset") == 8
+
+
+async def test_a_revoked_token_stops_polling_quietly(tg, router):
+    _polling_script(router, {"ok": False, "error_code": 401, "description": "Unauthorized"})
+    await tg.bot.run()  # returns instead of retrying forever
+
+
+async def test_markup_errors_fall_back_to_plain_text(tg, router):
+    def send(request):
+        body = json.loads(request.content)
+        if body.get("parse_mode") == "HTML":
+            return httpx2.Response(
+                400,
+                json={
+                    "ok": False,
+                    "error_code": 400,
+                    "description": "Bad Request: can't parse entities: unclosed start tag",
+                },
+            )
+        return httpx2.Response(200, json={"ok": True, "result": {"message_id": 2}})
+
+    router.add("POST", "https://api.telegram.org/bot123:abc/sendMessage", send)
+    await tg.telegram_api.send_message(CHAT, "<b>Rock &amp; roll")
+    last = router.calls("sendMessage")[-1]
+    assert last["text"] == "Rock & roll" and "parse_mode" not in last
+
+
+async def test_refused_link_buttons_are_dropped(tg, router):
+    def send(request):
+        body = json.loads(request.content)
+        rows = (body.get("reply_markup") or {}).get("inline_keyboard", [])
+        if any("url" in button for row in rows for button in row):
+            return httpx2.Response(
+                400,
+                json={
+                    "ok": False,
+                    "error_code": 400,
+                    "description": "Bad Request: BUTTON_URL_INVALID",
+                },
+            )
+        return httpx2.Response(200, json={"ok": True, "result": {"message_id": 2}})
+
+    router.add("POST", "https://api.telegram.org/bot123:abc/sendMessage", send)
+    buttons = [
+        [{"text": "Done", "callback_data": "r:done:1"}, {"text": "Open", "url": "http://10.0.0.5"}]
+    ]
+    await tg.telegram_api.send_message(CHAT, "Reminder", buttons=buttons)
+    last = router.calls("sendMessage")[-1]
+    assert last["reply_markup"]["inline_keyboard"] == [
+        [{"text": "Done", "callback_data": "r:done:1"}]
+    ]
+
+
+def test_long_messages_split_within_telegrams_limit():
+    from magpie.telegram_api import _units, split_message
+
+    text = "&amp; " * 1500 + "\n" + "😀" * 3000 + "\n" + "<b>title</b>"
+    parts = split_message(text)
+    assert all(_units(part) <= 4000 for part in parts)
+    assert not any(part.rstrip().endswith(("&", "&am", "&amp")) for part in parts)
+    assert "".join(parts).count("😀") == 3000
+
+
+async def test_buttons_still_work_when_telegram_refuses_the_answer(tg, router):
+    router.add(
+        "POST",
+        "https://api.telegram.org/bot123:abc/answerCallbackQuery",
+        {"ok": False, "error_code": 400, "description": "Bad Request: query is too old"},
+    )
+    pair(tg)
+    reminder = tg.store.add_reminder(None, now_utc(), "Call Ahmed")
+    query = {
+        "id": "q1",
+        "data": f"r:snz:{reminder.id}:30",
+        "message": {"message_id": 3, "chat": {"id": CHAT}},
+    }
+    await tg.bot.handle_update({"update_id": 2, "callback_query": query})
+    assert tg.store.get_reminder(reminder.id).due_at > now_utc() + timedelta(minutes=25)
+    assert router.calls("editMessageReplyMarkup")  # the buttons were still updated
+
+
+async def test_voice_notes_over_the_bot_limit_are_explained(tg, router):
+    pair(tg)
+    await tg.bot.handle_update(message(voice={"file_id": "big", "file_size": 30 * 1024 * 1024}))
+    assert any("too long" in text for text in sent_texts(router))
+    assert not router.calls("getFile")
+
+
+async def test_digest_command_always_answers(tg, router, monkeypatch):
+    pair(tg)
+
+    async def nothing(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(tg.digests, "run", nothing)
+    await tg.bot.handle_update(message("/digest"))
+    assert any("Nothing to report" in text for text in sent_texts(router))

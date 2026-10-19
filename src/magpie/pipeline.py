@@ -10,8 +10,9 @@ Work runs in background tasks with bounded concurrency. Anything interrupted
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -40,19 +41,31 @@ class Pipeline:
         self.listeners: list[Listener] = []
         self._tasks: set[asyncio.Task[Any]] = set()
         self._semaphore = asyncio.Semaphore(concurrency)
+        # One triage at a time per note, so a "reprocess" during a run can't
+        # interleave with it and leave two sets of reminders. Values are
+        # [lock, number of users] so idle locks can be dropped.
+        self._note_locks: dict[int, list[Any]] = {}
 
     # ------------------------------------------------------------ scheduling
 
     def submit(self, raw_text: str, source: str = "web", meta: dict | None = None) -> Note:
-        note = self.app.store.create_note(raw_text.strip(), source, meta)
+        text = raw_text.strip()
+        if not text:
+            raise ValueError("The note is empty.")
+        note = self.app.store.create_note(text, source, meta)
         self.spawn(self.process(note.id))
         return note
 
     def spawn(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
         task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._finished)
         return task
+
+    def _finished(self, task: asyncio.Task[Any]) -> None:
+        self._tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            log.error("Background task failed", exc_info=task.exception())
 
     async def drain(self) -> None:
         """Wait for all background work (used by tests and the CLI)."""
@@ -84,14 +97,46 @@ class Pipeline:
 
     # ---------------------------------------------------------------- triage
 
+    @contextlib.asynccontextmanager
+    async def _note_lock(self, note_id: int) -> AsyncIterator[None]:
+        entry = self._note_locks.setdefault(note_id, [asyncio.Lock(), 0])
+        entry[1] += 1
+        try:
+            async with entry[0]:
+                yield
+        finally:
+            entry[1] -= 1
+            if entry[1] == 0:
+                self._note_locks.pop(note_id, None)
+
     async def process(self, note_id: int, *, review: bool = True) -> Note | None:
-        async with self._semaphore:
-            note = await self._triage(note_id)
+        async with self._note_lock(note_id), self._semaphore:
+            note = await self._safe_triage(note_id)
         if note is not None and review and note.state == ProcState.READY:
             for link in note.links:
                 if link.state == ProcState.PENDING:
                     self.spawn(self.review_link(link.id))
         return note
+
+    async def _safe_triage(self, note_id: int) -> Note | None:
+        try:
+            return await self._triage(note_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Never leave a note stuck in "processing" because of a bug or a surprise.
+            log.exception("Processing note %s failed", note_id)
+            try:
+                note = self.app.store.update_note(
+                    note_id,
+                    state=ProcState.FAILED,
+                    error=f"Something went wrong while processing this note ({exc}). "
+                    "Try “Process again”.",
+                )
+            except KeyError:
+                return None
+            await self._emit("failed", note)
+            return note
 
     async def _triage(self, note_id: int) -> Note | None:
         store = self.app.store
@@ -119,11 +164,16 @@ class Pipeline:
             about_me=prefs.about_me,
             morning_time=prefs.morning_time,
             source=note.source,
+            instructions=prefs.instructions,
         )
         try:
             triage = await brain.triage(note.raw_text, ctx)
         except BrainError as exc:
             return await self._failed(note, exc)
+        current = store.get_note(note_id)
+        if current is None:
+            return None  # deleted while Claude was working on it
+        note = current
 
         reminders_store = self.app.reminders
         store.cancel_open_reminders(note_id, ("explicit", "suggested"))
@@ -151,7 +201,8 @@ class Pipeline:
         note = store.update_note(
             note_id,
             title=triage.title.strip()[:200],
-            text=triage.text.strip(),
+            # An empty clean-up would hide what the user said.
+            text=triage.text.strip()[:60_000] or note.raw_text,
             summary=triage.summary.strip(),
             kind=kind,
             tags=triage.tags,
@@ -206,7 +257,7 @@ class Pipeline:
         try:
             async with self._semaphore:
                 found = await self.app.brain.find_link(query)
-        except BrainError as exc:
+        except Exception as exc:  # a failed lookup only means no link
             log.info("Web search for note %s failed: %s", note_id, exc)
             return
         if not found.url or found.confidence == "low" or not is_http_url(found.url):
@@ -217,7 +268,7 @@ class Pipeline:
             return
         url = normalize_url(found.url)
         link = self.app.store.add_link(
-            note_id, url, link_kind(url), found_by_search=True, title=found.title
+            note_id, url, link_kind(url), found_by_search=True, title=found.title[:300]
         )
         await self.review_link(link.id)
 
@@ -234,13 +285,24 @@ class Pipeline:
         if not self.app.brain.available:
             return link
         async with self._semaphore:
-            store.update_link(link_id, state=ProcState.PROCESSING, error=None)
-            note_text = note.text or note.raw_text
             try:
-                link = await self._review(link, note_text)
-            except (BrainError, FetchError) as exc:
-                log.warning("Review of link %s failed: %s", link_id, exc)
-                return store.update_link(link_id, state=ProcState.FAILED, error=str(exc))
+                store.update_link(link_id, state=ProcState.PROCESSING, error=None)
+                link = await self._review(link, note.text or note.raw_text)
+            except KeyError:
+                return None  # the note (and its links) were deleted meanwhile
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if isinstance(exc, (BrainError, FetchError)):
+                    log.warning("Review of link %s failed: %s", link_id, exc)
+                    error = str(exc)
+                else:
+                    log.exception("Review of link %s failed", link_id)
+                    error = f"Something went wrong while reviewing this link ({exc})."
+                try:
+                    return store.update_link(link_id, state=ProcState.FAILED, error=error)
+                except KeyError:
+                    return None
         self._refresh_search_text(note.id)
         updated = store.get_note(note.id)
         if updated is not None:
@@ -290,4 +352,5 @@ class Pipeline:
                 parts.append(f"{link.title} {link.review.tldr} {' '.join(link.review.key_points)}")
             elif link.title:
                 parts.append(link.title)
-        self.app.store.update_note(note_id, search_extra="\n".join(parts))
+        with contextlib.suppress(KeyError):
+            self.app.store.update_note(note_id, search_extra="\n".join(parts))

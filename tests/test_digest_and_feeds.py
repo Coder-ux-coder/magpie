@@ -95,3 +95,18 @@ def test_gather_picks_todays_reminders(core):
     assert [r.message for r in daily.reminders_today] == ["Today"]
     weekly = core.digests.gather("weekly", now=morning)
     assert weekly.kind == "weekly" and weekly.reminders_today == []
+
+
+def test_calendar_text_is_clean_and_until_is_utc():
+    due = local_to_utc("2026-10-19T09:00", TZ)
+    calendar = reminders_calendar(
+        [
+            _reminder(1, due, "Bell\x07 ring\x00", rrule="FREQ=DAILY;UNTIL=20261031T090000"),
+            _reminder(2, due, "Date only", rrule="FREQ=WEEKLY;UNTIL=20261231"),
+        ],
+        {},
+        timezone=TZ,
+    )
+    assert "\x07" not in calendar and "\x00" not in calendar
+    assert "RRULE:FREQ=DAILY;UNTIL=20261031T040000Z" in calendar
+    assert "RRULE:FREQ=WEEKLY;UNTIL=20261231T185959Z" in calendar

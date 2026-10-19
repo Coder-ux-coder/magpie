@@ -15,7 +15,12 @@ async function guarded(work) {
   }
 }
 
+// Notes with a change on its way: a second click (on stale data) waits for the first.
+const busy = new Set();
+
 export function patchNote(note, changes, message, undoChanges) {
+  if (busy.has(note.id)) return Promise.resolve(null);
+  busy.add(note.id);
   return guarded(async () => {
     const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: changes });
     emit("note-updated", updated);
@@ -23,7 +28,7 @@ export function patchNote(note, changes, message, undoChanges) {
       toast(message, undoChanges ? { action: "Undo", onAction: () => patchNote(updated, undoChanges) } : {});
     }
     return updated;
-  });
+  }).finally(() => busy.delete(note.id));
 }
 
 export const noteActions = {
@@ -78,8 +83,12 @@ export const noteActions = {
   },
 };
 
+const busyReminders = new Set();
+
 export const reminderActions = {
   async run(reminder, action, body) {
+    if (busyReminders.has(reminder.id)) return null;
+    busyReminders.add(reminder.id);
     return guarded(async () => {
       const result = await api(`/api/reminders/${reminder.id}/${action}`, { method: "POST", body });
       const messages = {
@@ -91,10 +100,11 @@ export const reminderActions = {
       toast(messages[action] || "Updated.");
       emit("reminders-changed", reminder.note_id);
       return result;
-    });
+    }).finally(() => busyReminders.delete(reminder.id));
   },
   done: (reminder) => reminderActions.run(reminder, "done"),
-  snooze: (reminder, minutes = 60) => reminderActions.run(reminder, "snooze", { minutes }),
+  // Without minutes the server uses the snooze length from Settings.
+  snooze: (reminder, minutes) => reminderActions.run(reminder, "snooze", minutes ? { minutes } : undefined),
   tomorrow: (reminder) => reminderActions.run(reminder, "tomorrow"),
   cancel: (reminder) => reminderActions.run(reminder, "cancel"),
 };

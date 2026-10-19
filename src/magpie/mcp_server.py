@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx2
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 INSTRUCTIONS = (
     "Magpie is the user's voice-first notes app. Use these tools to save notes (Magpie's own "
@@ -51,14 +52,21 @@ def build(url: str, token: str, client: httpx2.AsyncClient | None = None) -> MCP
     server = MCPServer("magpie", instructions=INSTRUCTIONS)
 
     async def call(method: str, path: str, **kwargs: Any) -> Any:
-        response = await client.request(method, path, **kwargs)
+        try:
+            response = await client.request(method, path, **kwargs)
+        except httpx2.HTTPError as exc:
+            raise ToolError(f"Could not reach Magpie at {url} ({type(exc).__name__}).") from exc
+        try:
+            data = response.json() if response.content else None
+        except ValueError:
+            data = None
         if response.status_code >= 400:
-            try:
-                detail = response.json().get("detail", response.text)
-            except ValueError:
-                detail = response.text
-            raise RuntimeError(f"Magpie returned {response.status_code}: {detail}")
-        return response.json() if response.content else None
+            detail = data.get("detail") if isinstance(data, dict) else None
+            # ToolError: its message reaches Claude (other errors are hidden as crashes).
+            raise ToolError(f"Magpie returned {response.status_code}: {detail or response.text}")
+        if data is None and response.content:
+            raise ToolError("Magpie sent an answer that is not JSON. Is the URL right?")
+        return data
 
     @server.tool()
     async def add_note(text: str) -> str:
@@ -73,7 +81,9 @@ def build(url: str, token: str, client: httpx2.AsyncClient | None = None) -> MCP
     async def search_notes(query: str, limit: int = 10) -> str:
         """Full-text search across all of the user's notes, newest relevant first."""
         data = await call(
-            "GET", "/api/notes", params={"q": query, "view": "all", "limit": min(limit, 50)}
+            "GET",
+            "/api/notes",
+            params={"q": query[:300], "view": "all", "limit": max(1, min(limit, 50))},
         )
         notes = data["notes"]
         return "\n".join(_note_line(n) for n in notes) or "No notes match."
@@ -81,7 +91,9 @@ def build(url: str, token: str, client: httpx2.AsyncClient | None = None) -> MCP
     @server.tool()
     async def recent_notes(limit: int = 20, view: str = "inbox") -> str:
         """List recent notes. view: inbox, all, done, archived, scheduled or reviews."""
-        data = await call("GET", "/api/notes", params={"view": view, "limit": min(limit, 100)})
+        data = await call(
+            "GET", "/api/notes", params={"view": view, "limit": max(1, min(limit, 100))}
+        )
         return "\n".join(_note_line(n) for n in data["notes"]) or "No notes."
 
     @server.tool()
@@ -92,7 +104,7 @@ def build(url: str, token: str, client: httpx2.AsyncClient | None = None) -> MCP
     @server.tool()
     async def upcoming_reminders(limit: int = 20) -> str:
         """Scheduled reminders, soonest first, in the user's local time."""
-        data = await call("GET", "/api/reminders", params={"limit": min(limit, 100)})
+        data = await call("GET", "/api/reminders", params={"limit": max(1, min(limit, 100))})
         lines = [
             f"#{r['id']} {r['when']}: {r['message']}" + (" (repeats)" if r.get("rrule") else "")
             for r in data["reminders"]
@@ -108,6 +120,7 @@ def build(url: str, token: str, client: httpx2.AsyncClient | None = None) -> MCP
     @server.tool()
     async def snooze_reminder(reminder_id: int, minutes: int = 60) -> str:
         """Push a reminder back by some minutes."""
+        minutes = max(1, min(minutes, 60 * 24 * 30))
         data = await call("POST", f"/api/reminders/{reminder_id}/snooze", json={"minutes": minutes})
         return f"Snoozed until {data['when']}."
 

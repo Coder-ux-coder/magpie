@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from magpie import __version__, api
 from magpie.config import Settings
@@ -26,6 +31,71 @@ CSP = (
     "worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
     "form-action 'self'; object-src 'none'"
 )
+# The largest upload Magpie accepts is an import (50 MB); recordings are 25 MB.
+MAX_BODY_BYTES = 55 * 1024 * 1024
+
+
+class SafeJSONResponse(JSONResponse):
+    """JSON that can always be sent, even when odd input (half a surrogate pair) is echoed."""
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content, ensure_ascii=True, allow_nan=True, separators=(",", ":")
+        ).encode()
+
+
+def _describe(error: dict[str, Any]) -> str:
+    where = ".".join(str(part) for part in error.get("loc", ()) if part not in ("body", "query"))
+    message = str(error.get("msg", "invalid value")).removeprefix("Value error, ")
+    return f"{where}: {message}" if where else message
+
+
+class _TooLarge(Exception):
+    pass
+
+
+class BodyLimit:
+    """Refuse request bodies over the limit before they fill memory or disk."""
+
+    def __init__(self, app: ASGIApp, limit: int = MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        length = dict(scope["headers"]).get(b"content-length")
+        if length is not None and (not length.isdigit() or int(length) > self.limit):
+            await self._refuse(scope, receive, send)
+            return
+        received = 0
+        started = False
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.limit:
+                    raise _TooLarge
+            return message
+
+        async def tracked_send(message: Message) -> None:
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracked_send)
+        except _TooLarge:
+            if not started:
+                await self._refuse(scope, receive, send)
+
+    @staticmethod
+    async def _refuse(scope: Scope, receive: Receive, send: Send) -> None:
+        response = SafeJSONResponse({"detail": "The upload is too large."}, status_code=413)
+        await response(scope, receive, send)
 
 
 def create_app(
@@ -47,6 +117,7 @@ def create_app(
             await core.stop()
 
     app = FastAPI(
+        default_response_class=SafeJSONResponse,
         title="Magpie",
         version=__version__,
         description="Voice-first notes with a Claude brain.",
@@ -56,6 +127,30 @@ def create_app(
         openapi_url="/api/openapi.json",
     )
     app.state.magpie = core
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_input(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # A readable sentence, and never the (possibly huge or unsendable) input echoed back.
+        errors = [_describe(error) for error in exc.errors()]
+        return SafeJSONResponse({"detail": "; ".join(errors[:5]) or "Invalid request."}, 422)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(_: Request, exc: StarletteHTTPException) -> Response:
+        if exc.status_code in (204, 304):
+            return Response(status_code=exc.status_code, headers=exc.headers)
+        return SafeJSONResponse({"detail": exc.detail}, exc.status_code, headers=exc.headers)
+
+    @app.exception_handler(OverflowError)
+    async def out_of_range(_: Request, __: OverflowError) -> JSONResponse:
+        return SafeJSONResponse({"detail": "A number in the request is out of range."}, 422)
+
+    @app.exception_handler(Exception)
+    async def unexpected(_: Request, __: Exception) -> JSONResponse:
+        # The traceback is logged by the server; the client gets a readable message.
+        return SafeJSONResponse(
+            {"detail": "Something went wrong on the server. Please try again."}, 500
+        )
+
     app.add_middleware(
         SessionMiddleware,
         secret_key=core.secrets.secret_key,
@@ -79,8 +174,12 @@ def create_app(
             headers.setdefault("Content-Security-Policy", CSP)
         if request.url.path.startswith("/api/"):
             headers.setdefault("Cache-Control", "no-store")
+        elif request.url.path.startswith("/static/"):
+            # Revalidate (cheap 304s) so an update never mixes old and new scripts.
+            headers.setdefault("Cache-Control", "no-cache")
         return response
 
+    app.add_middleware(BodyLimit)
     app.include_router(api.router)
     app.include_router(api.public)
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")

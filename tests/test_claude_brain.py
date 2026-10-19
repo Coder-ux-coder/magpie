@@ -293,3 +293,45 @@ async def test_ask_formats_notes():
     assert answer.note_ids == [12]
     content = client.calls[0]["messages"][0]["content"]
     assert "#12 [note] Rent" in content and "Question: when does rent go up?" in content
+
+
+async def test_unreadable_api_answers_become_brain_errors():
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    odd = anthropic.APIResponseValidationError(
+        response=httpx2.Response(200, request=request), body=None
+    )
+    brain, client = brain_with(odd)
+    with pytest.raises(BrainError, match="Unexpected answer"):
+        await brain.triage("hello", CTX)
+    assert client.calls[0]["timeout"] == 120  # never the SDK's 10-minute default
+
+
+async def test_answers_with_no_text_or_cut_off_context():
+    brain, _ = brain_with(response(SimpleNamespace(type="server_tool_use")))
+    with pytest.raises(BrainError, match="expected format"):
+        await brain.triage("hello", CTX)
+    brain, _ = brain_with(response(text_block("{"), stop="model_context_window_exceeded"))
+    with pytest.raises(BrainError, match="cut off"):
+        await brain.triage("hello", CTX)
+
+
+def test_prompts_stay_bounded_however_long_the_notes_are():
+    from datetime import timedelta
+
+    from magpie.brain.prompts import NOTES_BUDGET, ask_message
+    from magpie.models import Note
+
+    now = now_utc()
+    notes = [
+        Note(
+            id=i,
+            created_at=now - timedelta(minutes=i),
+            updated_at=now,
+            source="web",
+            raw_text="word " * 20_000,
+        )
+        for i in range(1, 301)
+    ]
+    prompt = ask_message("what did I say?", notes, CTX)
+    assert len(prompt) < NOTES_BUDGET + 10_000
+    assert "more notes left out" in prompt

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from magpie.models import Reminder, ReminderStatus
 from magpie.notify import Notification
-from magpie.timeutil import humanize, next_occurrence, now_utc, parse_hhmm, to_local
+from magpie.timeutil import anchor_rrule, humanize, next_occurrence, now_utc, parse_hhmm, to_local
 
 if TYPE_CHECKING:
     from magpie.core import Magpie
@@ -29,7 +29,10 @@ class Scheduler:
         self.app = app
 
     async def run(self) -> None:
-        self._prime()
+        try:
+            self._prime()
+        except Exception:
+            log.exception("Could not prepare the digest schedule")
         while True:
             try:
                 await self.tick()
@@ -52,8 +55,20 @@ class Scheduler:
     async def tick(self, now: datetime | None = None) -> None:
         now = now or now_utc()
         for reminder in self.app.store.due_reminders(now):
-            await self.fire(reminder, now)
-        await self.maybe_digests(now)
+            # One reminder that fails in an unexpected way must not hold up the others.
+            try:
+                await self.fire(reminder, now)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.exception("Could not send reminder %s", reminder.id)
+                self._retry_later(reminder, now, f"Magpie hit an error: {exc}"[:300])
+        try:
+            await self.maybe_digests(now)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Digest check failed")
 
     # ------------------------------------------------------------- reminders
 
@@ -74,20 +89,30 @@ class Scheduler:
             reminder_id=reminder.id,
             note_id=reminder.note_id,
             actions=self.app.reminder_actions(reminder.id),
+            snooze_minutes=prefs.snooze_minutes,
         )
         report = await self.app.notifier.send(notification)
 
+        current = store.get_reminder(reminder.id)
+        if (
+            current is None
+            or current.status != ReminderStatus.SCHEDULED
+            or current.due_at != reminder.due_at
+        ):
+            return  # deleted, done or snoozed while it was being sent: keep that change
         if report.ok or report.no_channels:
             error = None if report.ok else "No notification channel is set up yet."
+            rule = reminder.rrule
+            if rule and "COUNT=" in rule.upper():
+                rule = anchor_rrule(rule, reminder.due_at, prefs.timezone)
             following = (
-                next_occurrence(reminder.rrule, reminder.due_at, now, prefs.timezone)
-                if reminder.rrule
-                else None
+                next_occurrence(rule, reminder.due_at, now, prefs.timezone) if rule else None
             )
             if following is not None:
                 store.update_reminder(
                     reminder.id,
                     due_at=following,
+                    rrule=rule,
                     status=ReminderStatus.SCHEDULED,
                     sent_at=now,
                     attempts=0,
@@ -103,22 +128,26 @@ class Scheduler:
                 )
             return
 
+        self._retry_later(reminder, now, report.errors)
+
+    def _retry_later(self, reminder: Reminder, now: datetime, error: str) -> None:
+        store = self.app.store
         attempts = reminder.attempts + 1
-        if attempts > len(RETRY_DELAYS):
-            log.warning("Giving up on reminder %s: %s", reminder.id, report.errors)
-            store.update_reminder(
-                reminder.id,
-                status=ReminderStatus.FAILED,
-                attempts=attempts,
-                last_error=report.errors,
-            )
-        else:
-            store.update_reminder(
-                reminder.id,
-                due_at=now + RETRY_DELAYS[attempts - 1],
-                attempts=attempts,
-                last_error=report.errors,
-            )
+        try:
+            if attempts > len(RETRY_DELAYS):
+                log.warning("Giving up on reminder %s: %s", reminder.id, error)
+                store.update_reminder(
+                    reminder.id, status=ReminderStatus.FAILED, attempts=attempts, last_error=error
+                )
+            else:
+                store.update_reminder(
+                    reminder.id,
+                    due_at=now + RETRY_DELAYS[attempts - 1],
+                    attempts=attempts,
+                    last_error=error,
+                )
+        except KeyError:
+            pass  # deleted meanwhile
 
     # --------------------------------------------------------------- digests
 

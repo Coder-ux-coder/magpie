@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "magpie-notes"
-version = "0.1.0"
+version = "0.2.0"
 description = "Voice-first notes with a Claude brain: say \"notes on\", talk, and Claude files it, reminds you when it matters, and reviews the videos and articles you save."
 readme = "README.md"
 license = "MIT"

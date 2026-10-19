@@ -65,7 +65,7 @@ src/magpie/
   auth.py          Generated secrets, signed action links, login rate limiter
   core.py          Magpie container: builds and wires services, starts background tasks
   export.py ics.py JSON/Markdown export + import; iCalendar feed
-  cli.py           `magpie serve|add|digest|doctor|password|token|backup|mcp`
+  cli.py           `magpie serve|add|digest|doctor|password|token|backup|setup|mcp`
   mcp_server.py    MCP server (optional extra) that talks to the HTTP API
   web/             index.html, sw.js, manifest, static/{css,js,icons}
 tests/             pytest suite (conftest.py has the fixtures) + tests/js (node:test)
@@ -94,7 +94,13 @@ docs/              SPEC, architecture, configuration, deployment, integrations
   change). Anything the user adjusts in the dashboard is a `Prefs` field; add it in
   `config.py`, give it a safe default, and expose it in `web/static/js/settings.js`.
 - Background work goes through `Pipeline.spawn()` so it is tracked, can be drained in tests,
-  and is cancelled on shutdown.
+  and is cancelled on shutdown. Long-running loops are started with `Magpie._supervise()`,
+  which restarts them after an unexpected error: a loop must never die silently.
+- Robustness is part of every change: anything from Claude, Telegram, the network, the
+  database or a user can be malformed. Catch it where it enters, turn it into a clear
+  state or message (a failed note, a skipped row, a 422), and add a test with the bad input.
+  Repeat rules go through `validate_rrule()`, which refuses rules dateutil can't evaluate
+  quickly.
 - Errors shown to users are plain sentences (“Claude couldn't process this note: …”).
 
 ### Web app (`src/magpie/web`)

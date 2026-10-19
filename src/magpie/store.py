@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import ValidationError
 
@@ -24,6 +25,13 @@ from magpie.models import (
 )
 from magpie.schemas import LinkReview
 from magpie.timeutil import iso, now_utc, parse_iso
+
+log = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+# SQLite integers are 64-bit; a larger id in a URL can never match a row.
+MAX_ID = 2**63 - 1
 
 NOTE_FIELDS = {
     "raw_text",
@@ -91,6 +99,21 @@ def _encode(field: str, value: Any) -> Any:
     return value
 
 
+def _valid_id(value: Any) -> bool:
+    return isinstance(value, int) and 0 < value <= MAX_ID
+
+
+def _parse_rows(rows: Iterable[sqlite3.Row], parse: Callable[[sqlite3.Row], T]) -> list[T]:
+    """Parse rows, skipping any that are damaged so one bad row can't break a whole list."""
+    parsed = []
+    for row in rows:
+        try:
+            parsed.append(parse(row))
+        except (ValueError, TypeError, KeyError) as exc:
+            log.warning("Skipping a damaged database row (id %s): %s", row["id"], exc)
+    return parsed
+
+
 def _fts_query(text: str) -> str | None:
     words = _WORD.findall(text)
     if not words:
@@ -117,10 +140,15 @@ class Store:
         return note
 
     def get_note(self, note_id: int, *, children: bool = True) -> Note | None:
+        if not _valid_id(note_id):
+            return None
         row = self.db.one("SELECT * FROM notes WHERE id = ?", (note_id,))
         if row is None:
             return None
-        note = self._note(row)
+        note = _parse_rows([row], self._note)
+        if not note:
+            return None
+        note = note[0]
         if children:
             note.links = self.links_for([note_id]).get(note_id, [])
             note.reminders = self.reminders_for([note_id]).get(note_id, [])
@@ -187,8 +215,8 @@ class Store:
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
-        params.extend([max(1, min(limit, 500)), max(0, offset)])
-        notes = [self._note(row) for row in self.db.query(sql, params)]
+        params.extend([max(1, min(limit, 500)), max(0, min(offset, MAX_ID))])
+        notes = _parse_rows(self.db.query(sql, params), self._note)
         self._attach_children(notes)
         return notes
 
@@ -227,7 +255,25 @@ class Store:
         self.db.execute("UPDATE notes SET created_at = ? WHERE id = ?", (iso(created_at), note_id))
 
     def delete_note(self, note_id: int) -> bool:
+        if not _valid_id(note_id):
+            return False
         return self.db.execute("DELETE FROM notes WHERE id = ?", (note_id,)).rowcount > 0
+
+    def note_by_client_id(self, client_id: str, since: datetime) -> Note | None:
+        """A note a device already sent under this id (it retries when an answer is lost)."""
+        try:
+            row = self.db.one(
+                "SELECT id FROM notes WHERE created_at >= ?"
+                " AND json_extract(meta, '$.client_id') = ? ORDER BY id DESC LIMIT 1",
+                (iso(since), client_id),
+            )
+        except sqlite3.OperationalError:  # SQLite built without JSON functions
+            row = self.db.one(
+                "SELECT id FROM notes WHERE created_at >= ? AND meta LIKE ?"
+                " ORDER BY id DESC LIMIT 1",
+                (iso(since), f'%"client_id": "{client_id}"%'),
+            )
+        return self.get_note(row["id"]) if row else None
 
     def note_ids_in_state(self, *states: ProcState) -> list[int]:
         marks = ",".join("?" for _ in states)
@@ -241,7 +287,7 @@ class Store:
             "SELECT * FROM notes WHERE created_at >= ? AND created_at <= ? ORDER BY created_at",
             (iso(start), iso(end)),
         )
-        notes = [self._note(row) for row in rows]
+        notes = _parse_rows(rows, self._note)
         self._attach_children(notes)
         return notes
 
@@ -249,7 +295,7 @@ class Store:
         rows = self.db.query(
             "SELECT * FROM notes WHERE in_digest = 1 AND status = 'open' ORDER BY created_at"
         )
-        notes = [self._note(row) for row in rows]
+        notes = _parse_rows(rows, self._note)
         self._attach_children(notes)
         return notes
 
@@ -266,14 +312,14 @@ class Store:
             " AND r.status = 'scheduled') ORDER BY n.created_at DESC LIMIT ?",
             (limit,),
         )
-        return [self._note(row) for row in rows]
+        return _parse_rows(rows, self._note)
 
     def recent_notes(self, limit: int = 200) -> list[Note]:
         rows = self.db.query(
             "SELECT * FROM notes WHERE status != 'archived' ORDER BY created_at DESC LIMIT ?",
             (limit,),
         )
-        notes = [self._note(row) for row in rows]
+        notes = _parse_rows(rows, self._note)
         self._attach_children(notes)
         return notes
 
@@ -296,8 +342,10 @@ class Store:
         return link
 
     def get_link(self, link_id: int) -> Link | None:
+        if not _valid_id(link_id):
+            return None
         row = self.db.one("SELECT * FROM links WHERE id = ?", (link_id,))
-        return self._link(row) if row else None
+        return next(iter(_parse_rows([row], self._link)), None) if row else None
 
     def update_link(self, link_id: int, **fields: Any) -> Link:
         unknown = set(fields) - LINK_FIELDS
@@ -323,8 +371,8 @@ class Store:
         rows = self.db.query(
             f"SELECT * FROM links WHERE note_id IN ({marks}) ORDER BY id", list(note_ids)
         )
-        for row in rows:
-            result.setdefault(row["note_id"], []).append(self._link(row))
+        for link in _parse_rows(rows, self._link):
+            result.setdefault(link.note_id, []).append(link)
         return result
 
     def link_ids_in_state(self, *states: ProcState) -> list[int]:
@@ -339,7 +387,7 @@ class Store:
             "SELECT * FROM links WHERE state = 'ready' AND updated_at >= ? ORDER BY updated_at",
             (iso(since),),
         )
-        return [self._link(row) for row in rows]
+        return _parse_rows(rows, self._link)
 
     # -------------------------------------------------------------- reminders
 
@@ -364,8 +412,10 @@ class Store:
         return reminder
 
     def get_reminder(self, reminder_id: int) -> Reminder | None:
+        if not _valid_id(reminder_id):
+            return None
         row = self.db.one("SELECT * FROM reminders WHERE id = ?", (reminder_id,))
-        return self._reminder(row) if row else None
+        return next(iter(_parse_rows([row], self._reminder)), None) if row else None
 
     def update_reminder(self, reminder_id: int, **fields: Any) -> Reminder:
         unknown = set(fields) - REMINDER_FIELDS
@@ -381,6 +431,8 @@ class Store:
         return reminder
 
     def delete_reminder(self, reminder_id: int) -> bool:
+        if not _valid_id(reminder_id):
+            return False
         return self.db.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,)).rowcount > 0
 
     def reminders_for(self, note_ids: Sequence[int]) -> dict[int, list[Reminder]]:
@@ -391,8 +443,8 @@ class Store:
         rows = self.db.query(
             f"SELECT * FROM reminders WHERE note_id IN ({marks}) ORDER BY due_at", list(note_ids)
         )
-        for row in rows:
-            result.setdefault(row["note_id"], []).append(self._reminder(row))
+        for reminder in _parse_rows(rows, self._reminder):
+            result.setdefault(reminder.note_id, []).append(reminder)
         return result
 
     def due_reminders(self, now: datetime) -> list[Reminder]:
@@ -400,7 +452,7 @@ class Store:
             "SELECT * FROM reminders WHERE status = 'scheduled' AND due_at <= ? ORDER BY due_at",
             (iso(now),),
         )
-        return [self._reminder(row) for row in rows]
+        return _parse_rows(rows, self._reminder)
 
     def list_reminders(
         self,
@@ -427,7 +479,7 @@ class Store:
             sql += " WHERE " + " AND ".join(where)
         sql += f" ORDER BY due_at {'DESC' if newest_first else 'ASC'} LIMIT ?"
         params.append(limit)
-        return [self._reminder(row) for row in self.db.query(sql, params)]
+        return _parse_rows(self.db.query(sql, params), self._reminder)
 
     def cancel_open_reminders(self, note_id: int, origins: Sequence[str]) -> int:
         """Remove not-yet-sent reminders of the given origins (used when re-running triage)."""
@@ -455,13 +507,19 @@ class Store:
 
     def list_digests(self, limit: int = 30) -> list[Digest]:
         rows = self.db.query("SELECT * FROM digests ORDER BY id DESC LIMIT ?", (limit,))
-        return [self._digest(row) for row in rows]
+        return _parse_rows(rows, self._digest)
 
     # --------------------------------------------------------------------- kv
 
     def get_kv(self, key: str, default: Any = None) -> Any:
         row = self.db.one("SELECT value FROM kv WHERE key = ?", (key,))
-        return json.loads(row["value"]) if row else default
+        if row is None:
+            return default
+        try:
+            return json.loads(row["value"])
+        except ValueError:
+            log.warning("Ignoring a damaged setting %r", key)
+            return default
 
     def set_kv(self, key: str, value: Any) -> None:
         self.db.execute(
@@ -475,13 +533,18 @@ class Store:
 
     def get_prefs(self) -> Prefs:
         stored = self.get_kv("prefs", {})
+        if not isinstance(stored, dict):
+            stored = {}
         base = {"timezone": self.settings.timezone, "web_search": self.settings.web_search}
         try:
             return Prefs.model_validate({**base, **stored})
         except ValidationError:
             # A bad stored value (e.g. a time zone removed from tzdata) must not
             # take the app down: fall back field by field.
-            prefs = Prefs.model_validate(base)
+            try:
+                prefs = Prefs.model_validate(base)
+            except ValidationError:
+                prefs = Prefs()
             for key, value in stored.items():
                 try:
                     prefs = Prefs.model_validate({**prefs.model_dump(), key: value})
@@ -505,6 +568,9 @@ class Store:
 
     def remove_push_subscription(self, endpoint: str) -> None:
         self.db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+
+    def clear_push_subscriptions(self) -> None:
+        self.db.execute("DELETE FROM push_subscriptions")
 
     def push_subscriptions(self) -> list[dict[str, Any]]:
         rows = self.db.query("SELECT endpoint, p256dh, auth FROM push_subscriptions")

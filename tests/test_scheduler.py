@@ -154,3 +154,87 @@ async def test_weekly_review(core, channel):
     await scheduler.maybe_digests(sunday_evening)
     weekly = [n for n in channel.sent if n.title == "Your weekly review"]
     assert len(weekly) == 1
+
+
+async def test_one_broken_reminder_does_not_hold_up_the_others(core, channel, monkeypatch):
+    broken = core.store.add_reminder(None, now_utc() - timedelta(minutes=2), "Broken")
+    fine = core.store.add_reminder(None, now_utc() - timedelta(minutes=1), "Fine")
+    real_actions = core.reminder_actions
+
+    def actions(reminder_id):
+        if reminder_id == broken.id:
+            raise RuntimeError("unexpected")
+        return real_actions(reminder_id)
+
+    monkeypatch.setattr(core, "reminder_actions", actions)
+    await core.scheduler.tick()
+    assert [n.title for n in channel.sent] == ["Fine"]
+    assert core.store.get_reminder(fine.id).status == ReminderStatus.SENT
+    retried = core.store.get_reminder(broken.id)
+    assert retried.status == ReminderStatus.SCHEDULED
+    assert retried.attempts == 1
+    assert retried.due_at > now_utc()
+    assert "unexpected" in retried.last_error
+
+
+async def test_a_change_made_while_sending_is_kept(core, channel):
+    reminder = core.store.add_reminder(None, now_utc() - timedelta(minutes=1), "Stretch")
+    send = channel.send
+
+    async def send_and_snooze(notification):
+        await send(notification)
+        core.reminders.snooze(reminder.id, 30)  # the user taps "snooze" meanwhile
+
+    channel.send = send_and_snooze
+    await core.scheduler.tick()
+    stored = core.store.get_reminder(reminder.id)
+    assert stored.status == ReminderStatus.SCHEDULED
+    assert stored.due_at > now_utc() + timedelta(minutes=25)
+
+
+async def test_counted_series_ends(core, channel):
+    start = now_utc() - timedelta(minutes=1)
+    reminder = core.store.add_reminder(None, start, "Vitamins", rrule="FREQ=DAILY;COUNT=2")
+    await core.scheduler.tick(start + timedelta(minutes=1))
+    stored = core.store.get_reminder(reminder.id)
+    assert stored.status == ReminderStatus.SCHEDULED
+    assert "UNTIL=" in stored.rrule and "COUNT" not in stored.rrule
+    await core.scheduler.tick(stored.due_at + timedelta(minutes=1))
+    assert core.store.get_reminder(reminder.id).status == ReminderStatus.SENT
+    assert len(channel.sent) == 2
+
+
+async def test_digests_still_run_when_a_reminder_fails(core, channel, monkeypatch):
+    core.store.add_reminder(None, now_utc() - timedelta(minutes=1), "Broken")
+    monkeypatch.setattr(core, "reminder_actions", lambda _: 1 / 0)
+    calls = []
+
+    async def digests(now):
+        calls.append(now)
+
+    monkeypatch.setattr(core.scheduler, "maybe_digests", digests)
+    await core.scheduler.tick()
+    assert len(calls) == 1
+
+
+async def test_background_loops_are_restarted_after_a_crash(core, monkeypatch):
+    import asyncio
+
+    from magpie import core as core_module
+
+    runs = []
+
+    async def flaky():
+        runs.append(1)
+        if len(runs) < 3:
+            raise RuntimeError("boom")
+
+    real_sleep = asyncio.sleep
+
+    async def no_wait(_seconds):
+        await real_sleep(0)
+
+    monkeypatch.setattr(core_module.asyncio, "sleep", no_wait)
+    task = core._supervise("test loop", flaky)
+    await asyncio.wait_for(task, 2)
+    assert len(runs) == 3  # crashed twice, then finished normally

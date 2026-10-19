@@ -918,6 +918,7 @@ details > summary { cursor: pointer; font-weight: 600; min-height: 2rem; }
 }
 .status-dot.on { background: var(--ok); }
 .copy-field { display: flex; gap: 0.5rem; }
+.copy-field .btn { white-space: nowrap; }
 .copy-field input { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.875rem; }
 pre.snippet-block {
   margin: 0;
@@ -950,6 +951,8 @@ pre.snippet-block {
 .ask-form { display: flex; gap: 0.5rem; }
 .answer { display: grid; gap: 0.5rem; }
 .answer .question { font-weight: 700; }
+/* Long unbroken text (a pasted URL, "AAAA…") wraps instead of widening the page. */
+.list > *, .answer, .markdown, .digest-content { min-width: 0; overflow-wrap: anywhere; }
 .markdown h2, .markdown h3, .markdown h4 { font-size: 1rem; margin: 0.75rem 0 0.35rem; }
 .markdown p { margin: 0.35rem 0; }
 .markdown ul, .markdown ol { margin: 0.35rem 0; padding-left: 1.25rem; }
@@ -1016,4 +1019,15 @@ pre.snippet-block {
 @media (min-width: 48rem) {
   .capture { padding: 1.25rem; }
   .mic { width: 5rem; height: 5rem; }
+}
+
+/* Touch screens: every control at least 44 px tall. */
+@media (pointer: coarse) {
+  .card-actions .icon-btn { width: 2.75rem; height: 2.75rem; }
+  .btn.small,
+  .sheet-foot .btn,
+  .tab,
+  button.chip,
+  .segmented button { min-height: 2.75rem; }
+  details > summary { padding-block: 0.6rem; }
 }

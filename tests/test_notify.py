@@ -41,7 +41,7 @@ async def test_ntfy_payload(router):
     assert body["title"] == "Call Ahmed"
     assert body["priority"] == 4
     assert body["click"] == NOTE.url
-    assert [a["label"] for a in body["actions"]] == ["Done", "Snooze 1h"]
+    assert [a["label"] for a in body["actions"]] == ["Done", "Snooze 1 hour"]
     assert request.headers["authorization"] == "Bearer tk"
 
 
@@ -158,3 +158,90 @@ async def test_notifier_report():
     assert not only.ok
     empty = await Notifier([Off()], lambda: Prefs()).send(NOTE)
     assert empty.no_channels
+
+
+def test_email_subjects_never_contain_line_breaks():
+    settings = Settings(
+        _env_file=None, smtp_host="smtp.example.com", smtp_from="m@e.com", email_to="me@e.com"
+    )
+    note = Notification(title="Call Ahmed\nabout the budget\r\n" + "x" * 500, kind="reminder")
+    message = EmailChannel(settings).build(note)
+    assert "\n" not in message["Subject"] and len(message["Subject"]) <= 150
+
+
+async def test_a_hanging_channel_times_out_without_blocking_the_rest(monkeypatch):
+    import asyncio
+
+    from magpie import notify
+
+    class Slow:
+        name, label, configured = "slow", "Slow", True
+
+        async def send(self, notification):
+            await asyncio.sleep(5)
+
+    class Quick:
+        name, label, configured = "quick", "Quick", True
+
+        async def send(self, notification):
+            return None
+
+    monkeypatch.setattr(notify, "CHANNEL_TIMEOUT", 0.05)
+    report = await Notifier([Slow(), Quick()], lambda: Prefs()).send(NOTE)
+    assert report.results == {"slow": "timed out", "quick": "ok"}
+    assert report.ok
+
+
+def test_one_bad_push_subscription_does_not_stop_the_others(core, monkeypatch):
+    from magpie.notify import channels
+
+    core.store.add_push_subscription("https://push.example.com/bad", "bad", "bad", "ua")
+    core.store.add_push_subscription("https://push.example.com/good", "good", "good", "ua")
+    sent = []
+
+    def fake_webpush(subscription_info, **kwargs):
+        if subscription_info["endpoint"].endswith("bad"):
+            raise ValueError("Could not deserialize key data")
+        sent.append(subscription_info["endpoint"])
+
+    monkeypatch.setattr(channels, "webpush", fake_webpush)
+    channel = WebPushChannel(core.store, core.settings)
+    delivered, errors = channel._send_sync(channel.payload(NOTE))
+    assert delivered == 1 and sent == ["https://push.example.com/good"]
+    assert errors == ["push failed (ValueError)"]
+
+
+def test_push_payload_stays_small_with_long_non_latin_text(core):
+    long = Notification(title="امی کو فون کریں " * 40, body="یاد دہانی " * 200, kind="reminder")
+    payload = WebPushChannel(core.store, core.settings).payload(long)
+    assert len(payload.encode()) < 3000
+    assert "امی" in payload  # UTF-8, not \\u escapes
+
+
+def test_a_damaged_push_key_is_replaced(core):
+    from magpie.notify.channels import VapidKeys
+
+    core.store.add_push_subscription("https://push.example.com/a", "k", "a", "ua")
+    core.store.set_kv("vapid_private_pem", "-----BEGIN garbage-----")
+    keys = VapidKeys(core.store)
+    assert len(keys.public_key) > 80
+    assert core.store.push_subscriptions() == []  # they were made for the old key
+
+
+async def test_snooze_buttons_follow_the_chosen_length(router):
+    from dataclasses import replace
+
+    from magpie.notify import snooze_label
+
+    assert [snooze_label(m) for m in (15, 60, 120, 1440, 90)] == [
+        "15 min",
+        "1 hour",
+        "2 hours",
+        "1 day",
+        "90 min",
+    ]
+    router.add("POST", "https://api.telegram.org", {"ok": True, "result": {}})
+    channel = TelegramChannel(TelegramApi(client(router), "t"), lambda: 5)
+    await channel.send(replace(NOTE, snooze_minutes=30))
+    buttons = router.calls("sendMessage")[-1]["reply_markup"]["inline_keyboard"][0]
+    assert buttons[1] == {"text": "⏰ 30 min", "callback_data": "r:snz:7:30"}

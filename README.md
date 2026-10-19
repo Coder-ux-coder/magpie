@@ -87,29 +87,51 @@ get a two-line verdict on whether it's worth your time.
 
 ## Quick start
 
-You need [Docker](https://docs.docker.com/get-docker/) and a
-[Claude API key](https://console.anthropic.com/settings/keys).
+You need [Docker](https://docs.docker.com/get-docker/). A
+[Claude API key](https://console.anthropic.com/settings/keys) makes Magpie smart; you can
+add it during setup or later in the dashboard.
 
 ```bash
 git clone https://github.com/Coder-ux-coder/magpie.git
 cd magpie
-cp .env.example .env      # set ANTHROPIC_API_KEY, MAGPIE_PASSWORD and MAGPIE_TIMEZONE
-docker compose up -d
+./setup.sh
 ```
 
-Open <http://localhost:8000>, log in, and say or type your first note.
+That's all. The script asks for your Claude API key, a password (or makes one) and your
+time zone (it suggests your computer's), then starts Magpie at <http://localhost:8000>.
+Run it again any time to change those answers; your notes are kept.
 
-> [!TIP]
-> No API key yet? Set `MAGPIE_BRAIN=fake` to try the app with a simple offline stand-in
-> for Claude, and `python scripts/seed_demo.py` to load sample notes.
+<details>
+<summary>Other ways to install</summary>
+
+**Docker without the script:** `docker compose up -d`, then open <http://localhost:8000>.
+The generated password is in `docker compose logs magpie`, and you can paste your Claude
+key in **Settings → Claude**. Or copy `.env.example` to `.env` and fill it in first.
 
 **Without Docker** (Python 3.11 or newer):
 
 ```bash
-pip install "magpie-notes @ git+https://github.com/Coder-ux-coder/magpie"
-export ANTHROPIC_API_KEY=sk-ant-...  MAGPIE_PASSWORD=choose-one  MAGPIE_TIMEZONE=Asia/Karachi
+pipx install "magpie-notes @ git+https://github.com/Coder-ux-coder/magpie"   # or pip install
+magpie setup     # asks the same questions and writes .env
 magpie serve
 ```
+
+**No API key yet?** Set `MAGPIE_BRAIN=fake` to try everything with a simple offline
+stand-in for Claude, and `python scripts/seed_demo.py` to load sample notes.
+
+</details>
+
+### Make it yours
+
+Everything below is in **Settings**, no restart needed:
+
+- **Your rules for Claude:** standing instructions such as “tag anything about the shop
+  with #shop”, “remind me 30 minutes before meetings” or “keep titles in Urdu”.
+- **About you**, how **proactive** Claude should be, your **morning**, the **snooze**
+  length, the **digest** and **weekly review** times.
+- **Voice:** wake and stop phrases in any language, the language you speak, silence timeout.
+- **Notifications:** switch each channel on or off and send a test.
+- **Display:** theme, text size, high contrast, reduced motion, read-aloud.
 
 ### Next steps
 

@@ -83,6 +83,10 @@ sequenceDiagram
    retries with back-off if they all fail. Repeating reminders move to their next
    occurrence. It also sends the daily digest and weekly review at the user's local times.
 
+The scheduler and the Telegram bot run under a supervisor (`Magpie._supervise`) that
+restarts them after any unexpected error, and each reminder, update and channel is handled
+on its own, so one bad item can't stop the rest.
+
 ## Modules
 
 | Module | Responsibility |

@@ -78,18 +78,26 @@ function announceFiled(note) {
 
 export async function saveNote(text, source) {
   text = text.trim();
-  if (!text) return;
+  if (!text) return true;
+  // A slow server: say so, rather than leave the user wondering where the note went.
+  let dismissSlow = null;
+  const slow = setTimeout(() => { dismissSlow = toast("Still saving…", { timeout: 35000 }); }, 2500);
   try {
     const result = await createNote(text, source);
     if (result.queued) {
-      toast("You're offline. The note is saved on this device and will sync later.");
-      return;
+      toast(result.offline ? "You're offline. The note is saved on this device and will sync later." : "Couldn't reach Magpie. The note is saved on this device and will sync later.");
+      return true;
     }
     watchNote(result.note.id, { onFiled: announceFiled });
     emit("note-created", result.note);
     announce("Saved. Claude is filing it.");
+    return true;
   } catch (error) {
     toast(error.message, { error: true });
+    return false;
+  } finally {
+    clearTimeout(slow);
+    dismissSlow?.();
   }
 }
 
@@ -104,7 +112,13 @@ function deliver(text) {
     toast("Check the text, then press Save.");
     return;
   }
-  saveNote(text, "web-voice");
+  saveNote(text, "web-voice").then((saved) => {
+    if (saved) return;
+    // Not saved and not queued: put the words in the text box so they aren't lost.
+    const area = $("compose-text");
+    area.value = area.value ? `${area.value.trimEnd()} ${text}` : text;
+    area.dispatchEvent(new Event("input"));
+  });
 }
 
 function setupVoice() {
@@ -138,28 +152,39 @@ function setupVoice() {
   });
 }
 
+let transcribing = false;
+
+async function uploadRecording(blob) {
+  transcribing = true;
+  setMic("busy", "Transcribing…", "Transcribing…");
+  const form = new FormData();
+  form.append("file", blob, "note.webm");
+  try {
+    if (dictating || local.reviewVoice) {
+      const result = await api("/api/transcribe", { method: "POST", form });
+      deliver(result.text);
+    } else {
+      form.append("source", "web-audio");
+      const result = await api("/api/notes/audio", { method: "POST", form });
+      watchNote(result.note.id, { onFiled: announceFiled });
+      emit("note-created", result.note);
+      toast("Saved. Claude is filing it…");
+    }
+  } catch (error) {
+    // Keep the recording, so a failed upload loses nothing.
+    toast(error.message, { error: true, timeout: 30000, action: "Try again", onAction: () => uploadRecording(blob) });
+  } finally {
+    transcribing = false;
+    setMic("idle", "Start voice note", idleStatus());
+  }
+}
+
 async function toggleServerRecording() {
+  if (transcribing) return; // the mic stays off until the last recording is done
   if (recorder?.active) {
-    setMic("busy", "Transcribing…", "Transcribing…");
     const blob = await recorder.stop();
     recorder = null;
-    const form = new FormData();
-    form.append("file", blob, "note.webm");
-    try {
-      if (dictating || local.reviewVoice) {
-        const result = await api("/api/transcribe", { method: "POST", form });
-        deliver(result.text);
-      } else {
-        form.append("source", "web-audio");
-        const result = await api("/api/notes/audio", { method: "POST", form });
-        watchNote(result.note.id, { onFiled: announceFiled });
-        emit("note-created", result.note);
-        toast("Saved. Claude is filing it…");
-      }
-    } catch (error) {
-      toast(error.message, { error: true });
-    }
-    setMic("idle", "Start voice note", idleStatus());
+    await uploadRecording(blob);
     return;
   }
   try {
@@ -217,7 +242,7 @@ function setupCompose() {
       form.requestSubmit();
     }
   });
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = area.value.trim();
     if (!text) {
@@ -226,7 +251,10 @@ function setupCompose() {
     }
     area.value = "";
     resize();
-    saveNote(text, "web-text");
+    if (!(await saveNote(text, "web-text")) && !area.value.trim()) {
+      area.value = text; // not saved: give it back so nothing is lost
+      resize();
+    }
   });
   $("compose-dictate").addEventListener("click", () => {
     if (!canCapture()) {
