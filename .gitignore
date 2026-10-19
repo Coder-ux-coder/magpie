@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Magpie data and secrets
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+node_modules/

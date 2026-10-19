@@ -1,0 +1,37 @@
+# Quick start:   cp .env.example .env   (fill in at least ANTHROPIC_API_KEY and MAGPIE_PASSWORD)
+#                docker compose up -d   then open http://localhost:8000
+# With HTTPS:    set MAGPIE_DOMAIN and MAGPIE_BASE_URL in .env, point the domain at this
+#                server, then: docker compose --profile https up -d
+services:
+  magpie:
+    build: .
+    image: magpie:local
+    # Or use the prebuilt image instead of building:
+    # image: ghcr.io/coder-ux-coder/magpie:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    volumes:
+      - magpie-data:/data
+
+  # Optional: automatic HTTPS (needed for the microphone on phones) with Caddy.
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on: [magpie]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MAGPIE_DOMAIN: ${MAGPIE_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  magpie-data:
+  caddy-data:

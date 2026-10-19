@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Magpie</title>
+  <meta name="description" content="Voice-first notes with a Claude brain.">
+  <meta name="theme-color" content="#2f3fa8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1116" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Magpie">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icons/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to notes</a>
+
+  <!-- Login -->
+  <main id="login" class="login" hidden>
+    <form id="login-form" class="login-card" autocomplete="on">
+      <img src="/static/icons/logo.svg" alt="" width="64" height="64">
+      <h1>Magpie</h1>
+      <p class="muted">Voice-first notes with a Claude brain.</p>
+      <label for="login-password">Password</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+      <p id="login-error" class="error" role="alert"></p>
+      <button class="btn primary block" type="submit">Log in</button>
+      <p class="muted small">No password set? It's printed in the server log on start-up, or run <code>magpie password</code>.</p>
+    </form>
+  </main>
+
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <h1 class="sr-only">Magpie notes</h1>
+      <a class="brand" href="#/inbox" aria-label="Magpie home">
+        <img src="/static/icons/logo.svg" alt="" width="32" height="32">
+        <span>Magpie</span>
+      </a>
+      <form id="search-form" class="search" role="search">
+        <label for="search" class="sr-only">Search notes</label>
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#search"></use></svg>
+        <input id="search" type="search" placeholder="Search notes" autocomplete="off" enterkeyhint="search">
+        <kbd class="hint" aria-hidden="true">/</kbd>
+      </form>
+      <button id="btn-shortcuts" class="icon-btn hide-mobile" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#keyboard"></use></svg>
+      </button>
+      <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings" title="Settings">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#settings"></use></svg>
+      </button>
+    </header>
+
+    <section id="banners" class="banners" aria-label="Notices"></section>
+
+    <section class="capture" aria-labelledby="capture-heading">
+      <h2 id="capture-heading" class="sr-only">New note</h2>
+      <div class="capture-voice">
+        <button id="mic" class="mic" type="button" aria-pressed="false" aria-describedby="voice-status">
+          <svg class="icon mic-icon" aria-hidden="true"><use href="/static/icons/sprite.svg#mic"></use></svg>
+          <svg class="icon stop-icon" aria-hidden="true"><use href="/static/icons/sprite.svg#stop"></use></svg>
+          <span class="sr-only" id="mic-label">Start voice note</span>
+        </button>
+        <div class="voice-meta">
+          <p id="voice-status" class="voice-status" role="status" aria-live="polite">Tap the mic, or turn on hands-free and say “notes on”.</p>
+          <label class="switch">
+            <input id="handsfree" type="checkbox" role="switch">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span>Hands-free <span class="muted">(say “<span class="wake-phrase">notes on</span>”)</span></span>
+          </label>
+        </div>
+      </div>
+      <div id="transcript" class="transcript" aria-live="off" hidden dir="auto">
+        <span class="final"></span><span class="interim"></span>
+      </div>
+      <form id="compose" class="compose">
+        <label for="compose-text" class="sr-only">Type a note</label>
+        <textarea id="compose-text" rows="1" dir="auto" placeholder="Type a note or paste a link…  (“remind me to call Ahmed at 5 pm”)" enterkeyhint="send"></textarea>
+        <button id="compose-dictate" class="icon-btn" type="button" aria-label="Dictate into the text box" title="Dictate into the box (review before saving)">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#dictate"></use></svg>
+        </button>
+        <button class="btn primary" type="submit">Save</button>
+      </form>
+    </section>
+
+    <nav class="views" aria-label="Note views">
+      <ul id="view-tabs" role="list"></ul>
+    </nav>
+
+    <main id="main" class="main" tabindex="-1" aria-live="off">
+      <h2 id="view-title" class="view-title"></h2>
+      <div id="view"></div>
+    </main>
+
+    <footer class="footer muted small">
+      <span>Magpie <span id="version"></span></span>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/Coder-ux-coder/magpie" target="_blank" rel="noopener">Open source</a>
+      <span aria-hidden="true">·</span>
+      <button type="button" class="linklike" id="footer-shortcuts">Keyboard shortcuts</button>
+    </footer>
+  </div>
+
+  <!-- Share target / bookmarklet landing -->
+  <main id="share" class="login" hidden>
+    <form id="share-form" class="login-card">
+      <img src="/static/icons/logo.svg" alt="" width="56" height="56">
+      <h1 id="share-title">Save to Magpie</h1>
+      <label for="share-input">Add a few words if you like, then save.</label>
+      <textarea id="share-input" rows="5" dir="auto"></textarea>
+      <p id="share-text" class="muted" role="status" aria-live="polite"></p>
+      <button id="share-save" class="btn primary block" type="submit">Save</button>
+      <a id="share-cancel" class="btn block" href="/">Cancel</a>
+    </form>
+  </main>
+
+  <dialog id="note-dialog" class="sheet" aria-labelledby="note-dialog-title"></dialog>
+  <dialog id="settings-dialog" class="sheet wide" aria-labelledby="settings-title"></dialog>
+  <dialog id="shortcuts-dialog" class="sheet" aria-labelledby="shortcuts-title"></dialog>
+  <dialog id="confirm-dialog" class="sheet small" aria-labelledby="confirm-title"></dialog>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <div id="alerts" class="sr-only" role="alert" aria-live="assertive"></div>
+</body>
+</html>

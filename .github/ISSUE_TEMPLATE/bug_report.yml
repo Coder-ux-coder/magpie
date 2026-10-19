@@ -1,0 +1,38 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Say "notes on, remind me to ..."
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: Magpie version
+      description: Shown at the bottom of the dashboard, or run `magpie --version`.
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run Magpie?
+      options: [Docker, pip / uv, Other]
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device (for voice or dashboard issues)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: Remove API keys, tokens and personal notes before pasting.
+      render: text
