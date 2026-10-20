@@ -1,0 +1,3 @@
+# Windows needs CRLF in batch files; shell scripts must stay LF.
+*.cmd -text
+*.sh text eol=lf
