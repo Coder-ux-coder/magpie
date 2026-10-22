@@ -10,7 +10,7 @@ from typing import Any
 
 from magpie import __version__
 from magpie.content.links import is_http_url
-from magpie.models import Note, ProcState, ReminderStatus
+from magpie.models import COLORS, Note, ProcState, ReminderStatus
 from magpie.schemas import LinkReview
 from magpie.store import Store
 from magpie.timeutil import MAX_YEAR, MIN_YEAR, iso, now_utc, to_local, validate_rrule
@@ -18,16 +18,33 @@ from magpie.timeutil import MAX_YEAR, MIN_YEAR, iso, now_utc, to_local, validate
 log = logging.getLogger(__name__)
 
 FORMAT_VERSION = 1
+# Magpie in Claude (the artifact) has a few colours of its own; these are the nearest here.
+ARTIFACT_COLORS = {"violet": "purple", "yellow": "amber", "brown": "orange"}
+
+
+def _color(value: Any) -> str:
+    value = ARTIFACT_COLORS.get(value, value) if isinstance(value, str) else value
+    return value if value in COLORS else "blue"
 
 
 def export_json(store: Store) -> str:
     notes = store.list_notes(view="any", limit=100_000)
+    categories = store.list_categories()
+    names = {category.id: category.name for category in categories}
+    dumped = []
+    for note in notes:
+        item = note.model_dump(mode="json")
+        # Ids mean nothing on another install; the name travels instead.
+        if note.category_id in names:
+            item["meta"] = {**item["meta"], "category": names[note.category_id]}
+        dumped.append(item)
     payload = {
         "app": "magpie",
         "format": FORMAT_VERSION,
         "version": __version__,
         "exported_at": iso(now_utc()),
-        "notes": [note.model_dump(mode="json") for note in notes],
+        "categories": [{"name": c.name, "color": c.color} for c in categories],
+        "notes": dumped,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -82,6 +99,11 @@ def import_json(store: Store, raw: str | bytes) -> dict[str, int]:
         (row["created_at"], row["raw_text"])
         for row in store.db.query("SELECT created_at, raw_text FROM notes")
     }
+    colors = {}
+    for entry in payload.get("categories") or []:
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+            color = entry.get("color") or entry.get("colour")
+            colors[" ".join(entry["name"].split()).casefold()] = _color(color)
     imported = skipped = 0
     now = now_utc()
     for item in items:
@@ -98,7 +120,7 @@ def import_json(store: Store, raw: str | bytes) -> dict[str, int]:
         try:
             # All of a note or none of it: a bad reminder must not leave half a note behind.
             with store.db.transaction():
-                _insert(store, note, now)
+                _insert(store, note, now, colors)
         except (ValueError, TypeError, KeyError, sqlite3.Error) as exc:
             log.warning("Skipping an imported note that could not be saved: %s", exc)
             skipped += 1
@@ -108,9 +130,31 @@ def import_json(store: Store, raw: str | bytes) -> dict[str, int]:
     return {"imported": imported, "skipped": skipped}
 
 
-def _insert(store: Store, note: Note, now: datetime) -> None:
+def _category_for(store: Store, name: Any, colors: dict[str, str]) -> int | None:
+    if not isinstance(name, str) or not " ".join(name.split()):
+        return None
+    name = " ".join(name.split())[:40]
+    found = store.category_named(name)
+    if found is None:
+        try:
+            found = store.add_category(name, colors.get(name.casefold(), "blue"))
+        except ValueError:
+            found = store.category_named(name)
+    return found.id if found else None
+
+
+def _insert(store: Store, note: Note, now: datetime, colors: dict[str, str]) -> None:
     source = (note.source or "import")[:24]
-    created = store.create_note(note.raw_text, source, note.meta)
+    meta = dict(note.meta)
+    category = meta.pop("category", None)
+    if isinstance(category, dict):  # the artifact's {"name": …, "colour": …}
+        name = category.get("name")
+        if isinstance(name, str) and name.strip():
+            color = category.get("colour") or category.get("color")
+            colors.setdefault(" ".join(name.split()).casefold(), _color(color))
+        category = name
+    category_id = _category_for(store, category, colors)
+    created = store.create_note(note.raw_text, source, meta)
     store.set_created_at(created.id, note.created_at)
     fields: dict[str, Any] = {
         "text": note.text,
@@ -124,6 +168,7 @@ def _insert(store: Store, note: Note, now: datetime) -> None:
         "ping_reason": note.ping_reason,
         "briefing": note.briefing,
         "reply": note.reply,
+        "category_id": category_id,
         "state": ProcState.READY if note.text or note.title else ProcState.PENDING,
     }
     store.update_note(created.id, **fields)

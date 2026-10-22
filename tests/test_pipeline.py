@@ -220,7 +220,7 @@ async def test_unavailable_brain_keeps_notes_pending(core, brain, monkeypatch):
     note = core.store.create_note("saved while offline")
     result = await core.pipeline.process(note.id)
     assert result.state == ProcState.PENDING
-    assert "ANTHROPIC_API_KEY" in result.error
+    assert "isn't set up yet" in result.error and "Settings → AI" in result.error
     assert brain.calls == []
 
 

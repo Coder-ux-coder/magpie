@@ -30,6 +30,8 @@ const DEFAULTS = {
   handsFree: false, // listen for the wake phrase
   reviewVoice: false, // put voice text in the box instead of saving straight away
   serverStt: false, // record audio and let the server transcribe
+  autoListen: true, // listen for the command word as soon as Magpie opens
+  followDeviceZone: true, // reminders follow this computer's time zone
   dismissed: {}, // banners the user closed
 };
 
@@ -89,4 +91,14 @@ export function snoozeLabel(minutes = snoozeMinutes()) {
 
 export function speechLang() {
   return englishLang(state.prefs?.speech_lang, navigator.language);
+}
+
+/** The AI that files notes, as messages name it: "Claude", "Gemini", "Magpie" (no AI). */
+export function aiName() {
+  return state.status?.brain?.label || "Claude";
+}
+
+/** The user's category with this id, from the last list the server sent. */
+export function categoryOf(id) {
+  return (state.categories || []).find((category) => category.id === id) || null;
 }

@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from magpie.config import Prefs, Settings
 from magpie.db import Database
 from magpie.models import (
+    Category,
     Digest,
     Link,
     Note,
@@ -52,6 +53,7 @@ NOTE_FIELDS = {
     "search_extra",
     "meta",
     "source",
+    "category_id",
 }
 LINK_FIELDS = {
     "url",
@@ -160,6 +162,7 @@ class Store:
         view: str = "inbox",
         kind: str | None = None,
         q: str | None = None,
+        category_id: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Note]:
@@ -210,6 +213,9 @@ class Store:
         if kind:
             where.append("n.kind = ?")
             params.append(kind)
+        if category_id is not None:
+            where.append("n.category_id = ?")
+            params.append(category_id)
 
         sql = f"SELECT n.* FROM notes n {join}"
         if where:
@@ -258,6 +264,77 @@ class Store:
         if not _valid_id(note_id):
             return False
         return self.db.execute("DELETE FROM notes WHERE id = ?", (note_id,)).rowcount > 0
+
+    # ------------------------------------------------------------- categories
+
+    def list_categories(self) -> list[Category]:
+        rows = self.db.query(
+            "SELECT c.*, (SELECT COUNT(*) FROM notes n WHERE n.category_id = c.id"
+            " AND n.status = 'open') AS count FROM categories c ORDER BY c.position, c.id"
+        )
+        return _parse_rows(rows, lambda row: Category(**dict(row)))
+
+    def get_category(self, category_id: int) -> Category | None:
+        if not _valid_id(category_id):
+            return None
+        return next((c for c in self.list_categories() if c.id == category_id), None)
+
+    def category_named(self, name: str) -> Category | None:
+        wanted = name.strip().casefold()
+        return next((c for c in self.list_categories() if c.name.casefold() == wanted), None)
+
+    def add_category(self, name: str, color: str = "blue") -> Category:
+        """Raises ValueError when a category with that name already exists."""
+        row = self.db.one("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM categories")
+        try:
+            cursor = self.db.execute(
+                "INSERT INTO categories (name, color, position, created_at) VALUES (?, ?, ?, ?)",
+                (name, color, row["next"] if row else 0, iso(now_utc())),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"There's already a category called {name!r}.") from exc
+        category = self.get_category(int(cursor.lastrowid))
+        assert category is not None
+        return category
+
+    def update_category(
+        self, category_id: int, *, name: str | None = None, color: str | None = None
+    ) -> Category:
+        if self.get_category(category_id) is None:
+            raise KeyError(category_id)
+        try:
+            if name is not None:
+                self.db.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
+            if color is not None:
+                self.db.execute(
+                    "UPDATE categories SET color = ? WHERE id = ?", (color, category_id)
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"There's already a category called {name!r}.") from exc
+        category = self.get_category(category_id)
+        assert category is not None
+        return category
+
+    def delete_category(self, category_id: int) -> bool:
+        """Remove a category; its notes stay, without a category."""
+        if not _valid_id(category_id):
+            return False
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE notes SET category_id = NULL WHERE category_id = ?", (category_id,)
+            )
+            return conn.execute("DELETE FROM categories WHERE id = ?", (category_id,)).rowcount > 0
+
+    def order_categories(self, ids: list[int]) -> list[Category]:
+        """Put categories in this order; any left out keep their place after them."""
+        known = [c.id for c in self.list_categories()]
+        order = [i for i in dict.fromkeys(ids) if i in known] + [i for i in known if i not in ids]
+        with self.db.transaction() as conn:
+            for position, category_id in enumerate(order):
+                conn.execute(
+                    "UPDATE categories SET position = ? WHERE id = ?", (position, category_id)
+                )
+        return self.list_categories()
 
     def note_by_client_id(self, client_id: str, since: datetime) -> Note | None:
         """A note a device already sent under this id (it retries when an answer is lost)."""
@@ -611,6 +688,7 @@ class Store:
             in_digest=bool(row["in_digest"]),
             briefing=row["briefing"],
             reply=row["reply"],
+            category_id=row["category_id"],
             meta=json.loads(row["meta"] or "{}"),
         )
 

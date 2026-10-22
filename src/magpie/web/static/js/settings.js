@@ -2,6 +2,8 @@
 // preferences (saved in this browser).
 
 import { api } from "./api.js";
+import { ACCENTS, aiControls, categoriesEditor, emailControls, learningControls, pushControls, refreshStatus } from "./controls.js";
+import "./welcome.js";
 import { deviceTimeZone, emit, local, saveLocal, snoozeLabel, state } from "./state.js";
 import { speechSupported, recordingSupported } from "./voice.js";
 import { ttsSupported } from "./speech.js";
@@ -10,25 +12,14 @@ import { append, clear, confirmDialog, copyText, debounce, h, icon, iconButton, 
 const dialog = () => document.getElementById("settings-dialog");
 const REPO = "https://github.com/Coder-ux-coder/magpie";
 
-// Magpie listens for English; this only picks the accent.
-const ACCENTS = [
-  ["", "Automatic"],
-  ["en-GB", "English (UK)"],
-  ["en-US", "English (US)"],
-  ["en-AU", "English (Australia)"],
-  ["en-CA", "English (Canada)"],
-  ["en-IE", "English (Ireland)"],
-  ["en-NZ", "English (New Zealand)"],
-  ["en-ZA", "English (South Africa)"],
-];
 const DAYS = [["", "Off"], ["mon", "Monday"], ["tue", "Tuesday"], ["wed", "Wednesday"], ["thu", "Thursday"], ["fri", "Friday"], ["sat", "Saturday"], ["sun", "Sunday"]];
 const CHANNEL_HELP = {
   telegram: "Create a bot with @BotFather, set MAGPIE_TELEGRAM_BOT_TOKEN and restart Magpie.",
-  webpush: "Turn on notifications for this browser below. On iPhone, add Magpie to your Home Screen first.",
   ntfy: "Install the ntfy app, pick a secret topic name and set MAGPIE_NTFY_TOPIC.",
-  email: "Set MAGPIE_SMTP_HOST, MAGPIE_SMTP_USERNAME, MAGPIE_SMTP_PASSWORD and MAGPIE_EMAIL_TO.",
   webhook: "Set MAGPIE_WEBHOOK_URL (Slack, Discord, or any URL that accepts JSON).",
 };
+
+export { refreshStatus };
 
 async function savePrefs(changes, message = "Saved.") {
   try {
@@ -79,54 +70,7 @@ function section(id, title, ...children) {
 
 // ---------------------------------------------------------------- sections
 
-function claudeKeyControls() {
-  const brain = state.status.brain;
-  if (brain.name !== "claude") {
-    return h("p", { class: "muted small" }, "Magpie is using its offline stand-in (MAGPIE_BRAIN=fake). Remove that setting on the server to use Claude.");
-  }
-  if (brain.key_source === "env") {
-    return brain.available ? null : h("p", { class: "error" }, "Anthropic rejected the key in ANTHROPIC_API_KEY. Fix it on the server and restart Magpie.");
-  }
-  const input = h("input", { type: "password", id: "claude-key", autocomplete: "off", spellcheck: "false", placeholder: brain.key_source ? "Paste a new key to replace it" : "sk-ant-…" });
-  const save = h("button", { type: "submit", class: "btn primary" }, "Save key");
-  const form = h("form", { class: "copy-field" }, input, save);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const key = input.value.trim();
-    if (!key) return;
-    save.disabled = true;
-    save.textContent = "Checking…";
-    try {
-      const result = await api("/api/claude/key", { method: "PUT", body: { key }, timeout: 60000 });
-      toast(result.warning || "Claude is connected. Waiting notes are being filed now.");
-      await refreshStatus();
-      openSettings("claude");
-    } catch (error) {
-      toast(error.message, { error: true });
-      save.disabled = false;
-      save.textContent = "Save key";
-    }
-  });
-  const remove = async () => {
-    const ok = await confirmDialog({ title: "Remove the API key?", message: "Claude stops filing new notes until you add a key again. Your notes stay.", confirm: "Remove", danger: true });
-    if (!ok) return;
-    try {
-      await api("/api/claude/key", { method: "DELETE" });
-      await refreshStatus();
-      openSettings("claude");
-    } catch (error) {
-      toast(error.message, { error: true });
-    }
-  };
-  return h("div", { class: "field" },
-    h("label", { for: "claude-key" }, brain.key_source ? "Replace your API key" : "Your Claude API key"),
-    form,
-    h("span", { class: "hint" }, "Get one at ", h("a", { href: "https://console.anthropic.com/settings/keys", target: "_blank", rel: "noopener" }, "console.anthropic.com"), ". It is checked with Anthropic, then kept on your Magpie server only."),
-    brain.key_source === "dashboard" ? h("div", {}, h("button", { type: "button", class: "btn small danger", onclick: remove }, "Remove key")) : null,
-  );
-}
-
-function claudeSection() {
+function aiSection() {
   const status = state.status;
   const prefs = state.prefs;
   const usage = status.brain.usage || {};
@@ -145,20 +89,27 @@ function claudeSection() {
     input.addEventListener("change", () => savePrefs({ proactivity: value }));
     return h("label", { class: "choice" }, input, h("span", {}, label, h("small", {}, description)));
   });
-  return section("claude", "Claude",
-    h("p", {},
-      h("span", { class: `status-dot${status.brain.available ? " on" : ""}`, "aria-hidden": "true" }),
-      status.brain.available ? `Connected: ${status.brain.model}` : "Not connected yet.",
-    ),
-    claudeKeyControls(),
+  const name = status.brain.label;
+  return section("ai", "AI",
+    aiControls({ onSaved: () => openSettings("ai") }),
     usage.requests ? h("p", { class: "muted small" }, `Since the server started: ${usage.requests} requests, ${(usage.input_tokens || 0).toLocaleString()} input and ${(usage.output_tokens || 0).toLocaleString()} output tokens.`) : null,
-    h("fieldset", {}, h("legend", {}, "When should Claude ping you?"), choices),
-    field("pref-about", "About you (helps Claude choose good times and context)", about),
-    field("pref-instructions", "Your rules for Claude", rules, "Standing instructions Claude follows when it files notes, writes digests and answers questions."),
-    toggle("pref-websearch", "Let Claude search the web for videos and articles you mention without a link", prefs.web_search, (on) => savePrefs({ web_search: on }), {
-      disabled: !status.web_search,
-      hint: status.web_search ? null : "Web search is turned off on the server (MAGPIE_WEB_SEARCH=false).",
-    }),
+    h("fieldset", {}, h("legend", {}, "When should Magpie remind you?"), choices),
+    field("pref-about", `About you (helps ${name} choose good times and context)`, about),
+    field("pref-instructions", "Your instructions", rules, `Standing instructions ${name} follows when it files notes, writes digests and answers questions.`),
+    h("div", { class: "field" }, h("span", { style: "font-weight:600" }, "Learning"), learningControls()),
+    status.brain.web_search
+      ? toggle("pref-websearch", "Let Claude search the web for videos and articles you mention without a link", prefs.web_search, (on) => savePrefs({ web_search: on }), {
+          disabled: !status.web_search,
+          hint: status.web_search ? null : "Web search is turned off on the server (MAGPIE_WEB_SEARCH=false).",
+        })
+      : null,
+  );
+}
+
+function categoriesSection() {
+  return section("categories", "Categories",
+    h("p", { class: "muted" }, "Your own categories, in your colours. The AI files notes into them, notes you write in a category's tab stay there, and you can drag notes onto a tab."),
+    categoriesEditor(),
   );
 }
 
@@ -187,6 +138,9 @@ function timeSection() {
   });
   return section("time", "Time",
     field("pref-tz", "Your time zone", zone, "Reminders and digests use this zone."),
+    toggle("local-followzone", "Follow this computer's time zone automatically", local.followDeviceZone !== false, (on) => saveLocal({ followDeviceZone: on }), {
+      hint: "When this computer's zone changes (you travel, or the clocks were wrong), Magpie switches to it.",
+    }),
     device !== prefs.timezone
       ? h("button", { type: "button", class: "btn small", onclick: async () => { await savePrefs({ timezone: device }, `Using ${device}.`); openSettings("time"); } }, `Use this device's zone (${device})`)
       : null,
@@ -235,7 +189,7 @@ function voiceSection() {
         })
       : null,
     ttsSupported
-      ? toggle("local-readaloud", "Read Claude's replies aloud", local.readAloud, (on) => saveLocal({ readAloud: on }))
+      ? toggle("local-readaloud", "Read replies aloud", local.readAloud, (on) => saveLocal({ readAloud: on }))
       : null,
   );
 }
@@ -246,8 +200,9 @@ function notificationsSection() {
   const rows = status.channels.map((channel) => {
     const extra = [];
     if (channel.name === "telegram") extra.push(telegramControls());
-    if (channel.name === "webpush") extra.push(pushControls());
-    if (!channel.configured && channel.name !== "webpush" && !(channel.name === "telegram" && status.telegram.configured)) {
+    if (channel.name === "webpush") extra.push(h("div", { style: "flex-basis:100%" }, pushControls({ onSaved: () => openSettings("notify") })));
+    if (channel.name === "email") extra.push(h("div", { style: "flex-basis:100%" }, emailControls({ onSaved: () => openSettings("notify") })));
+    if (!channel.configured && CHANNEL_HELP[channel.name] && !(channel.name === "telegram" && status.telegram.configured)) {
       extra.push(h("p", { class: "muted small", style: "flex-basis:100%;margin:0" }, CHANNEL_HELP[channel.name]));
     }
     const enabled = h("input", {
@@ -277,8 +232,8 @@ function notificationsSection() {
   const weeklyTime = h("input", { type: "time", id: "pref-weekly-time", value: prefs.weekly_review_time });
   weeklyTime.addEventListener("change", () => weeklyTime.value && savePrefs({ weekly_review_time: weeklyTime.value }));
 
-  return section("notify", "Notifications",
-    h("p", { class: "muted" }, "Reminders and digests go to every channel that is set up and switched on."),
+  return section("notify", "Reminders",
+    h("p", { class: "muted" }, "Reminders and digests go to every way that is set up and switched on: pop-ups on this computer, email for your phone, or both."),
     rows,
     field("pref-digest", "Daily digest at", digestTime, "Clear the time to turn the daily digest off."),
     h("div", { class: "row" },
@@ -355,64 +310,6 @@ function waitForPairing() {
       // keep waiting
     }
   }, 3000);
-}
-
-function urlBase64ToUint8Array(base64) {
-  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
-  const raw = atob((base64 + padding).replace(/-/g, "+").replace(/_/g, "/"));
-  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
-}
-
-function pushControls() {
-  const box = h("div", { style: "flex-basis:100%" });
-  const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-  if (!supported) {
-    box.append(h("p", { class: "muted small" }, "This browser doesn't support push. On iPhone and iPad, add Magpie to your Home Screen, then open it from there."));
-    return box;
-  }
-  const count = state.status.push.subscriptions;
-  const enable = h("button", { type: "button", class: "btn small primary" }, icon("bell"), "Notify this device");
-  enable.addEventListener("click", async () => {
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        toast("Notifications are blocked for this site. Allow them in your browser settings.", { error: true });
-        return;
-      }
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(state.status.push.public_key),
-      });
-      await api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() });
-      toast("This device will get reminders.");
-      await refreshStatus();
-      openSettings("notify");
-    } catch (error) {
-      toast(error.message || "Couldn't turn on notifications.", { error: true });
-    }
-  });
-  const disable = h("button", { type: "button", class: "btn small" }, "Stop on this device");
-  disable.addEventListener("click", async () => {
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
-      if (subscription) {
-        await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: subscription.endpoint } });
-        await subscription.unsubscribe();
-      }
-      toast("This device won't get push notifications.");
-      await refreshStatus();
-      openSettings("notify");
-    } catch (error) {
-      toast(error.message, { error: true });
-    }
-  });
-  box.append(
-    h("p", { class: "muted small" }, count ? `${count} device${count > 1 ? "s" : ""} subscribed.` : "No devices subscribed yet."),
-    h("div", { class: "row" }, enable, disable),
-  );
-  return box;
 }
 
 function displaySection() {
@@ -528,33 +425,30 @@ function dataSection() {
 }
 
 function accountSection() {
-  return section("account", "Account",
-    state.status.password_generated
-      ? h("p", { class: "banner" }, icon("alert"), h("span", {}, "You're using a generated password. Set MAGPIE_PASSWORD on the server to choose your own."))
+  const login = state.status.login !== false;
+  return section("account", "Privacy & account",
+    login
+      ? null
+      : h("p", { class: "small" }, "No password: Magpie opens straight away, but only on this computer. To use it from your phone or another device, run the setup again and choose a password."),
+    login && state.status.password_generated
+      ? h("p", { class: "banner" }, icon("alert"), h("span", {}, "You're using a generated password. Run the setup again to choose your own, or to stop using one."))
       : null,
     h("p", { class: "muted small" }, `Magpie ${state.status.version} · `, h("a", { href: REPO, target: "_blank", rel: "noopener" }, "Source code")),
-    h("button", {
-      type: "button", class: "btn", onclick: async () => {
-        try {
-          await api("/api/logout", { method: "POST" });
-          location.href = "/";
-        } catch (error) {
-          toast(`Couldn't log out: ${error.message}`, { error: true });
-        }
-      },
-    }, icon("logout"), "Log out"),
+    h("div", { class: "row" },
+      h("button", { type: "button", class: "btn", onclick: () => { dialog().close(); emit("welcome"); } }, icon("sparkles"), "Show the welcome screen again"),
+      login
+        ? h("button", {
+            type: "button", class: "btn", onclick: async () => {
+              try {
+                await api("/api/logout", { method: "POST" });
+                location.href = "/";
+              } catch (error) {
+                toast(`Couldn't log out: ${error.message}`, { error: true });
+              }
+            },
+          }, icon("logout"), "Log out")
+        : null),
   );
-}
-
-export async function refreshStatus() {
-  const status = await api("/api/status");
-  if (!status || typeof status !== "object" || !status.brain || !status.prefs) {
-    throw new Error("The server sent an unexpected answer. Is something else running at this address?");
-  }
-  state.status = status;
-  state.prefs = status.prefs;
-  emit("status", state.status);
-  return state.status;
 }
 
 export async function openSettings(focusSection) {
@@ -563,8 +457,8 @@ export async function openSettings(focusSection) {
   const scroll = el.querySelector(".sheet-body")?.scrollTop || 0;
   clear(el);
   const sections = [
-    ["claude", "Claude"], ["time", "Time"], ["voice", "Voice"], ["notify", "Notifications"],
-    ["display", "Display"], ["integrations", "Integrations"], ["data", "Data"], ["account", "Account"],
+    ["ai", "AI"], ["notify", "Reminders"], ["categories", "Categories"], ["voice", "Voice"], ["time", "Time"],
+    ["display", "Display"], ["integrations", "Integrations"], ["data", "Data"], ["account", "Privacy"],
   ];
   const bodyEl = h("div", { class: "sheet-body" },
     h("nav", { class: "settings-nav", "aria-label": "Settings sections" },
@@ -573,10 +467,11 @@ export async function openSettings(focusSection) {
         el.querySelector(`#settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
       } }, label)),
     ),
-    claudeSection(),
-    timeSection(),
-    voiceSection(),
+    aiSection(),
     notificationsSection(),
+    categoriesSection(),
+    voiceSection(),
+    timeSection(),
     displaySection(),
     h("div", { id: "integrations-slot" }, h("p", { class: "muted" }, "Loading integrations…")),
     dataSection(),
@@ -593,7 +488,8 @@ export async function openSettings(focusSection) {
     .then((node) => el.querySelector("#integrations-slot")?.replaceWith(node))
     .catch((error) => toast(error.message, { error: true }));
   if (focusSection) {
-    requestAnimationFrame(() => el.querySelector(`#settings-${focusSection}`)?.scrollIntoView({ block: "start" }));
+    const target = focusSection === "claude" ? "ai" : focusSection; // older links
+    requestAnimationFrame(() => el.querySelector(`#settings-${target}`)?.scrollIntoView({ block: "start" }));
   } else if (wasOpen) {
     bodyEl.scrollTop = scroll;
   } else {

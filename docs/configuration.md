@@ -10,7 +10,11 @@ Magpie has two kinds of settings:
 Empty values are treated as unset. [`.env.example`](../.env.example) lists everything with
 comments. You rarely need to edit `.env` by hand: the setup (`setup.cmd` on Windows,
 `sh setup.sh` on Mac and Linux, or `magpie setup`) asks for the few settings that matter and
-writes the file for you, and the Claude API key can also be pasted in the dashboard.
+writes the file for you. The AI, email, pop-ups and your categories are all set up in Magpie
+itself: the welcome screen walks a new user through them, and Settings has them all.
+
+Installed copies update themselves (see [Updates](#updates-docker)), so every new setting
+comes with a safe default and an existing `.env` keeps working unchanged.
 
 A mistyped value never stops Magpie quietly: an unknown time zone falls back to UTC with a
 warning in the log, and a value that can't be read at all (for example `MAGPIE_PORT=eighty`)
@@ -22,24 +26,37 @@ makes `magpie` exit with a message that names the variable.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | | Claude API key. You can paste it in **Settings → Claude** instead; a key set here always wins. Without one, notes are saved and filed once a key is added. |
-| `MAGPIE_PASSWORD` | generated | Dashboard password. If unset, one is generated, logged at start-up and shown by `magpie password`. |
-| `MAGPIE_TIMEZONE` | `UTC` | Default time zone (IANA name) for new installs. Change it later in Settings. |
+| `MAGPIE_LOGIN` | `true` | `false` turns the password off. Magpie then only answers on this computer (`localhost`), and the Docker setup publishes the port on `127.0.0.1` only. The setup chooses this when you press Enter at the password question. |
+| `MAGPIE_PASSWORD` | generated | Dashboard password (when `MAGPIE_LOGIN` is on). If unset, one is generated, logged at start-up and shown by `magpie password`. |
+| `MAGPIE_TIMEZONE` | `UTC` | Default time zone (IANA name) for new installs. The dashboard follows your computer's time zone after that (Settings → Time). |
 | `MAGPIE_BASE_URL` | | Public address, e.g. `https://notes.example.com`. Enables links and one-tap buttons in notifications, and secure cookies when it starts with `https://`. |
 | `MAGPIE_DATA_DIR` | `data` (`/data` in Docker) | Where the database lives. |
 | `MAGPIE_HOST` | `127.0.0.1` (`0.0.0.0` in Docker) | Address to listen on. |
 | `MAGPIE_PORT` | `8000` | Port to listen on. |
 | `MAGPIE_LOG_LEVEL` | `info` | `debug`, `info`, `warning` or `error`. |
 
-### Claude
+### AI
+
+Usually chosen in **Settings → AI** (or on the welcome screen): Claude, ChatGPT, Gemini,
+OpenRouter, Ollama on your own computer, any OpenAI-compatible service, or no AI at all.
+Keys pasted there are checked first, kept on your server and never shown again. Set these
+only to fix the choice on the server.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MAGPIE_MODEL` | `claude-opus-5-5` | Claude model for every task. `claude-sonnet-5-5` and `claude-haiku-5-5` cost less. |
+| `MAGPIE_BRAIN` | chosen in Magpie | Fixes the AI: `claude`, `openai`, `gemini`, `openrouter`, `ollama`, `compatible` (any OpenAI-compatible service), `basic` (no AI: simple rules file notes, and reviews are off) or `fake` (an offline stand-in for demos and tests). When set, Settings → AI shows it but can't change it. |
+| `ANTHROPIC_API_KEY` | | Claude API key. A key set here wins over one pasted in Magpie. Without any key, notes are saved and filed once one is added. |
+| `MAGPIE_AI_API_KEY` | | API key for the service `MAGPIE_BRAIN` names, when it isn't Claude. |
+| `MAGPIE_AI_BASE_URL` | the service's | Its OpenAI-compatible address, ending in `/v1`. Needed for `compatible`; Ollama defaults to `http://localhost:11434/v1` (`http://host.docker.internal:11434/v1` in Docker). |
+| `MAGPIE_MODEL` | `claude-haiku-5-5` for Claude | The model. Haiku is fast and low-cost; `claude-sonnet-5-5` and `claude-opus-5-5` are more capable. Other services start with their own default (for example `gpt-5-mini`). |
+
+The rest apply to Claude only:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
 | `MAGPIE_EFFORT` | per task | Force one effort level (`low` to `max`) for all calls. By default filing and digests use `low`; reviews, Ask and weekly reviews use `medium`. |
-| `MAGPIE_WEB_SEARCH` | `true` | Allow Claude's web search to find things you mention without a link. Can also be switched off per user in Settings. |
-| `MAGPIE_FALLBACKS` | `true` | If Claude declines a request, retry it on Anthropic's recommended fallback model. |
-| `MAGPIE_BRAIN` | `claude` | `fake` swaps Claude for a simple offline stand-in (demos, development, tests). |
+| `MAGPIE_WEB_SEARCH` | `true` | Allow Claude's web search to find things you mention without a link. Can also be switched off in Settings. |
+| `MAGPIE_FALLBACKS` | `true` | If Claude declines a request, retry it on Anthropic's recommended fallback model (models that have one). |
 | `ANTHROPIC_BASE_URL` | | Read by the Anthropic SDK, for gateways and proxies. |
 
 ### Speech-to-text on the server
@@ -55,6 +72,11 @@ Used for Telegram voice messages, browsers without speech recognition, and the
 | `MAGPIE_STT_LANGUAGE` | `en` | Language of the recordings (ISO 639-1). Magpie expects English. |
 
 ### Notifications
+
+Pop-ups and email need no server settings: turn pop-ups on in **Settings → Reminders** on
+each computer or phone, and set up email there with your address and an app password
+(Gmail, Outlook, Yahoo and iCloud are filled in for you). The `MAGPIE_SMTP_*` settings below
+are for other mail servers, and win over the dashboard when set.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -84,14 +106,37 @@ Used for Telegram voice messages, browsers without speech recognition, and the
 
 Generated secrets are stored in the database, so they survive restarts.
 
+### Updates (Docker)
+
+Read by `docker-compose.yml`, not by Magpie itself. A small helper container checks for a
+new image every hour, restarts Magpie on it, and goes back to the previous version if the
+new one doesn't start. Your notes live in the `magpie-data` volume and are never touched.
+Open dashboards notice the update and load the new version.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MAGPIE_AUTO_UPDATE` | `true` | `false` stops automatic updates (update with `docker compose pull && docker compose up -d`). |
+| `MAGPIE_VERSION` | `latest` | Stay on one version: every build is also tagged `sha-<commit>`, and releases `0.3.0`, `0.3`. |
+| `MAGPIE_IMAGE` | `ghcr.io/coder-ux-coder/magpie` | Where the image comes from. |
+| `MAGPIE_UPDATE_CHECK_EVERY` | `3600` | Seconds between checks. |
+| `MAGPIE_UPDATE_FIRST_CHECK_AFTER` | `300` | Seconds after start-up before the first check. |
+| `MAGPIE_BIND` | `127.0.0.1` | Who can open Magpie: `127.0.0.1` is this computer only (fine without a password); `0.0.0.0` lets other devices on your network in (set a password first). |
+| `MAGPIE_HOST_PORT` | `8000` | The port on this computer, if 8000 is taken. |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker's socket, for the update helper (Podman and rootless Docker use another path). |
+
 ## Preferences (dashboard)
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| Claude API key | | Paste it here instead of setting `ANTHROPIC_API_KEY`. Magpie checks it with Anthropic, keeps it on your server and never shows it again. |
+| Welcome screen | shown once | Choose an AI, reminders, your command word and categories. Opens again from Settings → Privacy & account. |
+| AI | Claude Haiku 5.5 | Which AI files your notes, its model, and its key or address. *No AI* files notes with simple rules. |
+| Email | off | Your address and an app password; Magpie checks the login before saving and sends a test. Every reminder arrives as an email such as “⏰ Call James · due today 10:00 AM”. |
+| Pop-ups | off | Per computer or phone: a notification for every reminder, with Done and Snooze buttons, even when Magpie's window is in the background. |
+| Categories | none | Your own, each with a colour, in the order you choose (drag, or the arrows). The AI files notes into them; a note written in a category's tab stays there; drag a note onto a tab to move it. |
+| Learn from my changes | on | When you move a note to another category or change its kind, Magpie remembers and files similar notes your way (the last 40 changes; you can forget any of them). |
 | Proactivity | Balanced | *Quiet*: only reminders you ask for. *Balanced*: also before clear deadlines and appointments. *Proactive*: suggests reminders for anything actionable. |
-| About you | | Free text Claude reads with every note: working hours, names, family. Up to 2,000 characters. |
-| Your rules for Claude | | Standing instructions Claude follows when filing notes, writing digests and answering questions: “tag shop notes #shop”, “remind me 30 minutes before meetings”, “use British spelling”. Up to 2,000 characters. |
+| About you | | Free text the AI reads with every note: working hours, names, family. Up to 2,000 characters. |
+| Your instructions | | Standing instructions the AI follows when filing notes, writing digests and answering questions: “tag shop notes #shop”, “remind me 30 minutes before meetings”, “use British spelling”. Up to 2,000 characters. |
 | Web search | on | Find videos and articles mentioned without a link. |
 | Time zone | `MAGPIE_TIMEZONE`, else your browser's | Used for every reminder and digest. On a fresh install the dashboard picks up your device's time zone the first time you open it. |
 | Your morning | 09:00 | What “tomorrow morning” and the Tomorrow button mean. |
@@ -103,5 +148,12 @@ Generated secrets are stored in the database, so they survive restarts.
 | Daily digest | 08:00 | Empty turns it off. |
 | Weekly review | Sunday 18:00 | Day *Off* turns it off. |
 
-Display options (theme, text size, contrast, motion, read-aloud, checking voice notes
-before saving) are saved per device in the browser.
+Some settings belong to each device and are saved in its browser:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Start listening when Magpie opens | on | Listen for the command word as soon as Magpie opens, once you've allowed the microphone (the voice bar asks once). |
+| Listen for the command word | on when allowed | Hands-free: say the command word to start a note. |
+| Let me check voice notes before saving | off | A voice note waits in the voice bar until you press Save. |
+| Follow this computer's time zone | on | A computer (not a phone) switches Magpie's time zone to its own when that changes, so reminders keep matching your clock. |
+| Theme, text size, contrast, motion, read-aloud | system | Display options. |

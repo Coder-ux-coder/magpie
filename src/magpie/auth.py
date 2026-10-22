@@ -28,9 +28,12 @@ class Secrets:
         self.secret_key = settings.secret_key or self._get_or_create(
             "secret_key", lambda: secrets.token_urlsafe(32)
         )
-        self.password_generated = not settings.password
-        self.password = settings.password or self._get_or_create(
-            "generated_password", lambda: secrets.token_urlsafe(9)
+        # Without a login (MAGPIE_LOGIN=false) there is no password to generate.
+        self.password_generated = settings.login and not settings.password
+        self.password = settings.password or (
+            self._get_or_create("generated_password", lambda: secrets.token_urlsafe(9))
+            if settings.login
+            else ""
         )
         self.api_token_from_env = bool(settings.api_token)
         self.api_token = settings.api_token or self._get_or_create(

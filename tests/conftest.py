@@ -91,6 +91,7 @@ def make_triage(**overrides) -> Triage:
         "summary": "",
         "kind": "task",
         "tags": ["work"],
+        "category": "",
         "reminders": [],
         "ping": "none",
         "ping_reason": "",

@@ -474,29 +474,102 @@ legend { font-weight: 700; margin-bottom: 0.5rem; }
   .hide-mobile { display: inline-grid; }
 }
 
-/* ---------------------------------------------------------------- capture */
+/* -------------------------------------------------------------- voice bar */
+/* Docked at the bottom of every view, like a dictation tool. It can also fill a
+   floating Picture-in-Picture window (body.pip). Script sets --voicebar-h so the
+   notes and the toasts stay clear of it (see the end of this file). */
 
-.capture {
+.voicebar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  padding: 0.4rem max(1rem, env(safe-area-inset-right)) calc(0.6rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 1rem;
-  display: grid;
-  gap: 0.75rem;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 24px rgb(20 24 40 / 8%);
 }
-.capture-voice {
+.voicebar-inner {
+  max-width: 62rem;
+  margin: 0 auto;
+  display: grid;
+  gap: 0.25rem;
+}
+.voicebar-top {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
+  min-height: 2.75rem;
 }
-.voice-meta { display: grid; gap: 0.1rem; min-width: 0; }
-.voice-status { margin: 0; font-weight: 600; }
+.voice-status {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.voicebar[data-state="standby"] .voice-status { color: var(--teal); }
+.voicebar[data-state="recording"] .voice-status { color: var(--danger); }
+.voicebar-tools { display: flex; align-items: center; gap: 0.1rem; }
+.voicebar-main {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+.voicebar-field {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.voicebar-field:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 35%, transparent);
+}
+.voicebar[data-state="recording"] .voicebar-field { border-color: var(--danger); }
+.voicebar-field textarea {
+  border: 0;
+  background: transparent;
+  min-height: 3.25rem;
+  /* About five lines, then it scrolls. */
+  max-height: 8.5rem;
+  max-height: calc(5lh + 1.2rem);
+  resize: none;
+  overflow-y: auto;
+}
+.voicebar-field textarea:focus-visible { outline: none; } /* the field shows focus */
+.voice-interim {
+  margin: 0;
+  padding: 0 0.75rem 0.55rem;
+  color: var(--muted);
+  font-style: italic;
+  overflow-wrap: anywhere;
+  max-height: 4.5em;
+  max-height: 3lh;
+  overflow: hidden;
+}
+.voicebar-actions { display: flex; align-items: flex-end; gap: 0.4rem; }
+.voicebar-actions .btn { min-height: 3.25rem; }
+.btn.stop {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--accent-text);
+}
+.btn.stop:hover { background: color-mix(in srgb, var(--danger) 85%, var(--text)); }
 
 .mic {
   position: relative;
-  width: 4.5rem;
-  height: 4.5rem;
+  width: 3.25rem;
+  height: 3.25rem;
   border-radius: 50%;
   border: 0;
   flex: none;
@@ -504,28 +577,28 @@ legend { font-weight: 700; margin-bottom: 0.5rem; }
   place-items: center;
   color: #fff;
   background: linear-gradient(145deg, #3b4fd0, #0b7f81);
-  box-shadow: 0 6px 18px rgb(47 63 168 / 35%);
+  box-shadow: 0 4px 14px rgb(47 63 168 / 35%);
   cursor: pointer;
   transition: transform 0.12s, box-shadow 0.2s;
 }
-.mic:hover { transform: scale(1.03); }
-.mic .icon { width: 2rem; height: 2rem; }
+.mic:hover { transform: scale(1.04); }
+.mic .icon { width: 1.5rem; height: 1.5rem; }
 .mic .stop-icon { display: none; }
 .mic::after {
   content: "";
   position: absolute;
-  inset: -6px;
+  inset: -5px;
   border-radius: 50%;
   border: 3px solid transparent;
 }
 .mic[data-state="standby"]::after {
-  border-color: color-mix(in srgb, var(--teal) 70%, transparent);
+  border-color: color-mix(in srgb, var(--teal) 75%, transparent);
   border-style: dashed;
   animation: spin 6s linear infinite;
 }
 .mic[data-state="recording"] {
   background: linear-gradient(145deg, #e0364a, #b4232f);
-  box-shadow: 0 6px 22px rgb(180 35 47 / 45%);
+  box-shadow: 0 4px 18px rgb(180 35 47 / 45%);
 }
 .mic[data-state="recording"] .mic-icon { display: none; }
 .mic[data-state="recording"] .stop-icon { display: block; }
@@ -544,25 +617,99 @@ legend { font-weight: 700; margin-bottom: 0.5rem; }
   to { transform: rotate(360deg); }
 }
 
-.transcript {
-  min-height: 3rem;
-  padding: 0.75rem;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  font-size: 1.05rem;
+/* Phones and the pop-out window: Cancel moves up beside the status as an icon,
+   and while recording Notes off stands in for Save, so the text box keeps its room. */
+@media (max-width: 40rem) {
+  .voicebar-inner {
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    grid-template-areas:
+      "status status extra cancel tools"
+      "mic field field primary primary";
+    align-items: end;
+    column-gap: 0.45rem;
+  }
+  .voicebar-top,
+  .voicebar-main,
+  .voicebar-actions { display: contents; }
+  .voice-status { grid-area: status; align-self: center; }
+  #voice-allow,
+  #voice-undo { grid-area: extra; align-self: center; }
+  .voicebar-tools { grid-area: tools; align-self: center; }
+  #mic { grid-area: mic; }
+  .voicebar-field { grid-area: field; }
+  #voice-cancel {
+    grid-area: cancel;
+    align-self: center;
+    width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+  }
+  #voice-cancel .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #voice-off,
+  #voice-save { grid-area: primary; padding-inline: 0.9rem; }
+  .voicebar[data-state="recording"] #voice-save { display: none; }
 }
-.transcript .interim { color: var(--muted); }
 
-.compose {
+.voice-popover {
+  position: absolute;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: calc(100% + 0.5rem);
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: min(75vh, 34rem);
+  overflow: auto;
+  display: grid;
+  gap: 0.4rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.voice-popover h3 { font-size: 1rem; margin-bottom: 0.25rem; }
+.voice-popover .linklike { min-height: 2.75rem; }
+.voice-popover .btn.small { min-height: 2.75rem; }
+.voice-popover .field { margin-bottom: 0.25rem; }
+.voice-popover input[type="number"] {
+  width: 6rem;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+/* The bar on its own in the pop-out window. */
+body.pip { background: var(--surface); }
+body.pip .voicebar {
+  position: static;
+  border: 0;
+  box-shadow: none;
+  padding: 0.35rem 0.6rem;
+}
+body.pip .voicebar-inner { max-width: none; }
+body.pip .voicebar-field textarea { max-height: 4.2rem; max-height: calc(2lh + 1.2rem); }
+
+/* What stays in Magpie while the bar floats. */
+.voicebar-placeholder {
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  z-index: 20;
   display: flex;
+  align-items: center;
   gap: 0.5rem;
-  align-items: flex-end;
+  padding: 0.35rem 0.4rem 0.35rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
 }
-.compose textarea {
-  flex: 1;
-  max-height: 14rem;
-  resize: none;
-}
+.voicebar-placeholder p { margin: 0; font-weight: 600; font-size: 0.9375rem; }
 
 /* ------------------------------------------------------------------- tabs */
 
@@ -592,7 +739,7 @@ legend { font-weight: 700; margin-bottom: 0.5rem; }
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   padding: 0.35rem 0.85rem;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -1016,11 +1163,6 @@ pre.snippet-block {
   transition-duration: 0.001ms !important;
 }
 
-@media (min-width: 48rem) {
-  .capture { padding: 1.25rem; }
-  .mic { width: 5rem; height: 5rem; }
-}
-
 /* Touch screens: every control at least 44 px tall. */
 @media (pointer: coarse) {
   .card-actions .icon-btn { width: 2.75rem; height: 2.75rem; }
@@ -1031,3 +1173,183 @@ pre.snippet-block {
   .segmented button { min-height: 2.75rem; }
   details > summary { padding-block: 0.6rem; }
 }
+
+/* ------------------------------------------------------ voice bar spacing */
+
+/* Keep the last note and the toasts above the bar. */
+.app { padding-bottom: calc(var(--voicebar-h, 7.5rem) + 1.5rem); }
+.toasts { bottom: calc(var(--voicebar-h, 7.5rem) + 0.75rem); }
+
+/* ------------------------------------------------------------------------
+   Categories, AI and reminder setup, learning and the welcome screen
+   ------------------------------------------------------------------------ */
+
+:root {
+  --cat-red: #b8322a;
+  --cat-orange: #a84a00;
+  --cat-amber: #8a5c00;
+  --cat-green: #1f7a3d;
+  --cat-teal: #0b7579;
+  --cat-blue: #1f5fbf;
+  --cat-indigo: #3b44b0;
+  --cat-purple: #7a3fc4;
+  --cat-pink: #ad2d6b;
+  --cat-grey: #5b6577;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --cat-red: #ff8a80;
+    --cat-orange: #ffab70;
+    --cat-amber: #ffd166;
+    --cat-green: #7ee2a3;
+    --cat-teal: #5fd8cd;
+    --cat-blue: #8ab4ff;
+    --cat-indigo: #a5adff;
+    --cat-purple: #c9a7ff;
+    --cat-pink: #ff9ccc;
+    --cat-grey: #b6c0d4;
+  }
+}
+:root[data-theme="dark"] {
+  --cat-red: #ff8a80;
+  --cat-orange: #ffab70;
+  --cat-amber: #ffd166;
+  --cat-green: #7ee2a3;
+  --cat-teal: #5fd8cd;
+  --cat-blue: #8ab4ff;
+  --cat-indigo: #a5adff;
+  --cat-purple: #c9a7ff;
+  --cat-pink: #ff9ccc;
+  --cat-grey: #b6c0d4;
+}
+.swatch-red { --swatch: var(--cat-red); }
+.swatch-orange { --swatch: var(--cat-orange); }
+.swatch-amber { --swatch: var(--cat-amber); }
+.swatch-green { --swatch: var(--cat-green); }
+.swatch-teal { --swatch: var(--cat-teal); }
+.swatch-blue { --swatch: var(--cat-blue); }
+.swatch-indigo { --swatch: var(--cat-indigo); }
+.swatch-purple { --swatch: var(--cat-purple); }
+.swatch-pink { --swatch: var(--cat-pink); }
+.swatch-grey { --swatch: var(--cat-grey); }
+
+.chip.category {
+  color: var(--swatch);
+  background: color-mix(in srgb, var(--swatch) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--swatch) 35%, transparent);
+}
+.chip.category::before {
+  content: "";
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--swatch);
+  flex: none;
+}
+.note-card.in-category,
+.note-card.in-category:hover { border-left-color: var(--swatch); }
+.note-card.dragging { opacity: 0.5; }
+
+.tab .swatch-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--swatch);
+  flex: none;
+}
+.tab.category[aria-current="page"] {
+  background: var(--swatch);
+  border-color: var(--swatch);
+  color: var(--surface);
+}
+.tab.category[aria-current="page"] .swatch-dot { background: var(--surface); }
+body.dragging-note .tab.drop-target { outline: 2px dashed color-mix(in srgb, var(--swatch, var(--accent)) 60%, transparent); outline-offset: 2px; }
+.tab.drop-target.drop-here { outline: 3px solid var(--swatch, var(--accent)); outline-offset: 2px; }
+.tab.add-category { border-style: dashed; color: var(--muted); font: inherit; font-weight: 600; font-size: 0.9375rem; cursor: pointer; min-width: 2.75rem; justify-content: center; }
+
+.category-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+  display: grid;
+  gap: 0.4rem;
+}
+.category-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.category-row input[type="text"] { flex: 1 1 9rem; min-width: 0; }
+.category-row .count { white-space: nowrap; }
+.category-row.dragging { opacity: 0.5; }
+.drag-handle { cursor: grab; color: var(--muted); padding: 0 0.25rem; user-select: none; letter-spacing: -0.15em; }
+@media (pointer: coarse) { .drag-handle { display: none; } }
+.color-select { border-left: 0.9rem solid var(--swatch, var(--border)); max-width: 9rem; }
+.copy-field.add-category { flex-wrap: wrap; }
+.add-category input[type="text"] { flex: 1 1 12rem; min-width: 0; font-family: inherit; font-size: inherit; }
+button.chip.chip-button {
+  color: var(--swatch);
+  border-color: color-mix(in srgb, var(--swatch) 40%, var(--border));
+  background: var(--surface);
+}
+.suggestions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+.ai-status { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; margin: 0 0 0.75rem; }
+.ai-form,
+.email-form { display: grid; gap: 0.15rem; }
+.ai-form .copy-field input { flex: 1 1 12rem; min-width: 0; }
+.email-form details { margin-bottom: 0.75rem; }
+.email-form details summary { cursor: pointer; color: var(--muted); font-weight: 600; min-height: 2.75rem; display: flex; align-items: center; }
+
+.learning { display: grid; gap: 0.5rem; }
+.lessons { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
+.lessons li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+.lessons li span { min-width: 0; }
+
+.sheet-head .title-block:has(.title-edit) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.sheet-head .title-block:has(.title-edit) .kind { grid-column: 1 / -1; }
+#note-title-input { width: 100%; font-size: 1.125rem; font-weight: 700; }
+
+dialog.welcome { width: min(100% - 1.5rem, 44rem); }
+.welcome .eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.welcome h2:focus { outline: none; }
+.welcome .lead { font-size: 1.125rem; margin: 0; }
+.welcome-points { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
+.welcome-points li { display: flex; gap: 0.6rem; align-items: flex-start; }
+.welcome-points .icon { flex: none; width: 1.25rem; height: 1.25rem; margin-top: 0.15rem; color: var(--accent); }
+.welcome-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.welcome-card h3 { display: flex; gap: 0.5rem; align-items: center; margin: 0; font-size: 1rem; }
+.welcome-card p { margin: 0; }
+.welcome .sheet-foot { align-items: center; }
+.steps { display: flex; gap: 0.35rem; list-style: none; padding: 0; margin: 0 auto 0 0; align-items: center; }
+.steps li { width: 0.55rem; height: 0.55rem; border-radius: 999px; background: var(--border); }
+.steps li.done { background: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.steps li.current { width: 1.4rem; background: var(--accent); }
+:root[data-contrast="high"] .steps li { border: 1px solid currentcolor; }

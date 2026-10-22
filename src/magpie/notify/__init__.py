@@ -32,6 +32,7 @@ class Notification:
     # Signed one-click action URLs, e.g. {"done": ..., "snooze": ..., "tomorrow": ...}
     actions: dict[str, str] = field(default_factory=dict)
     snooze_minutes: int = 60
+    due: str = ""  # when a reminder is due, in the user's words: "today 10:00 AM"
 
     @property
     def text(self) -> str:

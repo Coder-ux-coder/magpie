@@ -2,10 +2,10 @@
 
 import { api, createNote, flushOutbox, onUnauthorized, outbox } from "./api.js";
 import { noteActions } from "./actions.js";
-import { setupCapture, startVoiceFromShortcut, stopVoice, toggleHandsFree, toggleMic } from "./capture.js";
+import { captureBusy, composeArea, focusCompose, setNoteContext, setupCapture, startVoiceFromShortcut, stopVoice, toggleHandsFree, toggleMic } from "./capture.js";
 import { closeNote, openNote } from "./note-dialog.js";
 import { openSettings, refreshStatus } from "./settings.js";
-import { applyLocal, deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
+import { aiName, applyLocal, categoryOf, deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
 import { clear, copyText, debounce, h, icon, iconButton, toast } from "./ui.js";
 import { detachList, renderAsk, renderDigests, renderNotes, renderScheduled, visibleNotes } from "./views.js";
 
@@ -40,6 +40,8 @@ let counts = {};
 let currentView = "inbox";
 let started = false;
 let pendingShare = null; // also kept here in case session storage is blocked
+let loadedBuild = ""; // the server version this page came from
+let updateReady = false;
 
 // Session storage can throw (private windows, blocked site data).
 function sessionGet(key) { try { return sessionStorage.getItem(key); } catch { return null; } }
@@ -190,7 +192,7 @@ function finishShare(shared) {
       $("share-title").textContent = result.queued ? "Saved on this device" : "Saved";
       status.textContent = result.queued
         ? "Magpie can't be reached right now. It will sync when you open Magpie again."
-        : "Claude is filing it and will review any link.";
+        : "Magpie is filing it and will review any link.";
       input.hidden = true;
       $("share-save").hidden = true;
       $("share-cancel").textContent = "Open Magpie";
@@ -225,8 +227,11 @@ async function startApp() {
     return;
   }
   started = true;
+  if (Array.isArray(state.status.categories)) state.categories = state.status.categories;
   $("version").textContent = state.status.version;
+  loadedBuild = buildOf(state.status);
   await adoptDeviceTimeZone();
+  setNoteContext(noteContext);
   setupCapture();
   setupSearch();
   setupKeyboard();
@@ -237,8 +242,15 @@ async function startApp() {
     counts = next || {};
     renderTabs();
   });
-  on("status", () => renderBanners());
+  on("status", (status) => {
+    if (Array.isArray(status?.categories)) state.categories = status.categories;
+    if (loadedBuild && buildOf(status) !== loadedBuild) updateReady = true;
+    renderBanners();
+    renderTabs();
+  });
   on("prefs", () => renderBanners());
+  on("categories", () => renderTabs());
+  on("categories-changed", refreshCategories);
   on("refresh", () => renderView());
   on("reminders-changed", () => {
     if (currentView === "scheduled" && !state.q) renderView();
@@ -250,8 +262,9 @@ async function startApp() {
   });
   window.addEventListener("hashchange", route);
   window.addEventListener("online", syncOutbox);
-  document.addEventListener("visibilitychange", () => !document.hidden && quietRefresh());
+  document.addEventListener("visibilitychange", () => (document.hidden ? reloadIfUpdated() : quietRefresh()));
   setInterval(quietRefresh, 30000);
+  setInterval(checkForUpdate, 5 * 60000);
   counts = state.status.counts;
   renderBanners();
   route();
@@ -263,17 +276,45 @@ async function startApp() {
   }
 }
 
-// On a fresh install nobody has chosen a time zone yet: use this device's, once.
+// Reminders follow the computer's clock. On a fresh install any device sets the time
+// zone once; after that a computer opening Magpie updates it when its zone changed
+// (travel, a new machine). Phones and tablets only get the banner below, so a phone
+// in another zone can't keep switching it back and forth.
 async function adoptDeviceTimeZone() {
   const device = deviceTimeZone();
-  if (!state.status.timezone_unset || device === state.prefs.timezone) return;
+  if (device === state.prefs.timezone) return;
+  const computer = window.matchMedia?.("(pointer: fine)").matches && !/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+  // "UTC" and "Etc/…" usually mean a device that doesn't know where it is.
+  const real = device.includes("/") && !device.startsWith("Etc/");
+  if (!state.status.timezone_unset && !(local.followDeviceZone !== false && computer && real)) return;
   try {
     state.prefs = await api("/api/prefs", { method: "PUT", body: { timezone: device } });
     state.status.timezone_unset = false;
-    toast(`Reminders use your time zone, ${device.replaceAll("_", " ")}. Change it in Settings.`);
+    emit("prefs", state.prefs);
+    toast(`Time zone set to ${device.replaceAll("_", " ")} from this ${computer ? "computer" : "device"}. Change it in Settings → Time.`);
   } catch {
     // The banner below still offers the switch.
   }
+}
+
+// Magpie updates itself on the server. An open window notices and loads the new
+// version: by itself while nobody is looking at it, otherwise from a banner.
+function buildOf(status) {
+  return `${status?.version || ""}+${status?.build || ""}`;
+}
+
+async function checkForUpdate() {
+  if ($("app").hidden) return;
+  try {
+    await refreshStatus();
+  } catch {
+    return; // restarting for the update, or offline: try again later
+  }
+  reloadIfUpdated();
+}
+
+function reloadIfUpdated() {
+  if (updateReady && document.hidden && !captureBusy() && !outbox().length) location.reload();
 }
 
 async function syncOutbox() {
@@ -285,7 +326,7 @@ async function syncOutbox() {
   }
   for (const item of rejected) {
     // Never drop a note silently: give it back to the user to fix or copy.
-    const area = $("compose-text");
+    const area = composeArea();
     if (area && !area.value.trim()) {
       area.value = item.text;
       toast(`A note saved offline couldn't be filed (${item.reason}). It's back in the text box.`, { error: true, timeout: 15000 });
@@ -305,6 +346,7 @@ function parseHash() {
   if (first === "note" && Number.isInteger(id) && id > 0) return { view: currentView, note: id };
   if (first === "settings") return { view: currentView, settings: true };
   if (first === "kind" && VIEWS.some((v) => v.hash === `kind/${second}`)) return { view: `kind/${second}` };
+  if (first === "category" && Number.isInteger(id) && id > 0) return { view: `category/${id}` };
   if (TITLES[first]) return { view: first };
   return { view: "inbox" };
 }
@@ -339,22 +381,93 @@ function viewInfo(view) {
   return VIEWS.find((v) => v.hash === view) || VIEWS[0];
 }
 
+// ------------------------------------------------- categories and dragging
+
+const NOTE_TYPE = "application/x-magpie-note";
+
+// A tab you can drop a dragged note on: a category, Done or Archive.
+function acceptNotes(target, drop) {
+  target.classList.add("drop-target");
+  target.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer?.types.includes(NOTE_TYPE)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    target.classList.add("drop-here");
+  });
+  target.addEventListener("dragleave", () => target.classList.remove("drop-here"));
+  target.addEventListener("drop", (event) => {
+    target.classList.remove("drop-here");
+    const id = Number(event.dataTransfer?.getData(NOTE_TYPE));
+    const note = visibleNotes().find((n) => n.id === id);
+    if (!note) return;
+    event.preventDefault();
+    drop(note);
+  });
+}
+
+function dropOn(view) {
+  if (view.hash === "done") return (note) => note.status !== "done" && noteActions.toggleDone(note);
+  if (view.hash === "archived") return (note) => note.status !== "archived" && noteActions.toggleArchive(note);
+  return null;
+}
+
+let categoriesRequest = null;
+function refreshCategories() {
+  // Several changes in a row (a drag, then an undo) need only one fetch.
+  categoriesRequest ||= api("/api/categories")
+    .then((data) => {
+      state.categories = data.categories;
+      renderTabs();
+      if (currentView.startsWith("category/") && !categoryOf(Number(currentView.split("/")[1]))) location.hash = "#/inbox";
+    })
+    .catch(() => {})
+    .finally(() => { categoriesRequest = null; });
+  return categoriesRequest;
+}
+
+// Where a new note was written, so it remembers the tab (and stays in its category).
+function noteContext() {
+  if (state.q) return { captured_in: "Search" };
+  if (currentView.startsWith("category/")) {
+    const category = categoryOf(Number(currentView.split("/")[1]));
+    return category ? { category_id: category.id, captured_in: category.name } : {};
+  }
+  return { captured_in: viewInfo(currentView).label };
+}
+
+function tab(hash, content, { count, className = "", drop = null } = {}) {
+  const active = !state.q && hash === currentView;
+  const link = h("a", { class: `tab ${className}`.trim(), href: `#/${hash}`, "aria-current": active ? "page" : null },
+    content,
+    count ? h("span", { class: "count" }, h("span", { class: "sr-only" }, ", "), String(count)) : null);
+  if (drop) acceptNotes(link, drop);
+  return h("li", {}, link);
+}
+
 function renderTabs() {
   const list = $("view-tabs");
   clear(list);
+  const categories = state.categories || [];
   for (const view of VIEWS) {
-    const active = !state.q && view.hash === currentView;
     const count = view.count ? counts[view.count] : null;
-    if (view.hash.startsWith("kind/") && !count && !active) continue;
-    list.append(
-      h("li", {},
-        h("a", { class: "tab", href: `#/${view.hash}`, "aria-current": active ? "page" : null },
-          icon(view.icon),
-          view.label,
-          count ? h("span", { class: "count" }, h("span", { class: "sr-only" }, ", "), String(count)) : null,
-        ),
-      ),
-    );
+    if (view.hash.startsWith("kind/") && !count && view.hash !== currentView) continue;
+    list.append(tab(view.hash, [icon(view.icon), view.label], { count, drop: dropOn(view) }));
+    if (view.hash !== "inbox") continue;
+    // Your own categories come straight after the inbox, in your order and colours.
+    for (const category of categories) {
+      list.append(tab(`category/${category.id}`, [h("span", { class: "swatch-dot", "aria-hidden": "true" }), h("span", { dir: "auto" }, category.name)], {
+        count: category.count,
+        className: `category swatch-${category.color}`,
+        drop: (note) => noteActions.moveTo(note, category),
+      }));
+    }
+    list.append(h("li", {}, h("button", {
+      type: "button",
+      class: "tab add-category",
+      title: "Add a category",
+      "aria-label": categories.length ? "Add a category" : null,
+      onclick: () => openSettings("categories"),
+    }, icon("plus"), categories.length ? null : "Add a category")));
   }
   // Scroll the tab strip sideways only: scrollIntoView() would also scroll the page.
   const active = list.querySelector('[aria-current="page"]');
@@ -401,6 +514,18 @@ async function renderView() {
       const kind = view.split("/")[1];
       title.textContent = viewInfo(view).label;
       await renderNotes(container, { view: "kind", kind }, "", current);
+    } else if (view.startsWith("category/")) {
+      const id = Number(view.split("/")[1]);
+      title.textContent = categoryOf(id)?.name || "Category";
+      await renderNotes(container, { view: "category", category: id }, "", current);
+      if (!current()) return;
+      const category = categoryOf(id);
+      if (!category) {
+        toast("That category isn't there any more.");
+        location.hash = "#/inbox";
+        return;
+      }
+      title.textContent = category.name;
     } else {
       title.textContent = TITLES[view] || "Inbox";
       await renderNotes(container, { view }, "", current);
@@ -468,12 +593,13 @@ function renderBanners() {
   const status = state.status;
   if (!status) return;
   if (!status.brain.available) {
-    const fromEnv = status.brain.key_source === "env";
+    const name = aiName();
+    const fixed = status.brain.locked || status.brain.key_source === "env";
     box.append(h("div", { class: "banner" }, icon("alert"),
-      h("p", {}, fromEnv
-        ? "Anthropic rejected the API key set on the server (ANTHROPIC_API_KEY). Notes are saved and will be filed once it's fixed."
-        : "Claude isn't connected yet. Your notes are saved and will be filed as soon as you add an API key."),
-      fromEnv ? null : h("button", { type: "button", class: "btn small primary", onclick: () => openSettings("claude") }, "Add API key")));
+      h("p", {}, fixed
+        ? `${name} isn't working with the settings on the server (check its API key in the .env file). Your notes are saved and will be filed once it's fixed.`
+        : `${name} isn't connected yet. Your notes are saved and will be filed as soon as it is.`),
+      fixed ? null : h("button", { type: "button", class: "btn small primary", onclick: () => openSettings("ai") }, "Choose an AI")));
   }
   const device = deviceTimeZone();
   if (state.prefs && state.prefs.timezone !== device) {
@@ -490,8 +616,13 @@ function renderBanners() {
   }
   const configured = status.channels.filter((c) => c.configured && c.enabled);
   if (!configured.length) {
-    add(dismissible("no-channels", "info", "Reminders only appear here until you connect Telegram, browser push or another channel.",
-      h("button", { type: "button", class: "btn small", onclick: () => openSettings("notify") }, "Set up notifications")));
+    add(dismissible("no-channels", "info", "Reminders only show up here until you turn on pop-ups or email.",
+      h("button", { type: "button", class: "btn small", onclick: () => openSettings("notify") }, "Set up reminders")));
+  }
+  if (updateReady) {
+    box.append(h("div", { class: "banner info" }, icon("sparkles"),
+      h("p", {}, `Magpie has been updated to ${status.version}. Reload to use the new version.`),
+      h("button", { type: "button", class: "btn small primary", onclick: () => location.reload() }, "Reload")));
   }
   const queued = outbox().length;
   if (queued) {
@@ -571,7 +702,7 @@ function setupKeyboard() {
     const actions = {
       m: () => toggleMic(),
       h: () => toggleHandsFree(),
-      n: () => $("compose-text").focus(),
+      n: () => focusCompose(),
       "/": () => $("search").focus(),
       ",": () => openSettings(),
       "?": () => showShortcuts(),

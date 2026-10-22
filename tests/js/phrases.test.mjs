@@ -9,10 +9,13 @@ import {
   STOP_ALIASES,
   WAKE_ALIASES,
   afterWake,
+  appendText,
   beforeStop,
   englishLang,
+  findWake,
   isCancel,
   levenshtein,
+  noteFromResults,
   phraseList,
 } from "../../src/magpie/web/static/js/phrases.js";
 
@@ -29,6 +32,8 @@ test("wake phrase starts a note and keeps what follows", () => {
 test("ordinary speech does not wake Magpie", () => {
   assert.equal(afterWake("nothing to see here", wake).found, false);
   assert.equal(afterWake("notes one two three", wake).found, false);
+  assert.equal(afterWake("I took notes of the meeting", wake).found, false);
+  assert.equal(afterWake("my notes in the drawer", wake).found, false);
   assert.equal(afterWake("", wake).found, false);
 });
 
@@ -67,4 +72,47 @@ test("levenshtein", () => {
   assert.equal(levenshtein("noteson", "nodeson"), 1);
   assert.equal(levenshtein("", "abc"), 3);
   assert.equal(levenshtein("same", "same"), 0);
+});
+
+// ----------------------------------------------------- notes in live results
+
+const r = (text, final = false) => ({ text, final });
+const read = (results, options) => noteFromResults(results, { wake, stop, ...options });
+
+test("the wake phrase is found in interim results, even split over two", () => {
+  assert.equal(findWake([r("hello there", true), r("notes on buy milk")], 0, wake), 1);
+  assert.equal(findWake([r("so notes", true), r("on call Mum")], 0, wake), 0);
+  assert.equal(findWake([r("so notes", true), r("on call Mum")], 1, wake), -1); // already used
+  assert.equal(findWake([r("I took notes of it", true)], 0, wake), -1);
+});
+
+test("a note reads its words after the wake phrase, settled and interim", () => {
+  assert.deepEqual(read([r("Notes on, buy milk", true), r(" and eggs")], { fromWake: true }).final, "buy milk");
+  assert.equal(read([r("Notes on, buy milk", true), r(" and eggs")], { fromWake: true }).interim, "and eggs");
+  assert.equal(read([r("so notes", true), r("on call Mum")], { fromWake: true }).text, "call Mum");
+  // Pressing the mic and then saying "notes on" anyway.
+  assert.equal(read([r("notes on, call James", true)]).text, "call James");
+  assert.equal(read([r("call James about notes on the budget", true)]).text, "call James about notes on the budget");
+});
+
+test("the stop word ends a note even before it settles, with any punctuation", () => {
+  const interim = read([r("buy milk", true), r(" notes off")]);
+  assert.deepEqual([interim.stopped, interim.settled, interim.text], [true, false, "buy milk"]);
+  const settled = read([r("Notes on, buy milk and eggs. Notes off.", true)], { fromWake: true });
+  assert.deepEqual([settled.stopped, settled.settled, settled.text], [true, true, "buy milk and eggs."]);
+  assert.equal(read([r("buy milk. NOTES OFF!", true)]).text, "buy milk.");
+  assert.equal(read([r("I took notes of the meeting", true)]).stopped, false);
+});
+
+test("cancel phrases are noticed in interim results too", () => {
+  const said = read([r("call James", true), r(" cancel note")]);
+  assert.deepEqual([said.cancelled, said.cancelSettled], [true, false]);
+  assert.equal(read([r("cancel the subscription", true)]).cancelled, false);
+});
+
+test("dictation is added to typed text, keeping line breaks", () => {
+  assert.equal(appendText("Shopping:\n", "milk"), "Shopping:\nmilk");
+  assert.equal(appendText("Call James  ", "at five"), "Call James at five");
+  assert.equal(appendText("", "  hello "), "hello");
+  assert.equal(appendText("keep this", ""), "keep this");
 });

@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
-from magpie.brain.base import Context, DigestData
+from magpie.brain.base import BrainError, Context, DigestData
 from magpie.content import LinkContent
 from magpie.content.links import extract_urls
 from magpie.models import Note
@@ -166,6 +166,7 @@ def _plan_reminders(text: str, ctx: Context) -> list[PlannedReminder]:
 
 class FakeBrain:
     name = "fake"
+    label = "Magpie"
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -200,12 +201,22 @@ class FakeBrain:
         else:
             reply = f"Saved to {kind}s." if kind != "note" else "Saved."
         tags = sorted({w.lower() for w in re.findall(r"#(\w+)", text)})[:4]
+        lowered = text.casefold()
+        category = next(
+            (
+                name
+                for name in ctx.categories
+                if re.search(rf"(?<!\w)#?{re.escape(name.casefold())}(?!\w)", lowered)
+            ),
+            "",
+        )
         return Triage(
             title=title,
             text=clean,
             summary="",
             kind=kind,
             tags=tags,
+            category=category,
             reminders=reminders,
             ping=ping,
             ping_reason=reason,
@@ -274,3 +285,30 @@ class FakeBrain:
             answer="Here's what I found in your notes:\n" + "\n".join(lines),
             note_ids=[note.id for note in hits],
         )
+
+
+class _Forget(list):
+    """A call log that keeps nothing: BasicBrain runs for months, not one test."""
+
+    def append(self, item: object) -> None:
+        pass
+
+
+class BasicBrain(FakeBrain):
+    """The "No AI" choice: simple rules for times, lists and links, and honest gaps."""
+
+    name = "basic"
+    label = "Magpie"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = _Forget()
+
+    def usage(self) -> dict[str, int]:
+        return {}
+
+    async def review(self, content: LinkContent, note_text: str) -> LinkReview:
+        raise BrainError("Reviews need an AI. Choose one in Settings → AI.")
+
+    async def review_url(self, url: str, note_text: str) -> LinkReview:
+        raise BrainError("Reviews need an AI. Choose one in Settings → AI.")

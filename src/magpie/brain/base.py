@@ -42,6 +42,9 @@ class Context:
     morning_time: str = "09:00"
     source: str = "web"
     instructions: str = ""
+    categories: tuple[str, ...] = ()
+    lessons: tuple[str, ...] = ()  # the user's corrections to earlier notes, newest first
+    written_in: str = ""  # the Magpie tab that was open when the note was written
 
 
 @dataclass
@@ -68,7 +71,8 @@ class DigestData:
 
 
 class Brain(Protocol):
-    name: str
+    name: str  # the provider id: "claude", "openai", ..., "fake"
+    label: str  # the name used in messages: "Claude couldn't process this note"
 
     @property
     def available(self) -> bool: ...

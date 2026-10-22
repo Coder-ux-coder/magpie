@@ -486,9 +486,10 @@ def test_claude_key_can_be_added_from_the_dashboard(tmp_path, router, monkeypatc
 
     fake = SimpleNamespace(key=None, models=SimpleNamespace(retrieve=retrieve))
 
-    def make_brain(settings, api_key=None):
-        fake.key = api_key
-        return ClaudeBrain(settings, client=fake if api_key else None, api_key=api_key)
+    def make_brain(settings, api_key=None, *, config=None, http=None):
+        key = config.api_key if config is not None else api_key
+        fake.key = key
+        return ClaudeBrain(settings, client=fake if key else None, api_key=key)
 
     monkeypatch.setattr(core_module, "make_brain", make_brain)
     settings = Settings(_env_file=None, data_dir=tmp_path, password="pw", brain="claude")

@@ -43,21 +43,32 @@ class Settings(BaseSettings):
     port: int = 8000
     base_url: str = ""
     password: str | None = None
+    # MAGPIE_LOGIN=false: no password. The dashboard then only answers on this computer
+    # (http://localhost), so the setup also publishes the port on 127.0.0.1 only.
+    login: bool = True
     api_token: str | None = None
     secret_key: str | None = None
     timezone: str = "UTC"
     log_level: str = "info"
+    # The commit the Docker image was built from (set by the image): open dashboards
+    # notice an automatic update and load the new version.
+    build: str = ""
 
-    # Claude
+    # AI: Claude by default, or any OpenAI-compatible service (see brain/providers.py).
+    # When MAGPIE_BRAIN is set the server decides; otherwise Settings → AI does.
+    brain: Literal[
+        "claude", "openai", "gemini", "openrouter", "ollama", "compatible", "basic", "fake"
+    ] = "claude"
     anthropic_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("ANTHROPIC_API_KEY", "MAGPIE_ANTHROPIC_API_KEY"),
     )
-    model: str = "claude-opus-5-5"
+    ai_api_key: str | None = None
+    ai_base_url: str = ""
+    model: str = "claude-haiku-5-5"
     effort: Effort | None = None
     fallbacks: bool = True
     web_search: bool = True
-    brain: Literal["claude", "fake"] = "claude"
 
     # Server-side speech-to-text (any OpenAI-compatible /audio/transcriptions endpoint)
     stt_api_key: str | None = None
@@ -97,6 +108,14 @@ class Settings(BaseSettings):
     @classmethod
     def _strip_slash(cls, value: str) -> str:
         return value.strip().rstrip("/")
+
+    @field_validator("ai_base_url")
+    @classmethod
+    def _http_address(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError("expected an address starting with http:// or https://")
+        return value
 
     @field_validator("timezone")
     @classmethod
@@ -143,6 +162,8 @@ class Prefs(BaseModel):
     snooze_minutes: int = Field(default=60, ge=5, le=1440)
     channels: dict[str, bool] = Field(default_factory=dict, max_length=20)
     web_search: bool = True
+    learn: bool = True  # remember the user's corrections and file similar notes their way
+    onboarded: bool = False  # the welcome screen was finished or skipped
     telegram_chat_id: int | None = None
 
     @field_validator("morning_time", "digest_time", "weekly_review_time")

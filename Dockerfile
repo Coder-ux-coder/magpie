@@ -1,4 +1,4 @@
-# Magpie: voice-first notes with a Claude brain.
+# Magpie: voice-first notes, filed by the AI of your choice.
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,7 +15,10 @@ RUN pip install . \
     && chown magpie:magpie /data
 
 USER magpie
-ENV MAGPIE_DATA_DIR=/data \
+# The commit this image was built from: open dashboards reload after an update.
+ARG MAGPIE_BUILD=""
+ENV MAGPIE_BUILD=$MAGPIE_BUILD \
+    MAGPIE_DATA_DIR=/data \
     MAGPIE_HOST=0.0.0.0 \
     MAGPIE_PORT=8000
 VOLUME ["/data"]

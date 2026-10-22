@@ -4,7 +4,7 @@ import { api } from "./api.js";
 import { noteActions, reminderActions, watchNote } from "./actions.js";
 import { KINDS, SOURCES, isWorking, kindBadge, noteTitle, reviewBlock, reviewSpeech } from "./cards.js";
 import { speak, stopSpeaking } from "./speech.js";
-import { emit, on, snoozeLabel, speechLang, tz } from "./state.js";
+import { aiName, categoryOf, emit, on, snoozeLabel, speechLang, state, tz } from "./state.js";
 import { clear, copyText, fullDate, h, icon, iconButton, localInputValue, toast, when } from "./ui.js";
 
 const dialog = () => document.getElementById("note-dialog");
@@ -90,10 +90,7 @@ function render(note, { keepScroll = false, force = false } = {}) {
   el.append(
     h("div", { class: "sheet-inner" },
       h("div", { class: "sheet-head" },
-        h("div", { class: "title-block" },
-          kindBadge(note.kind),
-          h("h2", { id: "note-dialog-title", dir: "auto" }, title),
-        ),
+        titleBlock(note, title),
         iconButton("speaker", "Read this note aloud", () => speak(`${title}. ${note.text || note.raw_text}`, { lang: speechLang() })),
         iconButton("close", "Close", close),
       ),
@@ -102,7 +99,46 @@ function render(note, { keepScroll = false, force = false } = {}) {
     ),
   );
   if (keepScroll) el.querySelector(".sheet-body").scrollTop = scroll;
-  else el.querySelector(".sheet-head .icon-btn:last-child").focus();
+  else el.querySelector(".sheet-head > .icon-btn:last-child").focus();
+}
+
+function titleBlock(note, title) {
+  const block = h("div", { class: "title-block" });
+  const show = () => {
+    clear(block).append(
+      kindBadge(note.kind),
+      h("h2", { id: "note-dialog-title", dir: "auto" }, title),
+      iconButton("edit", "Change the title", edit, { class: "icon-btn title-edit" }),
+    );
+  };
+  const edit = () => {
+    const input = h("input", { type: "text", id: "note-title-input", value: noteTitle(note), maxlength: 200, dir: "auto", "aria-label": "Title" });
+    let saving = false;
+    const save = async () => {
+      const value = input.value.trim();
+      if (saving) return;
+      if (!value || value === noteTitle(note)) return show();
+      saving = true;
+      try {
+        const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { title: value } });
+        emit("note-updated", updated);
+        toast("Title saved.");
+      } catch (error) {
+        toast(error.message, { error: true });
+        show();
+      }
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); save(); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); show(); block.querySelector(".title-edit")?.focus(); }
+    });
+    input.addEventListener("blur", save);
+    clear(block).append(kindBadge(note.kind), h("h2", { id: "note-dialog-title", class: "sr-only" }, title), input);
+    input.focus();
+    input.select();
+  };
+  show();
+  return block;
 }
 
 function body(note) {
@@ -111,6 +147,8 @@ function body(note) {
     h("p", { class: "meta-line" },
       h("span", {}, fullDate(note.created_at, tz())),
       h("span", {}, SOURCES[note.source] || note.source),
+      note.meta?.captured_in ? h("span", {}, `Written in ${note.meta.captured_in}`) : null,
+      categoryOf(note.category_id) ? h("span", { class: `chip category swatch-${categoryOf(note.category_id).color}` }, categoryOf(note.category_id).name) : null,
       note.status !== "open" ? h("span", {}, note.status === "done" ? "Done" : "Archived") : null,
     ),
   );
@@ -119,14 +157,14 @@ function body(note) {
     parts.push(
       h("div", { class: "claude-box" },
         note.error ? icon("clock") : h("span", { class: "spinner", "aria-hidden": "true" }),
-        h("p", {}, note.error || "Claude is reading this note…"),
+        h("p", {}, note.error || `${aiName()} is reading this note…`),
       ),
     );
   } else if (note.state === "failed") {
     parts.push(
       h("div", { class: "banner" },
         icon("alert"),
-        h("p", {}, `Claude couldn't process this note: ${note.error || "unknown error"}`),
+        h("p", {}, `${aiName()} couldn't process this note: ${note.error || "unknown error"}`),
         h("button", { type: "button", class: "btn small", onclick: () => noteActions.reprocess(note) }, icon("refresh"), "Try again"),
       ),
     );
@@ -172,9 +210,9 @@ function body(note) {
   if (note.briefing) {
     parts.push(
       h("section", { class: "section" },
-        h("h3", {}, "Context from Claude"),
+        h("h3", {}, "Background"),
         h("p", { dir: "auto" }, note.briefing),
-        h("p", { class: "muted small" }, "From Claude's general knowledge, which may be out of date."),
+        h("p", { class: "muted small" }, `From ${aiName()}'s general knowledge, which may be out of date.`),
       ),
     );
   }
@@ -209,7 +247,7 @@ function textSection(note) {
         const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { text } });
         emit("note-updated", updated);
         render(updated, { keepScroll: true, force: true });
-        toast("Saved. Use “Ask Claude again” to re-file it with your changes.");
+        toast(`Saved. Use “Ask ${aiName()} again” to re-file it with your changes.`);
       } catch (error) {
         toast(error.message, { error: true });
       } finally {
@@ -329,8 +367,27 @@ function detailsSection(note) {
       toast(error.message, { error: true });
     }
   });
+  const categories = state.categories || [];
+  const category = h("select", { id: "note-category" },
+    h("option", { value: "0", selected: !note.category_id }, "No category"),
+    categories.map((c) => h("option", { value: String(c.id), selected: c.id === note.category_id }, c.name)),
+  );
+  category.addEventListener("change", async () => {
+    const id = Number(category.value);
+    try {
+      const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { category_id: id } });
+      emit("note-updated", updated);
+      emit("categories-changed");
+      toast(id ? `Moved to ${categoryOf(id)?.name || "the category"}.` : "Taken out of its category.");
+    } catch (error) {
+      category.value = String(note.category_id || 0);
+      toast(error.message, { error: true });
+    }
+  });
   return h("section", { class: "section" },
     h("h3", {}, "Details"),
+    h("div", { class: "field" }, h("label", { for: "note-category" }, "Category"), category,
+      categories.length ? null : h("span", { class: "hint" }, "Make your own categories in Settings → Categories.")),
     h("div", { class: "field" }, h("label", { for: "note-kind" }, "Kind"), kind),
     h("div", { class: "field" }, h("label", { for: "note-tags" }, "Tags"), tags, h("span", { class: "hint" }, "Separate tags with commas.")),
   );
@@ -353,7 +410,7 @@ function footer(note) {
     h("button", { type: "button", class: "btn primary", onclick: () => noteActions.toggleDone(note) }, icon(done ? "undo" : "check"), done ? "Not done" : "Done"),
     h("button", { type: "button", class: "btn", onclick: () => noteActions.togglePin(note), "aria-pressed": String(note.pinned) }, icon("pin"), note.pinned ? "Unpin" : "Pin"),
     h("button", { type: "button", class: "btn", onclick: () => noteActions.toggleArchive(note) }, icon("archive"), archived ? "Unarchive" : "Archive"),
-    h("button", { type: "button", class: "btn", onclick: () => noteActions.reprocess(note) }, icon("sparkles"), "Ask Claude again"),
+    h("button", { type: "button", class: "btn", onclick: () => noteActions.reprocess(note) }, icon("sparkles"), `Ask ${aiName()} again`),
     h("button", { type: "button", class: "btn", onclick: () => copyText(note.text || note.raw_text, "Note copied.") }, icon("copy"), "Copy"),
     h("button", {
       type: "button",

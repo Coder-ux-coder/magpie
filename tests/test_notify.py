@@ -22,6 +22,7 @@ NOTE = Notification(
     reminder_id=7,
     note_id=1,
     actions={"done": "https://notes.example.com/a/x", "snooze": "https://notes.example.com/a/y"},
+    due="today 5:00 PM",
 )
 
 
@@ -61,6 +62,8 @@ async def test_webhook_formats(router, fmt, key, fragment):
     await WebhookChannel(client(router), settings).send(NOTE)
     body = json.loads(router.requests[-1].content)
     assert fragment in body[key]
+    if fmt == "json":
+        assert body["event"] == "reminder" and body["due"] == NOTE.due
 
 
 async def test_webhook_errors_raise(router):

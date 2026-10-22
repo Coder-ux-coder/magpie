@@ -46,7 +46,7 @@ async def test_due_reminder_is_sent_with_actions(core, channel):
     assert len(channel.sent) == 1
     sent = channel.sent[0]
     assert sent.title == "Call James"
-    assert sent.body == "Budget call"
+    assert sent.body.startswith("Budget call\nDue today ") and sent.due.startswith("today ")
     assert sent.reminder_id == reminder.id
     assert sent.url == f"https://notes.example.com/#/note/{note.id}"
     assert set(sent.actions) == {"done", "snooze", "tomorrow"}

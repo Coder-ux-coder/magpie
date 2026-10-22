@@ -96,8 +96,9 @@ function clientId() {
 
 const itemKey = (item) => item.client_id || `${item.captured_at}|${item.text}`;
 
-export async function createNote(text, source = "web-text") {
-  const body = { text, source, client_id: clientId() };
+/** Save a note; `context` can add where it was written ({category_id, captured_in}). */
+export async function createNote(text, source = "web-text", context = {}) {
+  const body = { ...context, text, source, client_id: clientId() };
   try {
     return await api("/api/notes", { method: "POST", body });
   } catch (error) {

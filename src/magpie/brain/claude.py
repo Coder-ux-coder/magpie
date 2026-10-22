@@ -103,6 +103,7 @@ def _extract_json(text: str) -> str | None:
 
 class ClaudeBrain:
     name = "claude"
+    label = "Claude"
 
     def __init__(
         self,
@@ -110,9 +111,10 @@ class ClaudeBrain:
         client: AsyncAnthropic | None = None,
         *,
         api_key: str | None = None,
+        model: str | None = None,
     ) -> None:
         self.settings = settings
-        self.model = settings.model
+        self.model = model or settings.model
         # The environment wins over a key saved from the dashboard.
         key = settings.anthropic_api_key or api_key
         has_credentials = bool(
@@ -148,10 +150,23 @@ class ClaudeBrain:
         except anthropic.NotFoundError as exc:
             raise BrainError(
                 f"That key works, but the model {self.model} isn't available to it. "
-                "Choose another with MAGPIE_MODEL."
+                "Choose another in Settings → AI."
             ) from exc
         except anthropic.APIError as exc:
             raise BrainError("Couldn't reach Anthropic to check the key.", retryable=True) from exc
+
+    async def list_models(self) -> list[str]:
+        if self._client is None:
+            raise BrainUnavailable("No API key.")
+        try:
+            page = await self._client.models.list(limit=100, timeout=20)
+        except anthropic.AuthenticationError as exc:
+            raise BrainUnavailable("Anthropic rejected that API key.") from exc
+        except anthropic.APIError as exc:
+            raise BrainError(
+                "Couldn't reach Anthropic to list the models.", retryable=True
+            ) from exc
+        return sorted({model.id for model in page.data if isinstance(model.id, str)})
 
     # ------------------------------------------------------------ public API
 

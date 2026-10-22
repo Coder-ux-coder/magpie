@@ -16,8 +16,8 @@ behaviour, update this file too.
 
 ## The refined prompt
 
-Build **Magpie**, an open-source, self-hosted, voice-first notes app with
-Claude as its brain.
+Build **Magpie**, an open-source, self-hosted, voice-first notes app with an AI
+as its brain: Claude by default, any other provider the user prefers, or none.
 
 **Who it is for.** One person per install. They capture thoughts on the move,
 mostly by voice and often messily, and want those thoughts organised, followed
@@ -25,15 +25,23 @@ up and summarised without filing anything by hand.
 
 ### Core loop
 
-1. **Capture.** Saying "notes on" starts a note. The browser transcribes speech
-   live, and "notes off" (or a few seconds of silence) saves it. The same note
-   can come from a push-to-talk button, typed text, a link shared from the phone's
-   share sheet, a Telegram text or voice message, a Siri Shortcut, or the HTTP API.
-2. **Understand.** Claude cleans the transcript (filler words, recognition
+1. **Capture.** A voice bar sits at the bottom of every view, like a dictation
+   tool. Saying "notes on" starts a note, the words appear live and can be edited,
+   and "notes off", Save or a few seconds of silence saves it; Cancel discards it,
+   with Undo. Magpie listens for the command word as soon as it opens, the bar can
+   pop out into a small always-on-top window, and Magpie installs as an app with
+   its own window. The same note can come from the mic button, typed text, a link
+   shared from the phone's share sheet, a Telegram text or voice message, a Siri
+   Shortcut, or the HTTP API.
+2. **Understand.** The AI cleans the transcript (filler words, recognition
    mistakes, false starts) without changing its meaning. It gives the note a
-   title, a kind (task, idea, link, journal, meeting, reference, list or note)
-   and tags, and reads any dates and times in it.
-3. **Decide.** Claude decides whether and when to ping:
+   title (which the user can edit), a kind (task, idea, link, journal, meeting,
+   reference, list or note), one of the user's own colour-coded categories, and
+   tags, and reads any dates and times in it. A note written while a category's
+   tab is open stays in that category, and every note remembers the tab it was
+   written in. When the user moves a note or changes its kind, Magpie keeps the
+   correction as a lesson for similar notes.
+3. **Decide.** The AI decides whether and when to ping:
    - **explicit**: the user named a time ("at 5 pm", "tomorrow morning", "in 20
      minutes", "every Monday at 9"). Schedule exactly that, in the user's time zone.
    - **suggested**: no time was named, but the note is actionable and
@@ -43,39 +51,50 @@ up and summarised without filing anything by hand.
      daily digest.
    - **none**: nothing to follow up (journal entries, reference facts). File it.
 
-   A user setting (quiet, balanced or proactive) controls how readily Claude
-   suggests pings it was not asked for.
-4. **Notify.** Reminders go out through Telegram (recommended), ntfy, browser
-   push, email or a webhook, with Done and Snooze actions where the channel
-   supports them.
+   A user setting (quiet, balanced or proactive) controls how readily the AI
+   suggests pings it was not asked for. Times follow the computer's clock.
+4. **Notify.** Reminders pop up on the user's computer and phone (web push) and
+   arrive by email ("⏰ Call James · due today 5:00 PM"), both set up from the
+   dashboard; Telegram, ntfy and webhooks also work. Done and Snooze actions come
+   with every channel that supports them.
 5. **Review.** When a note contains a YouTube video or an article, Magpie
-   fetches the transcript or text, and Claude writes a short review: TL;DR, key
+   fetches the transcript or text, and the AI writes a short review: TL;DR, key
    points, a verdict on whether it is worth the time, and who it is for. When the
    user only names something by voice ("that Paul Graham essay about doing things
    that don't scale"), Claude finds it with web search first.
-6. **Dashboard.** Browse, search, filter, edit and act on notes. See upcoming
-   reminders, reviews, and daily and weekly digests, and ask questions across all
-   of your notes.
-
-7. **Make it yours.** Setup takes one command and three answers (API key, password,
-   time zone), and the key can also be pasted in the dashboard. Users can give Claude
-   standing instructions ("tag shop notes #shop", "remind me 30 minutes before
-   meetings"), choose the snooze length, and adjust everything else in Settings.
+6. **Dashboard.** Browse, search, filter, edit, delete (with Undo) and act on
+   notes; drag them between categories. See upcoming reminders, reviews, and daily
+   and weekly digests, and ask questions across all of your notes.
+7. **Make it yours.** Setup takes one command and two answers (a password, which
+   can be skipped, and the time zone). A welcome screen then sets up the AI
+   (provider, model, key), pop-ups and email, the command word and categories.
+   Users can give the AI standing instructions ("tag shop notes #shop", "remind me
+   30 minutes before meetings"), choose the snooze length, and adjust everything
+   else in Settings.
+8. **Stay current.** Installed copies update themselves within the hour, keep
+   every note and setting, and go back to the previous version if a new one fails
+   to start. Open windows load the new version when nobody is using them.
+9. **Without an API key.** A version of Magpie runs as a Claude artifact, where
+   the user's own Claude account files the notes; its notes can be exported into a
+   self-hosted Magpie.
 
 ### Constraints
 
-- **Easy to run.** One process, one SQLite file, Docker or Python 3.11+. The
-  only required external service is the Anthropic API; Telegram, speech-to-text
-  and push are optional.
-- **Secure by default.** The dashboard is password protected, integrations use a
-  revocable API token, CSRF is blocked, fetching a link cannot reach private
-  network addresses, and all data stays on the user's own server.
-- **Robust.** Notes are never lost: without an API key, or when Claude is
-  unavailable, notes are saved and processed later. Reminders survive restarts,
+- **Easy to run.** One process, one SQLite file, Docker or Python 3.11+. No
+  external service is required: the AI can be Claude, any OpenAI-compatible
+  service (OpenAI, Gemini, OpenRouter, Groq, a local Ollama) or simple rules, and
+  Telegram, speech-to-text and email are optional.
+- **Secure by default.** Without a password the dashboard only answers on the
+  user's own computer (and refuses other host names, against DNS rebinding); with
+  one, it is password protected. Integrations use a revocable API token, CSRF is
+  blocked, fetching a link cannot reach private network addresses, keys are never
+  shown again once saved, and all data stays on the user's own computer.
+- **Robust.** Notes are never lost: without an AI, or when it is unavailable,
+  notes are saved and processed later. Reminders survive restarts,
   respect time zones and DST, and retry when delivery fails.
 - **Phone-first UI.** It is responsive and accessible, installs as a PWA, works
   as a share target, and supports dark mode.
-- **English only.** The app, Claude's titles, replies, reviews and digests, and
+- **English only.** The app, the AI's titles, replies, reviews and digests, and
   speech recognition are all in English; the user picks their accent (UK, US,
   Australian and others).
 - **Documented for humans and agents.** A README for people and an AGENTS.md for
@@ -84,8 +103,7 @@ up and summarised without filing anything by hand.
 ### Out of scope for v1
 
 Multi-user accounts, native mobile apps, WhatsApp (its business API needs Meta
-verification and paid templates), calendar sync, on-device language models and
-image notes.
+verification and paid templates), calendar sync and image notes.
 
 ### Acceptance criteria
 
@@ -100,9 +118,16 @@ image notes.
    reminder, or with one suggested shortly before the trip in proactive mode.
 5. The daily digest at 08:00 lists today's reminders, notes waiting for the
    digest and fresh reviews.
-6. `docker compose up` with `ANTHROPIC_API_KEY` and `MAGPIE_PASSWORD` in `.env`
-   gives a working app at http://localhost:8000.
-7. With no API key, notes are still saved and are processed once a key is added.
+6. Running the setup and pressing Enter at both questions gives a working app in
+   its own window, with no password, and a welcome screen to choose the AI.
+7. With no AI set up, notes are still saved and are processed once one is chosen;
+   with "no AI", simple rules file them.
+8. A note written while the Work tab is open lands in Work; dragging a note onto
+   Home moves it there (with Undo), and similar notes go to Home afterwards.
+9. A reminder pops up on the computer and arrives as an email whose subject says
+   what is due and when.
+10. A new published version reaches an installed copy within about an hour,
+    without losing notes; a version that fails to start is rolled back.
 
 ### Design decisions
 
@@ -111,7 +136,11 @@ image notes.
 | Wake phrase | Browser Web Speech API in continuous mode, fuzzy-matching "notes on" and "notes off" | Free, real-time and needs no server audio. Falls back to recording plus server speech-to-text. |
 | Phone capture | Telegram voice notes, an iOS Shortcut ("Hey Siri, notes on") and the PWA | Background listening is not possible in a mobile browser, so these use the OS's own voice entry points. |
 | Speech-to-text on the server | Any OpenAI-compatible `/audio/transcriptions` endpoint | One integration covers OpenAI, Groq and self-hosted Whisper servers. Claude does not take audio input. |
-| Model | `claude-opus-5-5` with structured outputs and per-task effort | Most capable default; `MAGPIE_MODEL` switches it. |
+| Model | `claude-haiku-5-5` with structured outputs and per-task effort; Sonnet 5.5 and Opus 5.5 selectable | Fast and low-cost for short notes; Settings → AI or `MAGPIE_MODEL` switches it. |
+| Other AIs | One OpenAI-compatible client: JSON schema, then JSON mode, then the schema in the prompt, plus one repair round | Covers OpenAI, Gemini, OpenRouter, Groq, Ollama and others with one integration, whatever each supports. |
+| Claude accounts | A Claude artifact version of Magpie | A self-hosted app can't use a Claude subscription; inside Claude, the user's own account files the notes. |
+| No password | Published on 127.0.0.1 only, plus a Host-header check | Simplest for one person on one computer; safe against DNS rebinding. Setting a password opens it to other devices. |
+| Updates | A small updater container: hourly pull, health check, roll back | Installs keep up without the user doing anything; notes live in a volume. |
 | Reminder times | Claude returns local wall-clock times; the server converts them with the user's IANA time zone | Avoids offset and DST mistakes in model output. |
 | Storage | SQLite with FTS5 | Zero setup, fast full-text search, one file to back up. |
 | Frontend | Vanilla JS PWA, no build step | Anyone can run, read and modify it. |

@@ -22,6 +22,7 @@ TRIAGE = {
     "summary": "",
     "kind": "task",
     "tags": ["Work", "#work", "calls"],
+    "category": "Work",
     "reminders": [
         {
             "when": "2026-10-19T17:00",

@@ -23,13 +23,22 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from magpie import __version__
 from magpie.auth import RateLimiter
-from magpie.brain import BrainError
+from magpie.brain import PROVIDERS, BrainError
 from magpie.config import Prefs
 from magpie.core import Magpie
 from magpie.export import export_json, export_markdown, import_json
 from magpie.ics import reminders_calendar
-from magpie.models import Note, NoteKind, NoteStatus, ProcState, ReminderStatus
+from magpie.models import (
+    COLORS,
+    Category,
+    Note,
+    NoteKind,
+    NoteStatus,
+    ProcState,
+    ReminderStatus,
+)
 from magpie.notify import Notification, snooze_label
+from magpie.notify.channels import EmailError, SmtpConfig, smtp_preset
 from magpie.stt import MAX_AUDIO_BYTES, TranscriptionError
 from magpie.timeutil import humanize, now_utc
 
@@ -51,15 +60,45 @@ def session_fingerprint(app: Magpie) -> str:
     return hashlib.sha256(material).hexdigest()[:32]
 
 
+LOCAL_NAMES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+LOCAL_ONLY = (
+    "Magpie has no password, so it only opens on the computer it runs on, at "
+    "http://localhost:8000. To use it from other devices, run the setup again and choose a "
+    "password."
+)
+
+
+def is_local_host(host: str) -> bool:
+    """Whether a Host header names this computer.
+
+    Without a password this is what keeps other websites out: a page that points its
+    own domain at 127.0.0.1 (DNS rebinding) still sends its own name as the Host.
+    """
+    host = host.strip().lower()
+    if host.startswith("["):
+        name = host[1:].split("]", 1)[0]
+    else:
+        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return name in LOCAL_NAMES or name.endswith(".localhost")
+
+
+def signed_in(request: Request, app: Magpie) -> bool:
+    if not app.settings.login:
+        return is_local_host(request.headers.get("host", ""))
+    return request.session.get("fp") == session_fingerprint(app)
+
+
 async def require_user(request: Request) -> Magpie:
     app = get_magpie(request)
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() == "bearer" and token and app.secrets.check_token(token.strip()):
         return app
-    if request.session.get("fp") == session_fingerprint(app):
+    if signed_in(request, app):
         if request.method not in SAFE_METHODS and request.headers.get("x-magpie") != "1":
             raise HTTPException(403, "Missing the X-Magpie header.")
         return app
+    if not app.settings.login:
+        raise HTTPException(403, LOCAL_ONLY)
     raise HTTPException(401, "Not logged in.")
 
 
@@ -92,6 +131,12 @@ class NoteIn(BaseModel):
         description="A random id chosen by the client. Sending the same id again (a retry after "
         "a lost answer) returns the note already saved instead of a copy.",
     )
+    category_id: int | None = Field(
+        default=None, ge=1, description="Put the note in this category (the tab it was written in)."
+    )
+    captured_in: str | None = Field(
+        default=None, max_length=60, description="Where the note was written, e.g. a tab's name."
+    )
 
     _text = field_validator("text")(_not_blank)
 
@@ -103,6 +148,58 @@ class NotePatch(BaseModel):
     tags: list[str] | None = None
     status: NoteStatus | None = None
     pinned: bool | None = None
+    category_id: int | None = Field(
+        default=None, ge=0, description="0 takes it out of its category"
+    )
+
+
+def _category_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = " ".join(value.split())
+    if not value or any(ord(char) < 32 for char in value):
+        raise ValueError("Give the category a name.")
+    return value
+
+
+def _category_color(value: str | None) -> str | None:
+    if value is not None and value not in COLORS:
+        raise ValueError(f"Choose one of: {', '.join(COLORS)}.")
+    return value
+
+
+class CategoryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    color: str = "blue"
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str | None:
+        return _category_name(value)
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str) -> str | None:
+        return _category_color(value)
+
+
+class CategoryPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    color: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str | None) -> str | None:
+        return _category_name(value)
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str | None) -> str | None:
+        return _category_color(value)
+
+
+class OrderIn(BaseModel):
+    ids: list[int] = Field(max_length=200)
 
 
 class ReminderIn(BaseModel):
@@ -163,8 +260,11 @@ class PushEndpointIn(BaseModel):
 @router.get("/session")
 async def session(request: Request) -> dict[str, Any]:
     app = get_magpie(request)
+    authenticated = signed_in(request, app)
     return {
-        "authenticated": request.session.get("fp") == session_fingerprint(app),
+        "authenticated": authenticated,
+        "login": app.settings.login,
+        "message": None if authenticated or app.settings.login else LOCAL_ONLY,
         "version": __version__,
     }
 
@@ -172,6 +272,8 @@ async def session(request: Request) -> dict[str, Any]:
 @router.post("/login")
 async def login(request: Request, body: LoginIn) -> dict[str, Any]:
     app = get_magpie(request)
+    if not app.settings.login:
+        return {"authenticated": signed_in(request, app)}
     client = request.client.host if request.client else "unknown"
     if not login_limiter.allow(client):
         raise HTTPException(429, "Too many attempts. Try again in a few minutes.")
@@ -198,13 +300,18 @@ async def status(app: User) -> dict[str, Any]:
     bot = app.bot
     return {
         "version": __version__,
+        "build": app.settings.build[:12],
         "brain": {
             "name": app.brain.name,
+            "label": app.brain.label,
             "available": app.brain.available,
-            "model": app.settings.model if app.brain.name == "claude" else app.brain.name,
+            "model": getattr(app.brain, "model", app.brain.name),
             "usage": app.brain.usage(),
-            "key_source": app.claude_key_source() if app.brain.name == "claude" else None,
+            "key_source": app.ai_config().key_source,
+            "locked": app.ai_config().locked,
+            "web_search": app.brain.name == "claude",
         },
+        "login": app.settings.login,
         # A fresh install with no time zone chosen anywhere yet: the dashboard
         # adopts the browser's zone once.
         "timezone_unset": "timezone" not in app.settings.model_fields_set
@@ -230,6 +337,7 @@ async def status(app: User) -> dict[str, Any]:
             "subscriptions": len(app.store.push_subscriptions()),
         },
         "counts": app.store.count_notes(),
+        "categories": [c.model_dump() for c in app.store.list_categories()],
         "base_url": app.settings.base_url,
         "password_generated": app.secrets.password_generated,
         "prefs": prefs.model_dump(),
@@ -251,14 +359,24 @@ async def _create(
     wait: bool,
     captured_at: datetime | None = None,
     client_id: str | None = None,
+    category_id: int | None = None,
+    captured_in: str | None = None,
 ) -> dict[str, Any]:
     if client_id:
         earlier = app.store.note_by_client_id(client_id, now_utc() - timedelta(days=30))
         if earlier is not None:
             return {"note": earlier.model_dump(mode="json"), "reply": earlier.reply or "Saved."}
-    note = app.store.create_note(
-        text.strip(), source, {"client_id": client_id} if client_id else None
-    )
+    category = app.store.get_category(category_id) if category_id else None
+    meta: dict[str, Any] = {}
+    if client_id:
+        meta["client_id"] = client_id
+    if captured_in and captured_in.strip():
+        meta["captured_in"] = " ".join(captured_in.split())[:60]
+    if category is not None:
+        meta["category_by"] = "you"
+    note = app.store.create_note(text.strip(), source, meta or None)
+    if category is not None:
+        note = app.store.update_note(note.id, category_id=category.id)
     if captured_at is not None:
         captured = captured_at if captured_at.tzinfo else captured_at.replace(tzinfo=UTC)
         if now_utc() - timedelta(days=7) < captured < now_utc():
@@ -269,12 +387,13 @@ async def _create(
     fresh = app.store.get_note(note.id) or note
     reply = fresh.reply
     if not reply:
+        name = app.brain.label
         if fresh.state == ProcState.FAILED:
-            reply = "Saved, but Claude couldn't process it."
+            reply = f"Saved, but {name} couldn't process it."
         elif not app.brain.available:
-            reply = "Saved. Claude isn't set up yet, so it will be processed later."
+            reply = f"Saved. {name} isn't set up yet, so it will be filed later."
         else:
-            reply = "Saved. Claude is still working on it."
+            reply = f"Saved. {name} is still working on it."
     return {"note": fresh.model_dump(mode="json"), "reply": reply}
 
 
@@ -283,6 +402,7 @@ async def list_notes(
     app: User,
     view: Literal["inbox", "all", "done", "archived", "scheduled", "reviews"] | None = None,
     kind: NoteKind | None = None,
+    category: int | None = Query(default=None, ge=1, le=2**63 - 1),
     q: str | None = Query(default=None, max_length=300),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=10_000_000),
@@ -290,18 +410,31 @@ async def list_notes(
     # A search covers every note unless a view is asked for explicitly.
     view = view or ("all" if q else "inbox")
     notes = app.store.list_notes(
-        view=view, kind=kind.value if kind else None, q=q, limit=limit, offset=offset
+        view=view,
+        kind=kind.value if kind else None,
+        q=q,
+        category_id=category,
+        limit=limit,
+        offset=offset,
     )
     return {
         "notes": [note.model_dump(mode="json") for note in notes],
         "counts": app.store.count_notes(),
+        "categories": [c.model_dump() for c in app.store.list_categories()],
     }
 
 
 @router.post("/notes", status_code=201)
 async def create_note(app: User, body: NoteIn, wait: bool = False) -> dict[str, Any]:
     return await _create(
-        app, body.text, _source(body.source, "api"), wait, body.captured_at, body.client_id
+        app,
+        body.text,
+        _source(body.source, "api"),
+        wait,
+        body.captured_at,
+        body.client_id,
+        body.category_id,
+        body.captured_in,
     )
 
 
@@ -354,8 +487,24 @@ async def get_note(app: User, note_id: int) -> Note:
 async def update_note(app: User, note_id: int, body: NotePatch) -> Note:
     note = _note_or_404(app, note_id)
     fields = body.model_dump(exclude_none=True)
+    meta = dict(note.meta)
     if "text" in fields and fields["text"] != note.text:
-        fields["meta"] = {**note.meta, "edited": True}
+        meta["edited"] = True
+    if "category_id" in body.model_fields_set:
+        wanted = body.category_id or None
+        category = app.store.get_category(wanted) if wanted else None
+        if wanted and category is None:
+            raise HTTPException(422, "That category doesn't exist any more.")
+        fields["category_id"] = wanted
+        if wanted != note.category_id:
+            before = app.store.get_category(note.category_id) if note.category_id else None
+            if category is not None and note.state == ProcState.READY:
+                app.learn(note, "category", before.name if before else "", category.name)
+            meta["category_by"] = "you"
+    if "kind" in fields and fields["kind"] != note.kind and note.state == ProcState.READY:
+        app.learn(note, "kind", str(note.kind), str(fields["kind"]))
+    if meta != note.meta:
+        fields["meta"] = meta
     if "tags" in fields:
         tags = []
         for tag in fields["tags"]:
@@ -564,17 +713,89 @@ async def update_prefs(app: User, body: dict[str, Any] = Body(...)) -> Prefs:
 # -------------------------------------------------------------------- Claude
 
 
+# ---------------------------------------------------------------- categories
+
+
+@router.get("/categories")
+async def list_categories(app: User) -> dict[str, Any]:
+    return {
+        "categories": [c.model_dump() for c in app.store.list_categories()],
+        "colors": list(COLORS),
+    }
+
+
+@router.post("/categories", status_code=201)
+async def add_category(app: User, body: CategoryIn) -> Category:
+    if len(app.store.list_categories()) >= 100:
+        raise HTTPException(422, "That's a lot of categories already; remove one first.")
+    try:
+        return app.store.add_category(body.name, body.color)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.put("/categories/order")
+async def order_categories(app: User, body: OrderIn) -> dict[str, Any]:
+    return {"categories": [c.model_dump() for c in app.store.order_categories(body.ids)]}
+
+
+@router.patch("/categories/{category_id}")
+async def update_category(app: User, category_id: int, body: CategoryPatch) -> Category:
+    try:
+        return app.store.update_category(category_id, name=body.name, color=body.color)
+    except KeyError as exc:
+        raise HTTPException(404, "Category not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.delete("/categories/{category_id}", status_code=204)
+async def delete_category(app: User, category_id: int) -> Response:
+    if not app.store.delete_category(category_id):
+        raise HTTPException(404, "Category not found.")
+    return Response(status_code=204)
+
+
+# ------------------------------------------------------------------ learning
+
+
+@router.get("/learning")
+async def learning(app: User) -> dict[str, Any]:
+    return {"enabled": app.prefs().learn, "lessons": app.lessons()}
+
+
+@router.delete("/learning")
+async def forget_learning(
+    app: User, index: int | None = Query(default=None, ge=0)
+) -> dict[str, Any]:
+    lessons = app.lessons()
+    if index is None:
+        lessons = []
+    elif index < len(lessons):
+        lessons.pop(index)
+    app.store.set_kv("lessons", lessons)
+    return {"enabled": app.prefs().learn, "lessons": lessons}
+
+
+def _claude_key_refusal(app: Magpie) -> str | None:
+    if app.settings.brain == "fake":
+        return "Magpie runs with MAGPIE_BRAIN=fake; remove it to use Claude."
+    config = app.ai_config()
+    if config.locked and config.provider.id != "claude":
+        return f"The server chooses the AI (MAGPIE_BRAIN={app.settings.brain}); change it there."
+    if app.claude_key_source() == "env":
+        return "The key is set by ANTHROPIC_API_KEY on the server; change it there."
+    return None
+
+
 @router.put("/claude/key")
 async def save_claude_key(app: User, body: ClaudeKeyIn) -> dict[str, Any]:
-    if app.settings.brain != "claude":
-        raise HTTPException(409, "Magpie runs with MAGPIE_BRAIN=fake; remove it to use Claude.")
-    if app.claude_key_source() == "env":
-        raise HTTPException(
-            409, "The key is set by ANTHROPIC_API_KEY on the server; change it there."
-        )
+    refusal = _claude_key_refusal(app)
+    if refusal:
+        raise HTTPException(409, refusal)
     try:
         warning = await app.set_claude_key(body.key)
-    except BrainError as exc:
+    except (BrainError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"available": app.brain.available, "warning": warning}
 
@@ -587,6 +808,222 @@ async def forget_claude_key(app: User) -> dict[str, Any]:
         )
     await app.set_claude_key(None)
     return {"available": app.brain.available}
+
+
+# ------------------------------------------------------------------------ AI
+
+
+def _clean_key(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    value = value.strip()
+    if any(char.isspace() for char in value):
+        raise ValueError("Paste the key on its own, without spaces.")
+    return value
+
+
+def _clean_address(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    if value and not value.startswith(("http://", "https://")):
+        raise ValueError("The address must start with http:// or https://.")
+    return value
+
+
+class AIModelsIn(BaseModel):
+    provider: str = Field(max_length=20)
+    base_url: str | None = Field(default=None, max_length=500)
+    key: str | None = Field(default=None, max_length=500)
+
+    @field_validator("key")
+    @classmethod
+    def _key(cls, value: str | None) -> str | None:
+        return _clean_key(value)
+
+    @field_validator("base_url")
+    @classmethod
+    def _address(cls, value: str | None) -> str | None:
+        return _clean_address(value)
+
+
+class AIIn(AIModelsIn):
+    model: str | None = Field(default=None, max_length=200)
+
+    @field_validator("model")
+    @classmethod
+    def _model_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if any(char.isspace() for char in value):
+            raise ValueError("A model name has no spaces.")
+        return value
+
+
+@router.get("/ai")
+async def ai_settings(app: User) -> dict[str, Any]:
+    return app.ai_status()
+
+
+@router.put("/ai")
+async def save_ai(app: User, body: AIIn) -> dict[str, Any]:
+    config = app.ai_config()
+    if config.provider.id == "fake":
+        raise HTTPException(409, "Magpie runs with MAGPIE_BRAIN=fake; remove it to choose an AI.")
+    if config.locked and body.provider != config.provider.id:
+        raise HTTPException(
+            409, f"The server chooses the AI (MAGPIE_BRAIN={app.settings.brain}); change it there."
+        )
+    if body.key and body.provider == config.provider.id and config.key_source == "env":
+        raise HTTPException(409, "The key is set on the server; change it there.")
+    try:
+        warning = await app.set_ai(
+            body.provider, model=body.model, base_url=body.base_url, key=body.key
+        )
+    except (BrainError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {**app.ai_status(), "warning": warning}
+
+
+@router.delete("/ai/key")
+async def forget_ai_key(
+    app: User, provider: str = Query(min_length=1, max_length=20)
+) -> dict[str, Any]:
+    config = app.ai_config()
+    if provider == config.provider.id and config.key_source == "env":
+        raise HTTPException(409, "The key is set on the server; change it there.")
+    if provider not in PROVIDERS:
+        raise HTTPException(422, "Unknown AI provider.")
+    app.forget_ai_key(provider)
+    return app.ai_status()
+
+
+@router.post("/ai/models")
+async def ai_models(app: User, body: AIModelsIn) -> dict[str, Any]:
+    try:
+        models = await app.ai_models(body.provider, base_url=body.base_url, key=body.key)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except BrainError as exc:
+        raise HTTPException(502 if exc.retryable else 422, str(exc)) from exc
+    return {"models": models}
+
+
+# --------------------------------------------------------------------- email
+
+_ADDRESS = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class EmailIn(BaseModel):
+    address: str = Field(max_length=254)
+    password: str | None = Field(
+        default=None, max_length=300, description="Leave out to keep the saved one"
+    )
+    to: str | None = Field(default=None, max_length=254, description="Defaults to the address")
+    host: str | None = Field(default=None, max_length=253)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    security: Literal["starttls", "ssl", "none"] | None = None
+
+    @field_validator("address", "to")
+    @classmethod
+    def _address(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        value = value.strip()
+        if not _ADDRESS.match(value):
+            raise ValueError("That doesn't look like an email address.")
+        return value
+
+    @field_validator("host")
+    @classmethod
+    def _host(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        value = value.strip().lower()
+        if any(char.isspace() or char in "/:@" for char in value):
+            raise ValueError("Enter just the server name, like smtp.example.com.")
+        return value
+
+
+def _email_status(app: Magpie) -> dict[str, Any]:
+    config = app.email.config()
+    return {
+        "configured": app.email.configured,
+        "source": config.source if config else None,
+        "address": config.sender if config else "",
+        "to": config.to if config else "",
+        "host": config.host if config else "",
+        "port": config.port if config else None,
+        "security": config.security if config else None,
+        "enabled": app.prefs().channel_enabled("email"),
+    }
+
+
+@router.get("/email")
+async def email_settings(app: User) -> dict[str, Any]:
+    return _email_status(app)
+
+
+@router.put("/email")
+async def save_email(app: User, body: EmailIn) -> dict[str, Any]:
+    current = app.email.config()
+    if current is not None and current.source == "env":
+        raise HTTPException(
+            409, "Email is set up on the server (MAGPIE_SMTP_HOST); change it there."
+        )
+    if body.address is None:
+        raise HTTPException(422, "Enter your email address.")
+    password = body.password or (
+        current.password if current and current.sender.lower() == body.address.lower() else ""
+    )
+    if not password:
+        raise HTTPException(422, "Enter the app password for this address.")
+    preset = smtp_preset(body.address)
+    host = body.host or (preset[0] if preset else None)
+    if not host:
+        raise HTTPException(
+            422, "Magpie doesn't know the mail server for this address; enter it (SMTP server)."
+        )
+    port = body.port or (preset[1] if preset and host == preset[0] else 587)
+    security = body.security or (preset[2] if preset and host == preset[0] else "starttls")
+    config = SmtpConfig(
+        host,
+        port,
+        security,
+        body.address,
+        password,
+        body.address,
+        body.to or body.address,
+        "dashboard",
+    )
+    try:
+        await asyncio.to_thread(app.email.check, config)
+    except EmailError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    app.store.set_kv(
+        "email",
+        {
+            "address": config.sender,
+            "password": config.password,
+            "host": config.host,
+            "port": config.port,
+            "security": config.security,
+            "to": config.to,
+        },
+    )
+    return _email_status(app)
+
+
+@router.delete("/email")
+async def forget_email(app: User) -> dict[str, Any]:
+    current = app.email.config()
+    if current is not None and current.source == "env":
+        raise HTTPException(
+            409, "Email is set up on the server (MAGPIE_SMTP_HOST); change it there."
+        )
+    app.store.delete_kv("email")
+    return _email_status(app)
 
 
 # ------------------------------------------------------------- notifications

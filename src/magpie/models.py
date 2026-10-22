@@ -102,6 +102,7 @@ class Note(BaseModel):
     in_digest: bool = False
     briefing: str = ""
     reply: str = ""
+    category_id: int | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
     links: list[Link] = Field(default_factory=list)
     reminders: list[Reminder] = Field(default_factory=list)
@@ -112,6 +113,17 @@ class Note(BaseModel):
             return self.title
         words = (self.text or self.raw_text).split()
         return " ".join(words[:8]) + ("…" if len(words) > 8 else "")
+
+
+COLORS = ("red", "orange", "amber", "green", "teal", "blue", "indigo", "purple", "pink", "grey")
+
+
+class Category(BaseModel):
+    id: int
+    name: str
+    color: str = "blue"
+    position: int = 0
+    count: int = 0  # open notes in it
 
 
 class Digest(BaseModel):

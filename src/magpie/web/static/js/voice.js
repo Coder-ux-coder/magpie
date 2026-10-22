@@ -3,20 +3,21 @@
 // VoiceCapture wraps the browser's Web Speech API:
 //   off       -> not listening
 //   standby   -> hands-free: listening only for the wake phrase ("notes on")
-//   recording -> capturing a note until the stop phrase, silence, or a tap
+//   recording -> capturing a note until the stop phrase, silence, Save or Notes off
+// Each recognition session is read as a whole (see noteFromResults), so a wake or
+// stop phrase still in the interim results acts at once, and later corrections
+// from the recogniser replace earlier guesses instead of being added twice.
 // Recorder is the fallback for browsers without speech recognition: it records
 // audio and the server transcribes it (MAGPIE_STT_API_KEY).
 
 import {
-  CANCEL_PHRASES,
   DEFAULT_STOP,
   DEFAULT_WAKE,
   STOP_ALIASES,
   WAKE_ALIASES,
-  afterWake,
-  beforeStop,
   englishLang,
-  isCancel,
+  findWake,
+  noteFromResults,
   phraseList,
   tidy,
 } from "./phrases.js";
@@ -26,13 +27,19 @@ const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 export const speechSupported = Boolean(Recognition);
 export const recordingSupported = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
 
+// A stop or cancel phrase heard only in interim results waits this long, in case
+// the recogniser is still changing its mind ("notes off…" → "notes office").
+const SETTLE_MS = 700;
+
 const ERRORS = {
-  "not-allowed": "Microphone access is blocked. Allow the microphone for this site in your browser settings.",
-  "service-not-allowed": "Speech recognition isn't allowed in this browser. Try Chrome, Edge or Safari, or type instead.",
-  "audio-capture": "No microphone was found.",
-  network: "Speech recognition needs an internet connection in this browser.",
+  "not-allowed": "The microphone is blocked. Allow it for this site (the icon next to the address bar), then press the mic.",
+  "service-not-allowed": "This browser doesn't allow speech recognition here. Use Chrome or Edge, or type your note.",
+  "audio-capture": "No microphone was found. Plug one in or check your sound settings, then press the mic.",
+  network: "Speech recognition needs an internet connection in this browser. Magpie keeps trying.",
   "language-not-supported": "Your browser can't recognise that accent. Pick another in Settings → Voice.",
 };
+
+const join = (a, b) => tidy(`${a || ""} ${b || ""}`);
 
 export class VoiceCapture extends EventTarget {
   constructor(options = {}) {
@@ -40,11 +47,15 @@ export class VoiceCapture extends EventTarget {
     this.options = { lang: "", wake: DEFAULT_WAKE, stop: DEFAULT_STOP, silenceSeconds: 8, ...options };
     this.state = "off";
     this.handsFree = false;
-    this.buffer = "";
-    this.standbyTail = "";
     this.running = false;
     this.rec = null;
+    this.results = []; // the current recognition session, as [{text, final}]
+    this.consumed = -1; // results up to here belong to finished notes (or Magpie's own voice)
+    this.from = 0; // where the note being recorded starts
+    this.fromWake = false; // ...and whether that result holds the wake phrase
+    this.carried = ""; // the note's words from earlier recognition sessions
     this.silenceTimer = null;
+    this.settleTimer = null;
     this.muteUntil = 0;
     this.failures = 0;
     this.lastStart = 0;
@@ -69,6 +80,7 @@ export class VoiceCapture extends EventTarget {
   setHandsFree(on) {
     this.handsFree = on;
     if (on && this.state === "off") {
+      this.consumed = this.results.length - 1; // nothing heard before now can wake it
       this._setState("standby");
       this._ensureRunning();
     } else if (!on && this.state === "standby") {
@@ -79,25 +91,67 @@ export class VoiceCapture extends EventTarget {
 
   // Push-to-talk: start a note right away.
   start() {
-    this.buffer = "";
+    if (this.state === "recording") return;
+    this.carried = "";
+    this.from = this.results.length;
+    this.fromWake = false;
     this._setState("recording");
     this._ensureRunning();
     this._armSilence();
+    this._emit("transcript", { final: "", interim: "" });
   }
 
+  /** The note so far: {final, interim, text}. */
+  current() {
+    if (this.state !== "recording") return { final: "", interim: "", text: "" };
+    const live = noteFromResults(this.results, {
+      from: this.from,
+      fromWake: this.fromWake,
+      wake: this.wake,
+      stop: this.stop,
+    });
+    return { ...live, final: join(this.carried, live.final), text: join(this.carried, live.text) };
+  }
+
+  // Stop recording and hand back the text (Save or Notes off was pressed).
+  take() {
+    if (this.state !== "recording") return "";
+    const { text } = this.current();
+    this._endNote();
+    return text;
+  }
+
+  // Stop recording and announce the note (stop phrase, silence, the mic button).
   finish() {
-    const text = tidy(this.buffer);
-    this.buffer = "";
-    this._clearSilence();
-    this._afterNote();
+    if (this.state !== "recording") return;
+    const { text } = this.current();
+    this._endNote();
     this._emit(text ? "note" : "empty", { text });
   }
 
-  cancelNote() {
-    this.buffer = "";
-    this._clearSilence();
-    this._afterNote();
-    this._emit("cancelled");
+  // Throw the note away. Returns its text so it can be undone.
+  cancelNote({ announce = true } = {}) {
+    if (this.state !== "recording") return "";
+    const { text } = this.current();
+    this._endNote();
+    if (announce) this._emit("cancelled", { text });
+    return text;
+  }
+
+  // The user edited the text: keep listening, and add only what is said from now on.
+  rebase() {
+    if (this.state !== "recording") return;
+    const pending = this.results.findIndex((result, index) => index >= this.from && !result.final);
+    const from = pending === -1 ? this.results.length : pending;
+    this.fromWake = this.fromWake && from === this.from;
+    this.from = from;
+    this.carried = "";
+    this._clearSettle();
+  }
+
+  // Make sure recognition is running again (after the tab was in the background).
+  resume() {
+    if (this.state !== "off") this._ensureRunning();
   }
 
   // Ignore what the mic hears for a while (e.g. while Magpie reads a reply aloud).
@@ -108,11 +162,16 @@ export class VoiceCapture extends EventTarget {
   shutdown() {
     this.handsFree = false;
     this._clearSilence();
+    this._clearSettle();
     this._setState("off");
     this._halt();
   }
 
-  _afterNote() {
+  _endNote() {
+    this.consumed = this.results.length - 1;
+    this.carried = "";
+    this._clearSilence();
+    this._clearSettle();
     if (this.handsFree) {
       this._setState("standby");
     } else {
@@ -151,71 +210,105 @@ export class VoiceCapture extends EventTarget {
     rec.lang = this._lang();
     rec.onresult = (event) => this._onResult(event);
     rec.onerror = (event) => this._onError(event);
-    rec.onend = () => {
-      this.running = false;
-      if (this.state === "off") return;
-      // Browsers end recognition every so often; restart, backing off if it
-      // keeps ending immediately.
-      const quick = Date.now() - this.lastStart < 1500;
-      this.failures = quick ? this.failures + 1 : 0;
-      if (this.failures > 5) {
-        this._emit("error", { message: "Speech recognition keeps stopping. Tap the mic to try again." });
-        this.shutdown();
-        return;
-      }
-      setTimeout(() => this.state !== "off" && this._ensureRunning(), quick ? 600 * this.failures : 150);
-    };
+    rec.onend = () => this._onEnd();
     this.rec = rec;
     return rec;
   }
 
-  _onResult(event) {
-    if (Date.now() < this.muteUntil) return;
-    let interim = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i];
-      const text = result[0]?.transcript || "";
-      if (result.isFinal) this._onFinal(text);
-      else interim += text;
-    }
+  _onEnd() {
+    this.running = false;
     if (this.state === "recording") {
-      this._emit("transcript", { final: this.buffer, interim });
-      if (interim) this._armSilence();
+      // A stop phrase still waiting to settle counts: the session is over.
+      const settling = Boolean(this.settleTimer);
+      this._clearSettle();
+      // Otherwise keep what was said; the next session's results start from scratch.
+      if (!(settling && this._settle())) this.carried = this.current().text;
     }
+    this._afterEnd();
   }
 
-  _onFinal(text) {
+  _afterEnd() {
+    this.results = [];
+    this.consumed = -1;
+    this.from = 0;
+    this.fromWake = false;
+    if (this.state === "off") return;
+    // Browsers end recognition every so often; restart, backing off if it keeps
+    // ending immediately.
+    const quick = Date.now() - this.lastStart < 1500;
+    this.failures = quick ? this.failures + 1 : 0;
+    if (this.failures > 5) {
+      this._fail("Speech recognition keeps stopping. Press the mic to try again.");
+      return;
+    }
+    setTimeout(() => this.state !== "off" && this._ensureRunning(), quick ? 600 * this.failures : 150);
+  }
+
+  _onResult(event) {
+    this.results = Array.from(event.results, (result) => ({
+      text: result[0]?.transcript || "",
+      final: Boolean(result.isFinal),
+    }));
+    if (Date.now() < this.muteUntil) {
+      this.consumed = this.results.length - 1; // Magpie's own voice, read aloud
+      return;
+    }
     if (this.state === "standby") {
-      // Look across the previous phrase too, in case "notes" and "on" were
-      // recognised as separate results.
-      const combined = `${this.standbyTail} ${text}`;
-      const wake = afterWake(combined, this.wake);
-      this.standbyTail = text;
-      if (!wake.found) return;
-      this.standbyTail = "";
-      this.buffer = "";
-      this._setState("recording");
-      this._emit("wake");
-      text = wake.rest;
-      if (!text) {
-        this._armSilence();
+      const index = findWake(this.results, this.consumed + 1, this.wake);
+      if (index === -1) {
+        // Settled chatter can't start a note any more; keep the last result in
+        // case "notes" and "on" arrive separately.
+        const settled = this.results.findLastIndex((result) => result.final);
+        this.consumed = Math.max(this.consumed, settled - 1);
         return;
       }
+      this.carried = "";
+      this.from = index;
+      this.fromWake = true;
+      this._setState("recording");
+      this._emit("wake");
     }
-    if (this.state !== "recording") return;
-    if (isCancel(text, CANCEL_PHRASES)) {
-      this.cancelNote();
+    if (this.state === "recording") this._review();
+  }
+
+  _review() {
+    const note = this.current();
+    if (note.cancelled) {
+      if (note.cancelSettled) this.cancelNote();
+      else this._settleLater();
       return;
     }
-    const combined = tidy(`${this.buffer} ${text}`);
-    const stop = beforeStop(combined, this.stop);
-    this.buffer = stop.text;
-    this._emit("transcript", { final: this.buffer, interim: "" });
-    if (stop.found) {
-      this.finish();
+    this._emit("transcript", { final: note.final, interim: note.interim });
+    if (note.stopped) {
+      if (note.settled) this.finish();
+      else this._settleLater();
       return;
     }
+    this._clearSettle();
     this._armSilence();
+  }
+
+  _settleLater() {
+    if (this.settleTimer) return;
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = null;
+      this._settle();
+    }, SETTLE_MS);
+  }
+
+  // Act on a stop or cancel phrase that is still in the interim results.
+  _settle() {
+    if (this.state !== "recording") return false;
+    const note = this.current();
+    if (note.cancelled) this.cancelNote();
+    else if (note.stopped) this.finish();
+    else return false;
+    return true;
+  }
+
+  _clearSettle() {
+    clearTimeout(this.settleTimer);
+    this.settleTimer = null;
   }
 
   _armSilence() {
@@ -224,9 +317,8 @@ export class VoiceCapture extends EventTarget {
     if (!seconds) return;
     this.silenceTimer = setTimeout(() => {
       if (this.state !== "recording") return;
-      if (this.buffer.trim()) this.finish();
-      else if (this.handsFree) this._setState("standby");
-      else this.finish();
+      if (this.current().text || !this.handsFree) this.finish();
+      else this._endNote(); // woken by mistake: back to listening, quietly
     }, seconds * 1000);
   }
 
@@ -237,9 +329,20 @@ export class VoiceCapture extends EventTarget {
 
   _onError(event) {
     if (event.error === "no-speech" || event.error === "aborted") return;
-    const message = ERRORS[event.error] || `Speech recognition error: ${event.error}`;
-    if (event.error !== "network") this.shutdown();
-    this._emit("error", { error: event.error, message });
+    const message = ERRORS[event.error] || `Speech recognition stopped (${event.error}). Press the mic to try again.`;
+    if (event.error === "network") {
+      // Recognition ends and restarts by itself (see _afterEnd).
+      this._emit("error", { error: event.error, message, transient: true });
+      return;
+    }
+    this._fail(message, event.error);
+  }
+
+  // Stop for good, handing back anything said so far so it isn't lost.
+  _fail(message, error = "stopped") {
+    const text = this.state === "recording" ? this.current().text : "";
+    this.shutdown();
+    this._emit("error", { error, message, text });
   }
 
   _setState(state) {

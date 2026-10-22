@@ -3,7 +3,7 @@
 
 import { api } from "./api.js";
 import { isWorking } from "./cards.js";
-import { emit } from "./state.js";
+import { aiName, emit } from "./state.js";
 import { toast } from "./ui.js";
 
 async function guarded(work) {
@@ -24,6 +24,7 @@ export function patchNote(note, changes, message, undoChanges) {
   return guarded(async () => {
     const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: changes });
     emit("note-updated", updated);
+    if ("category_id" in changes) emit("categories-changed"); // the tabs' counts
     if (message) {
       toast(message, undoChanges ? { action: "Undo", onAction: () => patchNote(updated, undoChanges) } : {});
     }
@@ -53,6 +54,20 @@ export const noteActions = {
       { status: note.status },
     );
   },
+  // Dropped on a category's tab (or chosen in the note window); Undo puts it back.
+  moveTo(note, category) {
+    const id = category?.id || 0;
+    if ((note.category_id || 0) === id) {
+      toast(category ? `It's already in ${category.name}.` : "It isn't in a category.");
+      return Promise.resolve(null);
+    }
+    return patchNote(
+      note,
+      { category_id: id },
+      category ? `Moved to ${category.name}.` : "Taken out of its category.",
+      { category_id: note.category_id || 0 },
+    );
+  },
   remove(note) {
     emit("note-hidden", note.id);
     let undone = false;
@@ -77,7 +92,7 @@ export const noteActions = {
       const updated = await api(`/api/notes/${note.id}/reprocess`, { method: "POST" });
       emit("note-updated", updated);
       watchNote(note.id);
-      toast("Claude is taking another look.");
+      toast(`${aiName()} is taking another look.`);
       return updated;
     });
   },
@@ -109,7 +124,7 @@ export const reminderActions = {
   cancel: (reminder) => reminderActions.run(reminder, "cancel"),
 };
 
-// Poll a note until Claude has filed it and reviewed its links.
+// Poll a note until the AI has filed it and reviewed its links.
 const watching = new Map();
 
 export function watchNote(id, { onFiled } = {}) {

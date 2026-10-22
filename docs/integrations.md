@@ -2,6 +2,7 @@
 
 Ways to get notes into Magpie and reminders out of it, beyond the dashboard.
 
+- [Pop-ups and email](#pop-ups-and-email)
 - [Telegram](#telegram)
 - [iPhone and iPad: “Hey Siri, notes on”](#iphone-and-ipad-hey-siri-notes-on)
 - [Android](#android)
@@ -14,6 +15,22 @@ Ways to get notes into Magpie and reminders out of it, beyond the dashboard.
 Most integrations need your **API token** (Settings → Integrations) and, from outside your
 home network, a public HTTPS address for Magpie (see [deployment](deployment.md)).
 
+## Pop-ups and email
+
+The two simplest ways to get reminders, both set up in **Settings → Reminders** (or on the
+welcome screen), with nothing to install:
+
+- **Pop-ups:** press **Turn on pop-ups here** on each computer or phone and allow
+  notifications. A reminder then pops up even when Magpie's window is in the background,
+  with Done and Snooze buttons. Browsers allow this on `http://localhost` and on HTTPS
+  addresses; on an iPhone or iPad, add Magpie to the Home Screen first.
+- **Email:** enter your address and an *app password* (Gmail, Outlook, Yahoo and iCloud make
+  one in their security settings; the form links to each). Magpie fills in the mail server,
+  checks the login before saving, and sends a test. Each reminder arrives as
+  *“⏰ Call James about the budget · due today 5:00 PM”*, so it shows up on your phone like
+  any other email. Another mail server? Open *Mail server settings* in the form, or set
+  `MAGPIE_SMTP_*` (see [configuration](configuration.md#notifications)).
+
 ## Telegram
 
 Telegram is the most convenient way to use Magpie on a phone: you send notes by text or
@@ -23,7 +40,7 @@ polls Telegram, so this works even when your server has no public address.
 1. In Telegram, talk to [@BotFather](https://t.me/BotFather), send `/newbot` and follow the
    prompts. Copy the token it gives you.
 2. Set `MAGPIE_TELEGRAM_BOT_TOKEN=<token>` in `.env` and restart Magpie.
-3. In the dashboard, open **Settings → Notifications → Connect Telegram** and tap
+3. In the dashboard, open **Settings → Reminders → Connect Telegram** and tap
    **Open @yourbot** (or send the bot the `/start 123456` message shown). The code works
    for 15 minutes and only once.
 
@@ -71,7 +88,7 @@ from the Share Sheet* and sends `{"text": <Shortcut Input>, "source": "shortcut"
 same URL. Then share any page to it to get a review.
 
 Web push works on iOS 16.4 and later once Magpie is added to the Home Screen
-(Safari → Share → Add to Home Screen); turn it on in Settings → Notifications.
+(Safari → Share → Add to Home Screen); turn it on in Settings → Reminders.
 
 ## Android
 
@@ -89,15 +106,19 @@ Notifications.
 
 ## Any browser
 
-**Hands-free mode.** Turn on *Hands-free* and say **“notes on”** to start a note and
-**“notes off”** (or “end note”, or just stop talking for a few seconds) to save it.
-“Cancel note” discards it. Change the phrases, accent and silence timeout in
-Settings → Voice. This uses the browser's built-in speech recognition (Chrome, Edge,
-Safari); Chrome sends the audio to Google's speech service. In other browsers, or if you
-prefer, set `MAGPIE_STT_API_KEY` and turn on *Use the server's speech-to-text*.
+**The voice bar.** Magpie listens for **“notes on”** as soon as it opens (once you've
+allowed the microphone). Say it, talk while your words appear in the bar, and say
+**“notes off”** (or press Save, or just stop talking for a few seconds) to save the note.
+“Cancel note”, Cancel or Esc discards it, with Undo. Change the words, the accent and the
+silence timeout from the bar's options or Settings → Voice. This uses the browser's
+built-in speech recognition (Chrome, Edge, Safari); Chrome and Edge send the audio to their
+makers' speech services. In other browsers, or if you prefer, set `MAGPIE_STT_API_KEY` and
+turn on *Use the server's speech-to-text*.
 
-The microphone only works over HTTPS (or on `localhost`), and browsers stop listening in
-background tabs, so hands-free works while the Magpie tab is open.
+The microphone only works over HTTPS (or on `localhost`). Browsers may stop listening in a
+background tab, so keep Magpie open in its own window, or use **Pop out** (Chrome and Edge)
+to keep the bar in a small window on top of your other programs. Only one Magpie window
+listens at a time.
 
 **Keyboard.** Press <kbd>?</kbd> in the dashboard for all shortcuts: <kbd>m</kbd> toggles
 the mic, <kbd>Alt</kbd>+<kbd>N</kbd> does it even while typing, <kbd>n</kbd> types a note,
@@ -168,14 +189,14 @@ this week?”* or *“Add a note in Magpie to renew my passport next month.”*
 ## Notification channels
 
 Reminders and digests go to every channel that is set up and switched on in Settings →
-Notifications. Use **Test** next to each one to check it.
+Reminders. Use **Test** next to each one to check it.
 
 | Channel | Set up | Buttons |
 | --- | --- | --- |
 | Telegram | `MAGPIE_TELEGRAM_BOT_TOKEN`, then connect in Settings | Done, +1 hour, Tomorrow, Open |
-| Browser push | Settings → Notifications → *Notify this device* | Done, Snooze |
+| Pop-ups (browser push) | Settings → Reminders → *Turn on pop-ups here* | Done, Snooze |
 | [ntfy](https://ntfy.sh) | `MAGPIE_NTFY_TOPIC` (a long, secret name), subscribe in the ntfy app | Done, Snooze |
-| Email | `MAGPIE_SMTP_*` and `MAGPIE_EMAIL_TO` | Links to Done and Snooze |
+| Email | Settings → Reminders → Email (or `MAGPIE_SMTP_*` and `MAGPIE_EMAIL_TO`) | Links to Done and Snooze |
 | Webhook | `MAGPIE_WEBHOOK_URL`, `MAGPIE_WEBHOOK_FORMAT` (`json`, `slack`, `discord`) | — |
 
 Buttons outside Telegram use signed one-time links, which need `MAGPIE_BASE_URL` set to an
@@ -188,16 +209,17 @@ The `json` webhook format posts:
 {
   "event": "reminder",
   "title": "Call James about the budget",
-  "body": "Budget call",
-  "text": "Call James about the budget\n\nBudget call",
+  "body": "Budget call\nDue today 5:00 PM.",
+  "text": "Call James about the budget\n\nBudget call\nDue today 5:00 PM.",
   "url": "https://your-magpie/#/note/12",
   "note_id": 12,
   "reminder_id": 34,
+  "due": "today 5:00 PM",
   "actions": {"done": "https://your-magpie/a/…", "snooze": "https://your-magpie/a/…"}
 }
 ```
 
-`event` is `reminder`, `digest` or `test`.
+`event` is `reminder`, `digest` or `test`; `due` is set for reminders only.
 
 ## HTTP API
 
@@ -208,7 +230,7 @@ Interactive documentation lives at `/api/docs` on your server. Authenticate with
 TOKEN=mgp_your_token
 URL=https://your-magpie.example.com
 
-# Add a note and wait for Claude's reply (usually a few seconds)
+# Add a note and wait for the AI's reply (usually a few seconds)
 curl -s "$URL/api/notes?wait=true" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"text": "remind me to call James at 5 pm", "source": "api"}'
@@ -229,7 +251,9 @@ curl -s "$URL/api/notes/audio?wait=true" -H "Authorization: Bearer $TOKEN" \
   -F file=@memo.m4a -F source=api
 ```
 
-`source` is a short label shown with the note (`api`, `siri`, `shortcut`, …). Notes made
+`source` is a short label shown with the note (`api`, `siri`, `shortcut`, …). Add
+`category_id` to put the note in one of your categories, and `captured_in` (up to 60
+characters) to record where it was written. Notes made
 offline can pass `captured_at` (ISO 8601) so “in 20 minutes” counts from when you said it,
 and a random `client_id` (8 to 64 letters, digits, `-` or `_`): sending the same one again
 returns the note already saved instead of making a copy, so retries are safe.

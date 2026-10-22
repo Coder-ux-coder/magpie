@@ -402,7 +402,8 @@ class TelegramBot:
         elif event == "failed" and origin:
             await self.reply(
                 chat_id,
-                f"⚠️ Saved, but Claude couldn't process it: {escape(note.error or 'unknown error')}",
+                f"⚠️ Saved, but {escape(self.app.brain.label)} couldn't process it: "
+                f"{escape(note.error or 'unknown error')}",
                 reply_to=reply_to,
             )
 

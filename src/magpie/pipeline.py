@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from magpie.brain import BrainError, BrainUnavailable, Context
+from magpie.brain import BrainError, BrainUnavailable
 from magpie.content import FetchError
 from magpie.content.links import extract_urls, is_http_url, link_kind, normalize_url
 from magpie.models import Link, Note, NoteKind, ProcState
@@ -148,8 +148,8 @@ class Pipeline:
             return store.update_note(
                 note_id,
                 state=ProcState.PENDING,
-                error="Claude is not set up yet (ANTHROPIC_API_KEY). The note is saved and will "
-                "be processed once a key is configured.",
+                error=f"{brain.label} isn't set up yet. The note is saved and will be filed once "
+                "it is (Settings → AI).",
             )
         store.update_note(note_id, state=ProcState.PROCESSING, error=None)
         prefs = self.app.prefs()
@@ -157,14 +157,9 @@ class Pipeline:
         # Relative times ("in 20 minutes") count from when the note was captured,
         # which matters for notes queued offline or retried after an outage.
         clock = note.created_at if now - note.created_at < CAPTURE_CLOCK_WINDOW else now
-        ctx = Context(
-            timezone=prefs.timezone,
-            now=clock,
-            proactivity=prefs.proactivity,
-            about_me=prefs.about_me,
-            morning_time=prefs.morning_time,
-            source=note.source,
-            instructions=prefs.instructions,
+        written_in = note.meta.get("captured_in")
+        ctx = self.app.context(
+            note.source, now=clock, written_in=written_in if isinstance(written_in, str) else ""
         )
         try:
             triage = await brain.triage(note.raw_text, ctx)
@@ -198,8 +193,16 @@ class Pipeline:
 
         meta = dict(note.meta)
         meta.pop("attempts", None)
+        category_id = note.category_id
+        if category_id is None and triage.category.strip():
+            # A category the user chose (the tab they wrote in, or their correction) stays.
+            match = store.category_named(triage.category)
+            if match is not None:
+                category_id = match.id
+                meta["category_by"] = "ai"
         note = store.update_note(
             note_id,
+            category_id=category_id,
             title=triage.title.strip()[:200],
             # An empty clean-up would hide what the user said.
             text=triage.text.strip()[:60_000] or note.raw_text,
@@ -317,7 +320,7 @@ class Pipeline:
         except FetchError as exc:
             if "private address" in str(exc) or "Unsupported URL" in str(exc):
                 raise
-            log.info("Fetching %s failed (%s); letting Claude fetch it", link.url, exc)
+            log.info("Fetching %s failed (%s); letting the AI try", link.url, exc)
             content = None
         if content is not None and (content.has_body or content.kind == "youtube"):
             review = await brain.review(content, note_text)

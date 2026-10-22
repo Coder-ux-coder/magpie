@@ -76,11 +76,14 @@ class Scheduler:
         store = self.app.store
         prefs = self.app.prefs()
         note = store.get_note(reminder.note_id, children=False) if reminder.note_id else None
+        due = humanize(reminder.due_at, prefs.timezone, now)
         body_parts = []
         if note and note.display_title and note.display_title != reminder.message:
             body_parts.append(note.display_title)
         if now - reminder.due_at > LATE_AFTER:
-            body_parts.append(f"(This was due {humanize(reminder.due_at, prefs.timezone)}.)")
+            body_parts.append(f"(This was due {due}.)")
+        else:
+            body_parts.append(f"Due {due}.")
         notification = Notification(
             title=reminder.message,
             body="\n".join(body_parts),
@@ -90,6 +93,7 @@ class Scheduler:
             note_id=reminder.note_id,
             actions=self.app.reminder_actions(reminder.id),
             snooze_minutes=prefs.snooze_minutes,
+            due=due,
         )
         report = await self.app.notifier.send(notification)
 

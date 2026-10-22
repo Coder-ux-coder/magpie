@@ -1,9 +1,9 @@
 """Fill a fresh Magpie data directory with sample notes, for UI work and screenshots.
 
     MAGPIE_DATA_DIR=demo-data python scripts/seed_demo.py
-    MAGPIE_DATA_DIR=demo-data MAGPIE_BRAIN=fake MAGPIE_PASSWORD=demo magpie serve
+    MAGPIE_DATA_DIR=demo-data MAGPIE_BRAIN=fake MAGPIE_LOGIN=false magpie serve
 
-The notes are written straight into the database, as if Claude had already
+The notes are written straight into the database, as if the AI had already
 filed them. Nothing is sent to any API.
 """
 
@@ -24,15 +24,22 @@ def main() -> None:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     store = Store(Database(settings.db_path), settings)
     tz = settings.timezone if settings.timezone != "UTC" else "Europe/London"
-    store.save_prefs(Prefs(timezone=tz))
+    # Set up already, so the welcome screen doesn't cover the sample notes.
+    store.save_prefs(Prefs(timezone=tz, onboarded=True))
     today = local_now(tz).date()
+    work = store.add_category("Work", "blue").id
+    home = store.add_category("Home", "green").id
+    family = store.add_category("Family", "pink").id
 
     def at(days: int, hour: int, minute: int = 0):
         day = today + timedelta(days=days)
         return localize(datetime(day.year, day.month, day.day, hour, minute), tz)
 
     def note(raw, minutes_ago, **fields):
-        created = store.create_note(raw, fields.pop("source", "web-voice"))
+        written_in = fields.pop("written_in", "Inbox")
+        created = store.create_note(
+            raw, fields.pop("source", "web-voice"), {"captured_in": written_in}
+        )
         store.set_created_at(created.id, now_utc() - timedelta(minutes=minutes_ago))
         store.update_note(created.id, state=ProcState.READY, **fields)
         return created.id
@@ -45,6 +52,7 @@ def main() -> None:
         text="- Milk\n- Eggs\n- Bread\n- Lemons\n- Tea bags",
         kind="list",
         tags=["home"],
+        category_id=home,
         ping="none",
         reply="Saved to lists.",
     )
@@ -57,6 +65,7 @@ def main() -> None:
         text="Had a really good chat with Dad today. He's feeling much better after the surgery.",
         kind="journal",
         tags=["family"],
+        category_id=family,
         ping="none",
         ping_reason="A journal entry, nothing to follow up.",
         reply="Saved to your journal.",
@@ -69,6 +78,7 @@ def main() -> None:
         text="Call Mum on Saturday morning.",
         kind="task",
         tags=["family"],
+        category_id=family,
         ping="explicit",
         ping_reason="You said Saturday morning.",
         reply="Saved. I'll remind you on Saturday at 11:00 AM to call Mum.",
@@ -83,6 +93,8 @@ def main() -> None:
         text="Every Monday at 9, review the weekly plan.",
         kind="task",
         tags=["work", "planning"],
+        category_id=work,
+        written_in="Work",
         ping="explicit",
         ping_reason="A weekly reminder, Mondays at 9:00 AM.",
         reply="Saved. I'll remind you every Monday at 9:00 AM.",
@@ -160,6 +172,7 @@ def main() -> None:
         text="The electricity bill is due on the 10th.",
         kind="task",
         tags=["money", "home"],
+        category_id=home,
         ping="suggested",
         ping_reason="It's due on the 10th, so I'll nudge you the evening before.",
         reply="Saved. I'll remind you tomorrow at 6:00 PM, before it's due.",
@@ -179,6 +192,7 @@ def main() -> None:
         text="Remind me to call James tomorrow at 10 about the Q3 budget numbers.",
         kind="task",
         tags=["work", "budget"],
+        category_id=work,
         ping="explicit",
         ping_reason="You asked for tomorrow at 10.",
         reply="Saved. I'll remind you tomorrow at 10:00 AM to call James about the Q3 budget.",

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import smtplib
 import ssl
 from collections.abc import Callable
+from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Any
 
@@ -170,6 +172,7 @@ class WebhookChannel:
             "url": link,
             "note_id": notification.note_id,
             "reminder_id": notification.reminder_id,
+            "due": notification.due or None,
             "actions": notification.actions,
         }
 
@@ -181,53 +184,174 @@ class WebhookChannel:
             raise RuntimeError(f"Webhook returned HTTP {response.status_code}")
 
 
+# Outgoing mail servers for common addresses, so people only need their address and an
+# app password. Gmail, Outlook, Yahoo and iCloud refuse normal passwords from apps.
+EMAIL_PRESETS: dict[str, tuple[str, int, str]] = {
+    "gmail.com": ("smtp.gmail.com", 587, "starttls"),
+    "googlemail.com": ("smtp.gmail.com", 587, "starttls"),
+    "outlook.com": ("smtp-mail.outlook.com", 587, "starttls"),
+    "hotmail.com": ("smtp-mail.outlook.com", 587, "starttls"),
+    "live.com": ("smtp-mail.outlook.com", 587, "starttls"),
+    "msn.com": ("smtp-mail.outlook.com", 587, "starttls"),
+    "yahoo.com": ("smtp.mail.yahoo.com", 465, "ssl"),
+    "ymail.com": ("smtp.mail.yahoo.com", 465, "ssl"),
+    "icloud.com": ("smtp.mail.me.com", 587, "starttls"),
+    "me.com": ("smtp.mail.me.com", 587, "starttls"),
+    "mac.com": ("smtp.mail.me.com", 587, "starttls"),
+    "aol.com": ("smtp.aol.com", 465, "ssl"),
+    "zoho.com": ("smtp.zoho.com", 465, "ssl"),
+    "fastmail.com": ("smtp.fastmail.com", 465, "ssl"),
+    "gmx.com": ("mail.gmx.com", 587, "starttls"),
+    "gmx.co.uk": ("mail.gmx.com", 587, "starttls"),
+    "yandex.com": ("smtp.yandex.com", 465, "ssl"),
+}
+
+
+def smtp_preset(address: str) -> tuple[str, int, str] | None:
+    domain = address.rpartition("@")[2].strip().lower()
+    return EMAIL_PRESETS.get(domain)
+
+
+@dataclass(frozen=True)
+class SmtpConfig:
+    host: str
+    port: int
+    security: str  # starttls | ssl | none
+    username: str
+    password: str
+    sender: str
+    to: str
+    source: str  # env | dashboard
+
+
+class EmailError(Exception):
+    """The mail server refused or couldn't be reached; the message says what to do."""
+
+
 class EmailChannel:
     name = "email"
     label = "Email"
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, store: Store | None = None) -> None:
         self.settings = settings
+        self.store = store
+
+    def config(self) -> SmtpConfig | None:
+        """The server's MAGPIE_SMTP_* settings, else what was entered in the dashboard."""
+        s = self.settings
+        if s.smtp_host:
+            sender = s.smtp_from or s.smtp_username or ""
+            return SmtpConfig(
+                s.smtp_host,
+                s.smtp_port,
+                s.smtp_security,
+                s.smtp_username or "",
+                s.smtp_password or "",
+                sender,
+                s.email_to or "",
+                "env",
+            )
+        saved = self.store.get_kv("email") if self.store is not None else None
+        if not isinstance(saved, dict):
+            return None
+        try:
+            address = str(saved["address"])
+            return SmtpConfig(
+                str(saved["host"]),
+                int(saved["port"]),
+                str(saved.get("security", "starttls")),
+                address,
+                str(saved["password"]),
+                address,
+                str(saved.get("to") or address),
+                "dashboard",
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
 
     @property
     def configured(self) -> bool:
-        s = self.settings
-        return bool(s.smtp_host and s.email_to and (s.smtp_from or s.smtp_username))
+        config = self.config()
+        return bool(config and config.host and config.to and config.sender)
 
-    def build(self, notification: Notification) -> EmailMessage:
-        s = self.settings
+    def build(self, notification: Notification, config: SmtpConfig | None = None) -> EmailMessage:
+        config = config or self.config()
         message = EmailMessage()
         subject = f"{ICONS.get(notification.kind, '')} {notification.title}".strip()
+        if notification.kind == "reminder" and notification.due:
+            subject += f" · due {notification.due}"
         message["Subject"] = _one_line(subject, 150)
-        message["From"] = s.smtp_from or s.smtp_username or ""
-        message["To"] = s.email_to or ""
-        lines = [notification.body or notification.title]
+        message["From"] = config.sender if config else ""
+        message["To"] = config.to if config else ""
+        lines = [notification.title]
+        if notification.body:
+            lines.append(notification.body)
         if _public_url(notification.url):
             lines.append(f"Open in Magpie: {notification.url}")
         snooze = f"Snooze {snooze_label(notification.snooze_minutes)}"
         for label, key in (("Mark as done", "done"), (snooze, "snooze")):
             if key in notification.actions:
                 lines.append(f"{label}: {notification.actions[key]}")
+        lines.append("— Magpie")
         message.set_content("\n\n".join(lines))
         return message
 
-    def _send_sync(self, message: EmailMessage) -> None:
-        s = self.settings
+    def _connect(self, config: SmtpConfig) -> smtplib.SMTP:
         context = ssl.create_default_context()
-        if s.smtp_security == "ssl":
+        if config.security == "ssl":
             server: smtplib.SMTP = smtplib.SMTP_SSL(
-                s.smtp_host or "", s.smtp_port, context=context, timeout=30
+                config.host, config.port, context=context, timeout=30
             )
         else:
-            server = smtplib.SMTP(s.smtp_host or "", s.smtp_port, timeout=30)
-        with server:
-            if s.smtp_security == "starttls":
+            server = smtplib.SMTP(config.host, config.port, timeout=30)
+        try:
+            if config.security == "starttls":
                 server.starttls(context=context)
-            if s.smtp_username:
-                server.login(s.smtp_username, s.smtp_password or "")
+            if config.username:
+                server.login(config.username, config.password)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                server.close()
+            raise
+        return server
+
+    def check(self, config: SmtpConfig) -> None:
+        """Log in to the mail server without sending anything; EmailError says what's wrong."""
+        try:
+            with self._connect(config):
+                pass
+        except Exception as exc:
+            raise EmailError(explain_smtp_error(exc, config)) from exc
+
+    def _send_sync(self, message: EmailMessage, config: SmtpConfig) -> None:
+        with self._connect(config) as server:
             server.send_message(message)
 
     async def send(self, notification: Notification) -> None:
-        await asyncio.to_thread(self._send_sync, self.build(notification))
+        config = self.config()
+        if config is None:
+            raise EmailError("Email isn't set up.")
+        try:
+            await asyncio.to_thread(self._send_sync, self.build(notification, config), config)
+        except Exception as exc:
+            raise EmailError(explain_smtp_error(exc, config)) from exc
+
+
+def explain_smtp_error(exc: BaseException, config: SmtpConfig) -> str:
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return (
+            "The mail server refused the password. Gmail, Outlook, Yahoo and iCloud need an "
+            "app password, not the one you sign in with."
+        )
+    if isinstance(exc, smtplib.SMTPNotSupportedError):
+        return f"{config.host} doesn't offer a secure connection on port {config.port}."
+    if isinstance(exc, ssl.SSLError):
+        return f"The secure connection to {config.host} failed ({exc.reason or exc})."
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return "The mail server refused the address to send to."
+    if isinstance(exc, (OSError, smtplib.SMTPServerDisconnected)):
+        return f"Couldn't connect to {config.host} on port {config.port}."
+    return f"The mail server said: {exc}"[:300]
 
 
 class VapidKeys:
@@ -256,7 +380,7 @@ class VapidKeys:
 
 class WebPushChannel:
     name = "webpush"
-    label = "Browser push"
+    label = "Pop-ups (this computer and phone)"
 
     def __init__(self, store: Store, settings: Settings) -> None:
         self.store = store

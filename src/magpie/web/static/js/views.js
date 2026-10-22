@@ -5,7 +5,7 @@ import { noteActions, reminderActions } from "./actions.js";
 import { KINDS, noteCard } from "./cards.js";
 import { renderMarkdown } from "./markdown.js";
 import { speak } from "./speech.js";
-import { emit, local, on, snoozeLabel, speechLang, state, tz } from "./state.js";
+import { aiName, categoryOf, emit, local, on, snoozeLabel, speechLang, state, tz } from "./state.js";
 import { clear, clock, dayLabel, h, icon, toast, when } from "./ui.js";
 
 const PAGE = 40;
@@ -16,9 +16,11 @@ let list = { notes: [], hasMore: false, key: "", container: null };
 function belongs(note, route, q) {
   if (q) return true;
   if (route.kind && note.kind !== route.kind) return false;
+  if (route.category && note.category_id !== route.category) return false;
   switch (route.view) {
     case "inbox":
     case "kind":
+    case "category":
       return note.status === "open";
     case "done":
       return note.status === "done";
@@ -39,7 +41,7 @@ function emptyState(route, q) {
   if (route.view === "inbox") {
     return h("div", { class: "empty" },
       h("h3", {}, "Your inbox is clear"),
-      h("p", {}, "Capture anything. Claude files it and decides when to remind you."),
+      h("p", {}, "Capture anything. Magpie files it and decides when to remind you."),
       h("ul", {},
         h("li", {}, `Tap the mic, or turn on hands-free and say “${wake}”.`),
         h("li", {}, "Type: “remind me to drink water in 10 minutes”."),
@@ -50,10 +52,16 @@ function emptyState(route, q) {
   }
   const messages = {
     scheduled: "Nothing scheduled. Say when, like “remind me to call James at 5 pm”.",
-    reviews: "Share a YouTube video or an article and Claude will review it for you.",
+    reviews: `Share a YouTube video or an article and ${aiName()} will review it for you.`,
     done: "Finished notes show up here.",
     archived: "Archived notes show up here.",
   };
+  if (route.view === "category") {
+    const name = categoryOf(route.category)?.name || "this category";
+    return h("div", { class: "empty" },
+      h("h3", {}, `Nothing in ${name} yet`),
+      h("p", {}, `Notes you write while this tab is open go into ${name}. You can also drag a note onto its tab, or pick ${name} in a note's details.`));
+  }
   const kind = route.kind ? KINDS[route.kind]?.label.toLowerCase() : null;
   return h("div", { class: "empty" }, h("p", {}, messages[route.view] || `No ${kind || ""} notes yet.`));
 }
@@ -67,11 +75,16 @@ export async function renderNotes(container, route, q, isCurrent = () => true) {
     params.set("q", q);
     params.set("view", "all");
   } else {
-    params.set("view", route.view === "kind" ? "inbox" : route.view);
+    params.set("view", route.view === "kind" || route.view === "category" ? "inbox" : route.view);
     if (route.kind) params.set("kind", route.kind);
+    if (route.category) params.set("category", String(route.category));
   }
   const data = await api(`/api/notes?${params}`);
   if (!isCurrent()) return;
+  if (Array.isArray(data.categories)) {
+    state.categories = data.categories;
+    emit("categories", data.categories);
+  }
   emit("counts", data.counts);
   params.set("limit", String(PAGE));
   list = { notes: data.notes, hasMore: data.notes.length >= PAGE, key, container, route, q, params };
@@ -247,7 +260,7 @@ export async function renderDigests(container, isCurrent = () => true) {
   const run = async (kind, button) => {
     busy(button, kind === "weekly" ? "Writing your review…" : "Writing your digest…");
     try {
-      // Claude writes it on the spot, which can take a minute or two.
+      // The AI writes it on the spot, which can take a minute or two.
       await api("/api/digests", { method: "POST", body: { kind, send: send.checked }, timeout: 240000 });
       toast(send.checked ? "Done, and sent to your channels." : "Done.");
     } catch (error) {
@@ -260,7 +273,7 @@ export async function renderDigests(container, isCurrent = () => true) {
   const weekly = h("button", { type: "button", class: "btn", onclick: () => run("weekly", weekly) }, icon("sparkles"), "Weekly review now");
   container.append(
     h("div", { class: "card" },
-      h("p", { class: "muted" }, "Claude writes a daily digest (scheduled reminders, notes to revisit, new reviews) and a weekly review of themes and open loops. Set their times in Settings."),
+      h("p", { class: "muted" }, "Magpie writes a daily digest (scheduled reminders, notes to revisit, new reviews) and a weekly review of themes and open loops. Set their times in Settings → Reminders."),
       h("div", { class: "row" }, daily, weekly),
       h("label", { class: "switch" }, send, h("span", { class: "switch-track", "aria-hidden": "true" }), "Also send to my notification channels"),
     ),
@@ -309,7 +322,7 @@ export function renderAsk(container) {
     clear(answers);
     for (const item of [...conversation].reverse()) {
       const body = item.pending
-        ? h("p", { class: "muted" }, h("span", { class: "spinner", "aria-hidden": "true" }), " Claude is reading your notes…")
+        ? h("p", { class: "muted" }, h("span", { class: "spinner", "aria-hidden": "true" }), ` ${aiName()} is reading your notes…`)
         : item.error
           ? h("p", { class: "error" }, item.error)
           : renderMarkdown(item.answer);
@@ -346,7 +359,7 @@ export function renderAsk(container) {
   });
   container.append(
     h("div", { class: "card" },
-      h("p", { class: "muted" }, "Claude answers from your notes and links to the ones it used."),
+      h("p", { class: "muted" }, `${aiName()} answers from your notes and links to the ones it used.`),
       form,
       h("div", { class: "chips", style: "margin-top: .75rem" },
         SUGGESTIONS.map((s) => h("button", { type: "button", class: "chip", onclick: () => ask(s) }, s)),

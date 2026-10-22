@@ -6,8 +6,51 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-22
+
 ### Added
 
+- **A voice bar at the bottom of every view**, like a dictation tool: say “notes on” (or
+  press the mic, or type), watch the words appear and edit them, then say “notes off” or
+  press Save. Cancel, Esc or “cancel note” discards the note with Undo. Magpie listens for
+  the command word as soon as it opens (once the microphone is allowed), only one window
+  listens at a time, and the bar can pop out into a small always-on-top window (Chrome and
+  Edge). An Install button makes Magpie an app with its own window.
+- **Any AI, or none.** Settings → AI chooses Claude (Haiku 5.5 by default; Sonnet 5.5 and
+  Opus 5.5 too), ChatGPT, Gemini, OpenRouter, Ollama on your own computer, any
+  OpenAI-compatible service, or no AI (simple rules). Keys are checked before they're
+  saved, never shown again, and only sent to the address they were entered for. On the
+  server: `MAGPIE_BRAIN`, `MAGPIE_AI_API_KEY`, `MAGPIE_AI_BASE_URL`.
+- **A welcome screen** for new users: choose the AI, turn on pop-ups and email, set the
+  command word and make categories. It can be skipped and opened again from Settings.
+- **Your own categories**, each with a colour, in your order (drag or arrows). They're tabs
+  next to the inbox with counts; the AI files notes into them; a note written in a
+  category's tab stays there; drag a note onto a tab (or onto Done or Archive) to move it,
+  with Undo. Colour-coded cards, and categories travel with exports.
+- **Magpie learns from your changes:** moving a note to another category or changing its
+  kind becomes a lesson sent with new notes (the last 40; see and forget them in Settings).
+- Every note remembers the tab it was written in (shown in the note, and given to the AI as
+  a hint), and the API accepts `category_id` and `captured_in`.
+- Titles can be edited in the note window.
+- **Email reminders set up in Magpie**: an address and an app password (Gmail, Outlook,
+  Yahoo and iCloud are filled in), checked before saving, with plain-English errors. The
+  subject says what's due and when: “⏰ Call James · due today 5:00 PM”.
+- **Pop-ups**: Settings → Reminders → *Turn on pop-ups here* shows each reminder as a
+  notification on this computer or phone, with Done and Snooze.
+- **No password needed** on your own computer: `MAGPIE_LOGIN=false` (the setup's default)
+  opens Magpie straight away and only answers on localhost.
+- **Automatic updates** for Docker installs: an `updates` service checks for a new image
+  every hour, restarts Magpie on it, and rolls back if it doesn't start
+  (`MAGPIE_AUTO_UPDATE`, `MAGPIE_VERSION`). Open windows load the new version when nobody is
+  using them, or show a Reload banner.
+- A Magpie icon (Desktop and Start menu, Applications, or the applications menu) that opens
+  Magpie in its own window, starting Docker first if needed; optional start at sign-in.
+- **Magpie in Claude** (`artifact/magpie.html`): Magpie as a Claude artifact, where your
+  own Claude account files the notes, with no API key. Its exports import into a
+  self-hosted Magpie with their categories, and the other way round.
+- Following the computer's time zone: a computer switches Magpie's zone to its own when it
+  changes (Settings → Time).
+- JSON webhooks include `due` for reminders.
 - `setup.cmd`: double-click setup for Windows (`./setup.sh` doesn't run in PowerShell).
 - A step-by-step [getting started](docs/getting-started.md) guide for new users, with fixes
   for common problems.
@@ -15,6 +58,15 @@ All notable changes to Magpie are documented here. The format follows
 
 ### Changed
 
+- The default Claude model is `claude-haiku-5-5`: fast and low-cost for short notes.
+- The setup asks only for a password (Enter for none) and your time zone; the AI is chosen
+  on the welcome screen. Rerunning it keeps an existing password (and opens the port to
+  your network for it); type `none` to stop using one.
+- Settings is reorganised: AI, Reminders (pop-ups, email, Telegram, …), Categories, Voice,
+  Time, Display, Integrations, Data, Privacy & account.
+- Messages name the AI in use instead of always saying Claude.
+- Tabs and other touch targets are at least 44 px tall.
+- The Docker port is published on `127.0.0.1` unless `MAGPIE_BIND` says otherwise.
 - When the setup can't tell your time zone (Windows, containers), it leaves it to your
   browser instead of assuming UTC.
 - Docker Compose uses the fixed project name `magpie`, so your notes stay in the same volume
@@ -25,6 +77,16 @@ All notable changes to Magpie are documented here. The format follows
   New Zealand, South Africa); server transcription defaults to `MAGPIE_STT_LANGUAGE=en`.
   A saved voice language that isn't English falls back to *Automatic*.
 - Examples, sample data and screenshots use English names and places.
+
+### Fixed
+
+- Notes could be lost or saved twice when Save, Enter and “notes off” came together; the bar
+  now saves exactly what it shows, once, and puts the text back if saving fails.
+- “Notes off” said while the browser was still unsure of the words didn't stop recording,
+  and words settled after a save made a second note.
+- “Notes of” and “notes in” no longer start a recording by mistake.
+- Notes were hard to delete and a recording hard to cancel: every note card now has a
+  Delete button, Cancel is always shown while recording, and both have Undo.
 
 ## [0.2.0] - 2026-10-19
 

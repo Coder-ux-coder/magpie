@@ -61,18 +61,22 @@ export function findPhrase(text, phrases, { fuzzy = false } = {}) {
   for (const phrase of phrases) {
     const target = compact(phrase);
     if (!target) continue;
-    const size = tokens(phrase).length || 1;
+    const words = tokens(phrase);
+    const size = words.length || 1;
+    const lastWord = compact(words.at(-1)?.word || "");
     for (let i = 0; i < toks.length; i++) {
       for (let len = Math.max(1, size - 1); len <= size + 1 && i + len <= toks.length; len++) {
         const joined = toks.slice(i, i + len).map((t) => compact(t.word)).join("");
-        // Fuzzy matches may swap or drop one letter but not add one, so
-        // "nodes on" wakes Magpie while "notes one" does not.
+        // Fuzzy matches may swap or drop one letter but not add one, and the last
+        // word must be right: "nodes on" wakes Magpie, while "notes one" and the
+        // everyday "notes of" or "notes in" do not.
         const close =
           joined === target ||
           (fuzzy &&
             target.length >= 6 &&
             joined.length >= target.length - 1 &&
             joined.length <= target.length &&
+            (size < 2 || compact(toks[i + len - 1].word).endsWith(lastWord)) &&
             levenshtein(joined, target) <= 1);
         if (close && (!best || toks[i].start < best.start)) {
           best = { start: toks[i].start, end: toks[i + len - 1].end, phrase };
@@ -107,6 +111,65 @@ export function tidy(text) {
     .replace(/[\s,;:-]+$/u, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// ------------------------------------------------- a note in live results
+
+// Speech recognition reports a session as a growing list of results, each one
+// final or still changing (interim): [{text, final}]. Reading a note straight
+// from that list lets an interim "notes on" start a note at once and an interim
+// "notes off" end it, without waiting for the recogniser to settle.
+
+// Where a wake phrase starts among results[from..], or -1. It may be split over
+// two results ("notes" | "on buy milk").
+export function findWake(results, from, phrases) {
+  for (let i = Math.max(0, from); i < results.length; i++) {
+    if (afterWake(results[i].text, phrases).found) return i;
+    if (i > from && afterWake(`${results[i - 1].text} ${results[i].text}`, phrases).found) return i - 1;
+  }
+  return -1;
+}
+
+// The note in results[from..]: what is settled (final), what is still changing
+// (interim), its text (without a stop phrase), and whether a stop or cancel
+// phrase was said (settled: in final results, so act now). With fromWake the
+// text starts after the wake phrase; otherwise a leading wake phrase is dropped
+// too ("notes on, buy milk" after pressing the mic).
+export function noteFromResults(results, { from = 0, fromWake = false, wake = [], stop = [], cancel = CANCEL_PHRASES } = {}) {
+  const slice = results.slice(Math.max(0, from));
+  const strip = (raw) => {
+    const text = tidy(raw);
+    const hit = findPhrase(text, wake, { fuzzy: true });
+    if (fromWake) return hit ? tidy(text.slice(hit.end)) : null;
+    return hit && hit.start === 0 ? tidy(text.slice(hit.end)) : text;
+  };
+  const allRaw = slice.map((r) => r.text).join(" ");
+  const finalRaw = slice.filter((r) => r.final).map((r) => r.text).join(" ");
+  // A wake phrase the recogniser later heard differently: keep every word.
+  const all = strip(allRaw) ?? tidy(allRaw);
+  let final = strip(finalRaw) ?? "";
+  if (!all.startsWith(final)) final = "";
+  const interim = tidy(all.slice(final.length));
+  const stopped = beforeStop(all, stop);
+  return {
+    final: stopped.found ? stopped.text : final,
+    interim: stopped.found ? "" : interim,
+    text: stopped.found ? stopped.text : all,
+    stopped: stopped.found,
+    settled: beforeStop(final, stop).found,
+    cancelled: isCancel(all, cancel),
+    cancelSettled: isCancel(final, cancel),
+  };
+}
+
+// Add words to what is already in the text box, keeping its line breaks.
+export function appendText(base, addition) {
+  const before = String(base ?? "");
+  const add = String(addition ?? "").trim();
+  if (!add) return before;
+  const start = before.replace(/\s+$/u, "");
+  if (!start) return add;
+  return /\n\s*$/u.test(before) ? `${start}\n${add}` : `${start} ${add}`;
 }
 
 // The first English language tag given (the chosen accent, then the browser's), else UK English.

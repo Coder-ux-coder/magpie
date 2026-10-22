@@ -1,7 +1,7 @@
 // Building blocks shared by the lists and the note dialog.
 
 import { ago, append, h, icon, iconButton, when } from "./ui.js";
-import { tz } from "./state.js";
+import { aiName, categoryOf, tz } from "./state.js";
 
 export const KINDS = {
   task: { label: "Task", icon: "task" },
@@ -69,11 +69,13 @@ export function stars(rating) {
 
 export function noteChips(note) {
   const chips = [];
+  const category = categoryOf(note.category_id);
+  if (category) chips.push(h("span", { class: `chip category swatch-${category.color}` }, category.name));
   if (note.pinned) chips.push(h("span", { class: "chip pinned" }, icon("pin"), "Pinned"));
   if (note.state === "processing" || (note.state === "pending" && !note.error)) {
-    chips.push(h("span", { class: "chip pending" }, h("span", { class: "spinner", "aria-hidden": "true" }), "Claude is filing this…"));
+    chips.push(h("span", { class: "chip pending" }, h("span", { class: "spinner", "aria-hidden": "true" }), `${aiName()} is filing this…`));
   } else if (note.state === "pending" && note.error) {
-    chips.push(h("span", { class: "chip pending", title: note.error }, icon("clock"), "Waiting for Claude"));
+    chips.push(h("span", { class: "chip pending", title: note.error }, icon("clock"), `Waiting for ${aiName()}`));
   } else if (note.state === "failed") {
     chips.push(h("span", { class: "chip failed", title: note.error || "" }, icon("alert"), "Not processed"));
   }
@@ -108,30 +110,41 @@ export function noteCard(note, actions) {
   const titleId = `note-${note.id}-title`;
   const done = note.status === "done";
   const archived = note.status === "archived";
-  return h(
-    "li",
-    {},
-    h(
-      "article",
-      {
-        class: "card note-card",
-        dataset: { id: note.id, kind: note.kind, status: note.status },
-        "aria-labelledby": titleId,
-      },
-      h("div", { class: "head" },
-        kindBadge(note.kind),
-        h("span", { class: "note-time" }, h("time", { datetime: note.created_at, title: new Date(note.created_at).toLocaleString() }, ago(note.created_at))),
-      ),
-      h("h3", { class: "note-title", id: titleId, dir: "auto" }, h("a", { href: `#/note/${note.id}` }, title)),
-      snippetText && snippetText !== title ? h("p", { class: "snippet", dir: "auto" }, snippetText) : null,
-      h("div", { class: "chips" }, noteChips(note)),
-      h("div", { class: "card-actions" },
-        iconButton(done ? "undo" : "check", done ? "Mark as not done" : "Mark as done", () => actions.toggleDone(note), { "aria-pressed": String(done) }),
-        iconButton("pin", note.pinned ? "Unpin" : "Pin to top", () => actions.togglePin(note), { "aria-pressed": String(note.pinned) }),
-        iconButton("archive", archived ? "Move back to inbox" : "Archive", () => actions.toggleArchive(note)),
-      ),
+  const category = categoryOf(note.category_id);
+  const card = h(
+    "article",
+    {
+      class: `card note-card${category ? ` in-category swatch-${category.color}` : ""}`,
+      dataset: { id: note.id, kind: note.kind, status: note.status },
+      "aria-labelledby": titleId,
+      draggable: "true",
+    },
+    h("div", { class: "head" },
+      kindBadge(note.kind),
+      h("span", { class: "note-time" }, h("time", { datetime: note.created_at, title: new Date(note.created_at).toLocaleString() }, ago(note.created_at))),
+    ),
+    h("h3", { class: "note-title", id: titleId, dir: "auto" }, h("a", { href: `#/note/${note.id}` }, title)),
+    snippetText && snippetText !== title ? h("p", { class: "snippet", dir: "auto" }, snippetText) : null,
+    h("div", { class: "chips" }, noteChips(note)),
+    h("div", { class: "card-actions" },
+      iconButton(done ? "undo" : "check", done ? "Mark as not done" : "Mark as done", () => actions.toggleDone(note), { "aria-pressed": String(done) }),
+      iconButton("pin", note.pinned ? "Unpin" : "Pin to top", () => actions.togglePin(note), { "aria-pressed": String(note.pinned) }),
+      iconButton("archive", archived ? "Move back to inbox" : "Archive", () => actions.toggleArchive(note)),
+      iconButton("trash", "Delete", () => actions.remove(note)),
     ),
   );
+  // Drag a card onto a category tab to move it there (the note dialog has the same choice).
+  card.addEventListener("dragstart", (event) => {
+    event.dataTransfer.setData("application/x-magpie-note", String(note.id));
+    event.dataTransfer.effectAllowed = "move";
+    card.classList.add("dragging");
+    document.body.classList.add("dragging-note");
+  });
+  card.addEventListener("dragend", () => {
+    card.classList.remove("dragging");
+    document.body.classList.remove("dragging-note");
+  });
+  return h("li", {}, card);
 }
 
 export function youtubeId(url) {
@@ -173,7 +186,7 @@ export function reviewBlock(link, { onRetry, onSpeak } = {}) {
         onRetry ? h("button", { type: "button", class: "btn small", onclick: onRetry }, icon("refresh"), "Try again") : null,
       ]);
     } else {
-      block.append(h("p", { class: "muted" }, h("span", { class: "spinner", "aria-hidden": "true" }), " Claude is reviewing this…"));
+      block.append(h("p", { class: "muted" }, h("span", { class: "spinner", "aria-hidden": "true" }), ` ${aiName()} is reviewing this…`));
     }
     return block;
   }

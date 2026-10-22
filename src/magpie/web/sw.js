@@ -1,6 +1,6 @@
 // Magpie service worker: offline app shell and push notifications.
 
-const CACHE = "magpie-shell-v3";
+const CACHE = "magpie-shell-v4";
 const SHELL = [
   "/",
   "/static/css/app.css",
@@ -9,6 +9,7 @@ const SHELL = [
   "/static/js/actions.js",
   "/static/js/capture.js",
   "/static/js/cards.js",
+  "/static/js/controls.js",
   "/static/js/markdown.js",
   "/static/js/note-dialog.js",
   "/static/js/phrases.js",
@@ -18,6 +19,7 @@ const SHELL = [
   "/static/js/ui.js",
   "/static/js/views.js",
   "/static/js/voice.js",
+  "/static/js/welcome.js",
   "/static/icons/sprite.svg",
   "/static/icons/logo.svg",
   "/static/icons/icon-192.png",

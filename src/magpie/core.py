@@ -7,6 +7,7 @@ import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 import httpx2
@@ -14,6 +15,7 @@ import httpx2
 from magpie import __version__
 from magpie.auth import ActionSigner, Secrets
 from magpie.brain import Brain, BrainError, Context, make_brain
+from magpie.brain.providers import PROVIDERS, AIConfig, clean_saved, default_url, resolve
 from magpie.config import Prefs, Settings
 from magpie.content.fetch import Fetcher
 from magpie.db import Database
@@ -35,11 +37,13 @@ from magpie.store import Store
 from magpie.stt import Transcriber
 from magpie.telegram import TelegramBot
 from magpie.telegram_api import TelegramApi
-from magpie.timeutil import now_utc
+from magpie.timeutil import iso, now_utc
 
 log = logging.getLogger(__name__)
 
 ASK_ALL_NOTES_LIMIT = 300
+MAX_LESSONS = 40
+LESSONS_SENT = 20  # the newest corrections go with each note
 
 
 class Magpie:
@@ -62,7 +66,7 @@ class Magpie:
         self.http = http or httpx2.AsyncClient(
             headers={"User-Agent": f"Magpie/{__version__}"}, timeout=30
         )
-        self.brain: Brain = brain or make_brain(settings, api_key=self._saved_claude_key())
+        self.brain: Brain = brain or self._make_brain(self.ai_config())
         self.fetcher = Fetcher(self.http, settings)
         self.stt = Transcriber(self.http, settings)
         self.reminders = Reminders(self.store, self.prefs)
@@ -72,12 +76,13 @@ class Magpie:
             else None
         )
         self.webpush = WebPushChannel(self.store, settings)
+        self.email = EmailChannel(settings, self.store)
         self.notifier = Notifier(
             [
                 TelegramChannel(self.telegram_api, self.telegram_chat_id),
                 self.webpush,
                 NtfyChannel(self.http, settings),
-                EmailChannel(settings),
+                self.email,
                 WebhookChannel(self.http, settings),
             ],
             self.prefs,
@@ -90,43 +95,171 @@ class Magpie:
             self.pipeline.listeners.append(self.bot.on_event)
         self._tasks: list[asyncio.Task[Any]] = []
 
-    # ------------------------------------------------------------ Claude key
+    # ------------------------------------------------------------ AI provider
 
     def _saved_claude_key(self) -> str | None:
         key = self.store.get_kv("anthropic_api_key")
         return key if isinstance(key, str) and key else None
 
+    def ai_config(self) -> AIConfig:
+        """The provider, model, address and key in use (the server's settings win)."""
+        return resolve(self.settings, self.store.get_kv("ai"), self._saved_claude_key())
+
+    def _make_brain(self, config: AIConfig) -> Brain:
+        return make_brain(self.settings, config=config, http=self.http)
+
     def claude_key_source(self) -> str | None:
-        """Where the API key comes from: "env", "dashboard" or None."""
+        """Where the Claude key comes from: "env", "dashboard" or None."""
         if self.settings.anthropic_api_key or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
             return "env"
         return "dashboard" if self._saved_claude_key() else None
 
-    async def set_claude_key(self, key: str | None) -> str | None:
-        """Save (or with None, forget) a key entered in the dashboard and start using it.
+    async def set_ai(
+        self,
+        provider: str,
+        *,
+        model: str | None = None,
+        base_url: str | None = None,
+        key: str | None = None,
+    ) -> str | None:
+        """Use ``provider`` from now on, as chosen in Settings → AI.
 
-        Returns a warning when the key could not be checked. Raises BrainError when
-        Anthropic refuses it, in which case nothing is saved.
+        The choice is tried with the service first, and nothing is saved when it
+        refuses (BrainError) or can't work (ValueError). Returns a warning when the
+        service couldn't be reached to check, in which case it is saved anyway.
         """
+        info = PROVIDERS.get(provider)
+        if info is None:
+            raise ValueError("Unknown AI provider.")
+        stored = clean_saved(self.store.get_kv("ai"))
+        entry = dict(stored["settings"].get(provider, {}))
+        if model is not None:
+            entry["model"] = model.strip()
+        if base_url is not None and not info.fixed_url:
+            entry["base_url"] = base_url.strip().rstrip("/")
+        claude_key = key if provider == "claude" and key else self._saved_claude_key()
+        url = (entry.get("base_url") if not info.fixed_url else "") or default_url(info)
+        url = url.rstrip("/")
+        if provider != "claude":
+            if key:
+                entry["key"], entry["key_for"] = key, url
+            elif entry.get("key_for") != url:
+                # A key only ever goes to the address it was entered for.
+                entry.pop("key", None)
+                entry.pop("key_for", None)
+        choice = {"provider": provider, "settings": {**stored["settings"], provider: entry}}
+        config = resolve(self.settings, choice, claude_key)
+        if config.provider.id != provider:
+            raise ValueError(f"The server chooses the AI (MAGPIE_BRAIN={self.settings.brain}).")
+        if not config.ready:
+            if provider != "claude" and not config.base_url:
+                raise ValueError(f"Enter the address of the {info.name} service.")
+            if provider != "claude" and not config.model:
+                raise ValueError("Enter the name of the model to use.")
+            raise ValueError(f"Paste your {info.name} API key.")
         warning = None
-        if key:
-            candidate = make_brain(self.settings, api_key=key)
-            check = getattr(candidate, "check", None)
-            if check is not None:
-                try:
-                    await check()
-                except BrainError as exc:
-                    if not exc.retryable:
-                        raise
-                    warning = f"{exc} Saved anyway; notes will be filed once it's reachable."
+        check = getattr(self._make_brain(config), "check", None)
+        if check is not None:
+            try:
+                await check()
+            except BrainError as exc:
+                if not exc.retryable:
+                    raise
+                warning = f"{exc} Saved anyway; notes will be filed once it's reachable."
+        if provider == "claude" and key:
             self.store.set_kv("anthropic_api_key", key)
-        else:
-            self.store.delete_kv("anthropic_api_key")
-        if self.claude_key_source() != "env":
-            self.brain = make_brain(self.settings, api_key=key)
-            if self.brain.available:
-                self.pipeline.resume()  # file the notes that waited for a key
+        self.store.set_kv("ai", choice)
+        self.brain = self._make_brain(self.ai_config())
+        if self.brain.available:
+            self.pipeline.resume()  # file the notes that waited for an AI
         return warning
+
+    def forget_ai_key(self, provider: str) -> None:
+        if provider == "claude":
+            self.store.delete_kv("anthropic_api_key")
+        else:
+            stored = clean_saved(self.store.get_kv("ai"))
+            entry = stored["settings"].get(provider)
+            if entry:
+                entry.pop("key", None)
+                entry.pop("key_for", None)
+                self.store.set_kv("ai", stored)
+        self.brain = self._make_brain(self.ai_config())
+
+    async def set_claude_key(self, key: str | None) -> str | None:
+        """Save (or with None, forget) a Claude key from the dashboard: the older API."""
+        if key:
+            return await self.set_ai("claude", key=key)
+        self.forget_ai_key("claude")
+        return None
+
+    async def ai_models(
+        self, provider: str, *, base_url: str | None = None, key: str | None = None
+    ) -> list[str]:
+        """The models a provider offers, to pick from in Settings → AI."""
+        info = PROVIDERS.get(provider)
+        if info is None:
+            raise ValueError("Unknown AI provider.")
+        stored = clean_saved(self.store.get_kv("ai"))
+        entry = dict(stored["settings"].get(provider, {}))
+        if base_url is not None and not info.fixed_url:
+            entry["base_url"] = base_url.strip().rstrip("/")
+        url = ((entry.get("base_url") if not info.fixed_url else "") or default_url(info)).rstrip(
+            "/"
+        )
+        if key:
+            entry["key"], entry["key_for"] = key, url
+        entry.setdefault("model", entry.get("model") or info.model or "model")
+        choice = {"provider": provider, "settings": {**stored["settings"], provider: entry}}
+        config = resolve(
+            self.settings, choice, key if provider == "claude" and key else self._saved_claude_key()
+        )
+        lister = getattr(self._make_brain(config), "list_models", None)
+        if lister is None:
+            return []
+        return await lister()
+
+    def ai_status(self) -> dict[str, Any]:
+        config = self.ai_config()
+        stored = clean_saved(self.store.get_kv("ai"))
+        providers = []
+        for info in PROVIDERS.values():
+            if config.locked and info.id != config.provider.id:
+                continue
+            if info.id == config.provider.id:
+                shown = config
+            else:
+                shown = resolve(
+                    self.settings,
+                    {"provider": info.id, "settings": stored["settings"]},
+                    self._saved_claude_key(),
+                )
+            providers.append(
+                {
+                    "id": info.id,
+                    "label": info.label,
+                    "name": info.name,
+                    "help": info.help,
+                    "needs_key": info.needs_key,
+                    "key_url": info.key_url,
+                    "key_hint": info.key_hint,
+                    "fixed_url": info.fixed_url,
+                    "default_model": info.model or "",
+                    "model": shown.model,
+                    "base_url": shown.base_url,
+                    "has_key": bool(shown.api_key),
+                    "key_source": shown.key_source,
+                }
+            )
+        return {
+            "provider": config.provider.id,
+            "label": self.brain.label,
+            "model": config.model,
+            "available": self.brain.available,
+            "locked": config.locked,
+            "web_search": config.provider.id == "claude",
+            "providers": providers,
+        }
 
     # --------------------------------------------------------------- helpers
 
@@ -149,17 +282,59 @@ class Magpie:
             for action in ("done", "snooze", "tomorrow")
         }
 
-    def context(self, source: str = "web") -> Context:
+    def context(
+        self, source: str = "web", now: datetime | None = None, written_in: str = ""
+    ) -> Context:
         prefs = self.prefs()
         return Context(
             timezone=prefs.timezone,
-            now=now_utc(),
+            now=now or now_utc(),
             proactivity=prefs.proactivity,
             about_me=prefs.about_me,
             morning_time=prefs.morning_time,
             source=source,
             instructions=prefs.instructions,
+            categories=tuple(category.name for category in self.store.list_categories()),
+            lessons=self.lesson_lines() if prefs.learn else (),
+            written_in=written_in,
         )
+
+    # -------------------------------------------------------------- learning
+
+    def lessons(self) -> list[dict[str, str]]:
+        stored = self.store.get_kv("lessons")
+        if not isinstance(stored, list):
+            return []
+        return [
+            item
+            for item in stored
+            if isinstance(item, dict)
+            and all(isinstance(item.get(key), str) for key in ("text", "field", "to"))
+        ][:MAX_LESSONS]
+
+    def learn(self, note: Note, field: str, before: str, after: str) -> None:
+        """Remember a correction, so similar notes are filed the user's way from now on."""
+        if not after or before == after or not self.prefs().learn:
+            return
+        snippet = " ".join((note.raw_text or note.text).split())[:160]
+        lesson = {
+            "text": snippet,
+            "field": field,
+            "from": before,
+            "to": after,
+            "at": iso(now_utc()),
+        }
+        kept = [
+            item for item in self.lessons() if (item["text"], item["field"]) != (snippet, field)
+        ]
+        self.store.set_kv("lessons", [lesson, *kept][:MAX_LESSONS])
+
+    def lesson_lines(self) -> tuple[str, ...]:
+        lines = []
+        for item in self.lessons()[:LESSONS_SENT]:
+            instead = f" (not {item['from']})" if item.get("from") else ""
+            lines.append(f'"{item["text"]}" → {item["field"]} {item["to"]}{instead}')
+        return tuple(lines)
 
     async def ask(self, question: str) -> Answer:
         notes = self.store.recent_notes(limit=ASK_ALL_NOTES_LIMIT + 1)
@@ -214,10 +389,17 @@ class Magpie:
                 "    (set MAGPIE_PASSWORD to choose your own; `magpie password` shows it again)\n",
                 self.secrets.password,
             )
+        if not self.settings.login:
+            log.warning(
+                "Magpie has no password (MAGPIE_LOGIN=false), so the dashboard only opens on "
+                "this computer: http://localhost:%s",
+                self.settings.port,
+            )
         if not self.brain.available:
             log.warning(
-                "Claude isn't connected yet: notes are saved and filed once you add an API key "
-                "(Settings → Claude in the dashboard, or ANTHROPIC_API_KEY)."
+                "%s isn't connected yet: notes are saved and filed once you set up an AI "
+                "(Settings → AI in the dashboard).",
+                self.brain.label,
             )
 
     async def stop(self) -> None:

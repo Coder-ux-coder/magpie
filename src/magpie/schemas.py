@@ -40,6 +40,10 @@ class Triage(BaseModel):
     summary: str = Field(description="One-sentence summary for long notes, otherwise empty string.")
     kind: NoteKindLiteral
     tags: list[str] = Field(description="1-4 short lowercase tags.")
+    category: str = Field(
+        description="One of the user's own categories (listed with the note) that clearly fits, "
+        "written exactly as listed; empty string if none fits or none are listed."
+    )
     reminders: list[PlannedReminder]
     ping: PingLiteral
     ping_reason: str = Field(description="One short sentence to the user explaining the decision.")

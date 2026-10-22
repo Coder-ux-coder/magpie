@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Magpie</title>
-  <meta name="description" content="Voice-first notes with a Claude brain.">
+  <meta name="description" content="Voice-first notes, filed by the AI you choose.">
   <meta name="theme-color" content="#2f3fa8" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0f1116" media="(prefers-color-scheme: dark)">
   <meta name="color-scheme" content="light dark">
@@ -18,13 +18,14 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to notes</a>
+  <a class="skip-link" href="#compose-text">Write a note</a>
 
   <!-- Login -->
   <main id="login" class="login" hidden>
     <form id="login-form" class="login-card" autocomplete="on">
       <img src="/static/icons/logo.svg" alt="" width="64" height="64">
       <h1>Magpie</h1>
-      <p class="muted">Voice-first notes with a Claude brain.</p>
+      <p class="muted">Voice-first notes, filed by the AI you choose.</p>
       <label for="login-password">Password</label>
       <input id="login-password" name="password" type="password" autocomplete="current-password" required>
       <p id="login-error" class="error" role="alert"></p>
@@ -57,36 +58,6 @@
 
     <section id="banners" class="banners" aria-label="Notices"></section>
 
-    <section class="capture" aria-labelledby="capture-heading">
-      <h2 id="capture-heading" class="sr-only">New note</h2>
-      <div class="capture-voice">
-        <button id="mic" class="mic" type="button" aria-pressed="false" aria-describedby="voice-status">
-          <svg class="icon mic-icon" aria-hidden="true"><use href="/static/icons/sprite.svg#mic"></use></svg>
-          <svg class="icon stop-icon" aria-hidden="true"><use href="/static/icons/sprite.svg#stop"></use></svg>
-          <span class="sr-only" id="mic-label">Start voice note</span>
-        </button>
-        <div class="voice-meta">
-          <p id="voice-status" class="voice-status" role="status" aria-live="polite">Tap the mic, or turn on hands-free and say “notes on”.</p>
-          <label class="switch">
-            <input id="handsfree" type="checkbox" role="switch">
-            <span class="switch-track" aria-hidden="true"></span>
-            <span>Hands-free <span class="muted">(say “<span class="wake-phrase">notes on</span>”)</span></span>
-          </label>
-        </div>
-      </div>
-      <div id="transcript" class="transcript" aria-live="off" hidden dir="auto">
-        <span class="final"></span><span class="interim"></span>
-      </div>
-      <form id="compose" class="compose">
-        <label for="compose-text" class="sr-only">Type a note</label>
-        <textarea id="compose-text" rows="1" dir="auto" maxlength="50000" placeholder="Type a note or paste a link…  (“remind me to call James at 5 pm”)" enterkeyhint="send"></textarea>
-        <button id="compose-dictate" class="icon-btn" type="button" aria-label="Dictate into the text box" title="Dictate into the box (review before saving)">
-          <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#dictate"></use></svg>
-        </button>
-        <button class="btn primary" type="submit">Save</button>
-      </form>
-    </section>
-
     <nav class="views" aria-label="Note views">
       <ul id="view-tabs" role="list"></ul>
     </nav>
@@ -103,6 +74,85 @@
       <span aria-hidden="true">·</span>
       <button type="button" class="linklike" id="footer-shortcuts">Keyboard shortcuts</button>
     </footer>
+
+    <!-- Voice bar: docked at the bottom of every view; it can pop out into a floating window. -->
+    <section id="voicebar" class="voicebar" aria-labelledby="voicebar-heading" data-state="idle">
+      <h2 id="voicebar-heading" class="sr-only">New note</h2>
+      <form id="compose" class="voicebar-inner" novalidate>
+        <div class="voicebar-top">
+          <p id="voice-status" class="voice-status" role="status" aria-live="polite">Press the mic or type a note.</p>
+          <button id="voice-allow" class="btn small primary" type="button" hidden>Allow microphone</button>
+          <button id="voice-undo" class="btn small" type="button" hidden>Undo</button>
+          <div class="voicebar-tools">
+            <button id="voice-install" class="icon-btn" type="button" aria-label="Install Magpie as an app" title="Install Magpie as an app" hidden>
+              <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#download"></use></svg>
+            </button>
+            <button id="voice-popout" class="icon-btn" type="button" aria-label="Pop out into a floating window" title="Pop out: a small window that stays on top" hidden>
+              <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#external"></use></svg>
+            </button>
+            <button id="voice-back" class="icon-btn" type="button" aria-label="Put the voice bar back in Magpie" title="Put back in Magpie" hidden>
+              <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#undo"></use></svg>
+            </button>
+            <button id="voice-options" class="icon-btn" type="button" aria-label="Voice options" title="Voice options" aria-expanded="false" aria-controls="voice-popover">
+              <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#settings"></use></svg>
+            </button>
+          </div>
+        </div>
+        <div class="voicebar-main">
+          <button id="mic" class="mic" type="button" aria-pressed="false" aria-describedby="voice-status">
+            <svg class="icon mic-icon" aria-hidden="true"><use href="/static/icons/sprite.svg#mic"></use></svg>
+            <svg class="icon stop-icon" aria-hidden="true"><use href="/static/icons/sprite.svg#stop"></use></svg>
+            <span class="sr-only" id="mic-label">Start recording</span>
+          </button>
+          <div class="voicebar-field">
+            <label for="compose-text" class="sr-only">Note</label>
+            <textarea id="compose-text" rows="1" dir="auto" maxlength="50000" placeholder="Type a note, or press the mic and talk…" enterkeyhint="send"></textarea>
+            <p id="voice-interim" class="voice-interim" dir="auto" aria-hidden="true" hidden></p>
+          </div>
+          <div class="voicebar-actions">
+            <button id="voice-cancel" class="btn" type="button" aria-label="Cancel: discard this note" title="Discard this note (Esc)" hidden>
+              <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#close"></use></svg><span class="label">Cancel</span>
+            </button>
+            <button id="voice-off" class="btn stop" type="button" aria-label="Notes off: stop and save" title="Stop recording and save" hidden>Notes off</button>
+            <button id="voice-save" class="btn primary" type="submit" title="Save (Enter)">Save</button>
+          </div>
+        </div>
+      </form>
+      <div id="voice-popover" class="voice-popover" role="dialog" aria-labelledby="voice-popover-title" hidden>
+        <h3 id="voice-popover-title">Voice options</h3>
+        <label class="switch">
+          <input id="handsfree" type="checkbox" role="switch">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>Listen for the command word</span>
+        </label>
+        <div class="field">
+          <label for="voice-wake">Command word to start a note</label>
+          <input id="voice-wake" type="text" maxlength="60" autocomplete="off" spellcheck="false" dir="auto">
+        </div>
+        <div class="field">
+          <label for="voice-stopword">Stop word to save it</label>
+          <input id="voice-stopword" type="text" maxlength="60" autocomplete="off" spellcheck="false" dir="auto">
+        </div>
+        <div class="field">
+          <label for="voice-silence">Save after this many seconds of silence <span class="hint">(0 = never)</span></label>
+          <input id="voice-silence" type="number" min="0" max="120" step="1" inputmode="numeric">
+        </div>
+        <label class="switch">
+          <input id="voice-autolisten" type="checkbox" role="switch">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>Start listening when Magpie opens</span>
+        </label>
+        <label class="switch">
+          <input id="voice-review" type="checkbox" role="switch">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>Let me check voice notes before saving</span>
+        </label>
+        <div class="row spread">
+          <button id="voice-more" class="linklike" type="button">More voice settings</button>
+          <button id="voice-popover-done" class="btn small" type="button">Done</button>
+        </div>
+      </div>
+    </section>
   </div>
 
   <!-- Share target / bookmarklet landing -->

@@ -121,6 +121,18 @@ MIGRATIONS: list[str] = [
         created_at TEXT NOT NULL
     );
     """,
+    # 2: the user's own categories, in their order and colours.
+    """
+    CREATE TABLE categories (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+        color TEXT NOT NULL DEFAULT 'blue',
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    ALTER TABLE notes ADD COLUMN category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL;
+    CREATE INDEX notes_category ON notes(category_id);
+    """,
 ]
 
 FTS_SCHEMA = """

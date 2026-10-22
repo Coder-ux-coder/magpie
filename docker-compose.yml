@@ -1,27 +1,138 @@
 # Quick start:   setup.cmd on Windows, sh setup.sh on Mac/Linux (asks a few questions,
 #                writes .env, starts Magpie and opens it in the browser)
-#           or:  docker compose up -d   then open http://localhost:8000 and paste your
-#                Claude key in Settings (the password is in: docker compose logs magpie)
+#           or:  docker compose up -d   then open http://localhost:8000 and set up your
+#                AI in Settings (the password is in: docker compose logs magpie)
+# Updates:       automatic. The "updates" service checks for a new version every hour and
+#                restarts Magpie on it; your notes and settings are kept. If a new version
+#                doesn't start properly, it goes back to the one that worked. Turn it off
+#                with MAGPIE_AUTO_UPDATE=false in .env, or pin a version with MAGPIE_VERSION.
 # With HTTPS:    set MAGPIE_DOMAIN and MAGPIE_BASE_URL in .env, point the domain at this
 #                server, then: docker compose --profile https up -d
+# Build it yourself instead of downloading it (developers):
+#                docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 # A fixed project name keeps your notes in the same Docker volume (magpie_magpie-data)
 # whatever this folder is called, e.g. after unzipping a newer version.
 name: magpie
 
 services:
   magpie:
-    build: .
-    image: magpie:local
-    # Or use the prebuilt image instead of building:
-    # image: ghcr.io/coder-ux-coder/magpie:latest
+    image: ${MAGPIE_IMAGE:-ghcr.io/coder-ux-coder/magpie}:${MAGPIE_VERSION:-latest}
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     ports:
-      - "8000:8000"
+      # 127.0.0.1: only this computer can open Magpie (safe without a password).
+      # MAGPIE_BIND=0.0.0.0 in .env lets phones on your Wi-Fi in; set a password first.
+      # MAGPIE_HOST_PORT moves Magpie to another port if 8000 is taken.
+      - "${MAGPIE_BIND:-127.0.0.1}:${MAGPIE_HOST_PORT:-8000}:8000"
+    extra_hosts:
+      # Lets Magpie reach an AI running on this computer, such as Ollama.
+      - "host.docker.internal:host-gateway"
     volumes:
       - magpie-data:/data
+
+  # Keeps Magpie up to date. It talks to Docker to pull the new version and restart
+  # Magpie, and never touches your notes. MAGPIE_AUTO_UPDATE=false turns it off.
+  updates:
+    image: docker:29.8.1-cli
+    restart: unless-stopped
+    environment:
+      MAGPIE_AUTO_UPDATE: ${MAGPIE_AUTO_UPDATE:-true}
+      CHECK_EVERY: ${MAGPIE_UPDATE_CHECK_EVERY:-3600}
+      FIRST_CHECK_AFTER: ${MAGPIE_UPDATE_FIRST_CHECK_AFTER:-300}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ./:/magpie:ro
+    working_dir: /magpie
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        log() { echo "$$(date -u '+%Y-%m-%d %H:%M UTC')  $$*"; }
+        image_id() { docker image inspect --format '{{.Id}}' "$$1" 2>/dev/null; }
+        running() { docker compose ps -q --status running magpie 2>/dev/null | head -n 1; }
+        version() {
+          rev=$$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$$1" 2>/dev/null | cut -c1-7)
+          if [ -n "$$rev" ]; then echo "sha-$$rev"; else echo "image $$(echo "$$1" | cut -c8-19)"; fi
+        }
+        healthy() {
+          i=0; up=0
+          while [ $$i -lt 60 ]; do
+            state=$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$$(running)" 2>/dev/null)
+            case "$$state" in
+              healthy) return 0 ;;
+              unhealthy) return 1 ;;
+              running) up=$$((up + 1)); [ $$up -ge 6 ] && return 0 ;;
+              *) up=0 ;;
+            esac
+            i=$$((i + 1)); sleep 5
+          done
+          return 1
+        }
+        check() {
+          container=$$(running)
+          # Magpie is stopped on purpose: leave it alone.
+          [ -n "$$container" ] || return 0
+          image=$$(docker compose config --images magpie 2>/dev/null | head -n 1)
+          if [ -z "$$image" ]; then
+            log "Couldn't read docker-compose.yml in the Magpie folder. Trying again later."
+            return 0
+          fi
+          # Local-only tags: the working version (kept so Magpie can go back to it) and a
+          # version that failed to start (kept so it isn't downloaded again every hour).
+          previous="$${image%:*}:previous"
+          bad="$${image%:*}:failed"
+          current=$$(docker inspect --format '{{.Image}}' "$$container" 2>/dev/null)
+          docker tag "$$current" "$$previous" >/dev/null 2>&1
+          if ! docker compose pull --quiet magpie >/dev/null 2>&1; then
+            docker tag "$$previous" "$$image" >/dev/null 2>&1
+            docker image rm "$$previous" >/dev/null 2>&1
+            log "Couldn't check for updates (no internet, or the image registry is down). Trying again later."
+            return 0
+          fi
+          latest=$$(image_id "$$image")
+          if [ -z "$$latest" ] || [ "$$latest" = "$$current" ]; then
+            docker image rm "$$previous" >/dev/null 2>&1
+            return 0
+          fi
+          if [ "$$latest" = "$$(image_id "$$bad")" ]; then
+            # Keep the working version under the usual name, for the next restart.
+            docker tag "$$previous" "$$image" >/dev/null 2>&1
+            return 0
+          fi
+          if docker compose up -d --no-deps --pull never magpie >/dev/null 2>&1; then
+            if [ "$$(docker inspect --format '{{.Image}}' "$$(running)" 2>/dev/null)" = "$$current" ]; then
+              # The same contents under a new name: Docker kept Magpie running as it was.
+              docker image rm "$$previous" >/dev/null 2>&1
+              return 0
+            fi
+            if healthy; then
+              docker image rm "$$previous" "$$bad" >/dev/null 2>&1
+              log "Magpie is now on $$(version "$$latest"). Your notes and settings are kept."
+              return 0
+            fi
+          fi
+          docker tag "$$latest" "$$bad" >/dev/null 2>&1
+          if docker tag "$$previous" "$$image" >/dev/null 2>&1 &&
+            docker compose up -d --no-deps --pull never magpie >/dev/null 2>&1 &&
+            [ "$$(docker inspect --format '{{.Image}}' "$$(running)" 2>/dev/null)" = "$$current" ]; then
+            log "The new version ($$(version "$$latest")) didn't start properly, so Magpie went back to $$(version "$$current"). It will try the next version that comes out."
+          else
+            log "The new version ($$(version "$$latest")) didn't start properly and Magpie couldn't go back by itself. Run the setup again, or see docs/deployment.md#updates."
+          fi
+        }
+        case "$$(echo "$$MAGPIE_AUTO_UPDATE" | tr 'A-Z' 'a-z')" in
+          false|0|no|off)
+            log "Automatic updates are off (MAGPIE_AUTO_UPDATE=$$MAGPIE_AUTO_UPDATE)."
+            while true; do sleep 86400; done ;;
+        esac
+        if [ "$$CHECK_EVERY" -ge 3600 ]; then n=$$((CHECK_EVERY / 3600)); unit=hour
+        elif [ "$$CHECK_EVERY" -ge 60 ]; then n=$$((CHECK_EVERY / 60)); unit=minute
+        else n=$$CHECK_EVERY; unit=second; fi
+        if [ "$$n" = 1 ]; then every=$$unit; else every="$$n $${unit}s"; fi
+        log "Automatic updates are on: Magpie checks for a new version every $$every."
+        sleep "$$FIRST_CHECK_AFTER"
+        while true; do check; sleep "$$CHECK_EVERY"; done
 
   # Optional: automatic HTTPS (needed for the microphone on phones) with Caddy.
   caddy:
