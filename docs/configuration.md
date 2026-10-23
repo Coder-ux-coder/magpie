@@ -8,10 +8,20 @@ Magpie has two kinds of settings:
   Some have a server-setting default, such as the time zone.
 
 Empty values are treated as unset. [`.env.example`](../.env.example) lists everything with
-comments. You rarely need to edit `.env` by hand: the setup (`setup.cmd` on Windows,
-`sh setup.sh` on Mac and Linux, or `magpie setup`) asks for the few settings that matter and
-writes the file for you. The AI, email, pop-ups and your categories are all set up in Magpie
-itself: the welcome screen walks a new user through them, and Settings has them all.
+comments. You rarely need to edit `.env` by hand: the Docker setup (`sh setup.sh`,
+`setup-docker.cmd` or `magpie setup`) writes it for you without asking anything. The AI,
+email, pop-ups and your categories are all set up in Magpie itself: the welcome screen walks
+a new user through them, and Settings has them all.
+
+**The Windows app** needs none of this. It keeps its notes in `%LOCALAPPDATA%\Magpie\data`,
+its own small settings in `desktop.json` there (start with Windows, listening, the port),
+and reads the same variables from `%LOCALAPPDATA%\Magpie\magpie.env` if that file exists
+(the settings it brought over from Docker are written there). It always listens on
+`127.0.0.1` with no password, whatever the file says. The tray menu turns listening and
+starting with Windows on and off; the command word, stop word and silence timeout are the
+dashboard's voice settings. Two variables are for the app itself: `MAGPIE_DESKTOP_HOME`
+moves its folder, and `MAGPIE_VOSK_MODEL` points at another
+[Vosk](https://alphacephei.com/vosk/models) speech model folder.
 
 Installed copies update themselves (see [Updates](#updates-docker)), so every new setting
 comes with a safe default and an existing `.env` keeps working unchanged.
@@ -26,8 +36,8 @@ makes `magpie` exit with a message that names the variable.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MAGPIE_LOGIN` | `true` | `false` turns the password off. Magpie then only answers on this computer (`localhost`), and the Docker setup publishes the port on `127.0.0.1` only. The setup chooses this when you press Enter at the password question. |
-| `MAGPIE_PASSWORD` | generated | Dashboard password (when `MAGPIE_LOGIN` is on). If unset, one is generated, logged at start-up and shown by `magpie password`. |
+| `MAGPIE_PASSWORD` | | Only for a server that other devices reach: the dashboard then asks for this password. Without it (the default) there's no password, and Magpie only answers on its own computer (`localhost`); the Docker setup publishes the port on `127.0.0.1` only. |
+| `MAGPIE_LOGIN` | | Leave it unset. `true` makes up a password (shown by `magpie password`) when `MAGPIE_PASSWORD` isn't set; `false` turns a password off. Installs from before 0.4 that use a password Magpie made up keep it until the setup runs again, which sets `false`. |
 | `MAGPIE_TIMEZONE` | `UTC` | Default time zone (IANA name) for new installs. The dashboard follows your computer's time zone after that (Settings → Time). |
 | `MAGPIE_BASE_URL` | | Public address, e.g. `https://notes.example.com`. Enables links and one-tap buttons in notifications, and secure cookies when it starts with `https://`. |
 | `MAGPIE_DATA_DIR` | `data` (`/data` in Docker) | Where the database lives. |
@@ -120,7 +130,7 @@ Open dashboards notice the update and load the new version.
 | `MAGPIE_IMAGE` | `ghcr.io/coder-ux-coder/magpie` | Where the image comes from. |
 | `MAGPIE_UPDATE_CHECK_EVERY` | `3600` | Seconds between checks. |
 | `MAGPIE_UPDATE_FIRST_CHECK_AFTER` | `300` | Seconds after start-up before the first check. |
-| `MAGPIE_BIND` | `127.0.0.1` | Who can open Magpie: `127.0.0.1` is this computer only (fine without a password); `0.0.0.0` lets other devices on your network in (set a password first). |
+| `MAGPIE_BIND` | `127.0.0.1` | Who can open Magpie: `127.0.0.1` is this computer only; `0.0.0.0` lets other devices on your network in (only with `MAGPIE_PASSWORD` set). |
 | `MAGPIE_HOST_PORT` | `8000` | The port on this computer, if 8000 is taken. |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker's socket, for the update helper (Podman and rootless Docker use another path). |
 
@@ -131,7 +141,7 @@ Open dashboards notice the update and load the new version.
 | Welcome screen | shown once | Choose an AI, reminders, your command word and categories. Opens again from Settings → Privacy & account. |
 | AI | Claude Haiku 5.5 | Which AI files your notes, its model, and its key or address. *No AI* files notes with simple rules. |
 | Email | off | Your address and an app password; Magpie checks the login before saving and sends a test. Every reminder arrives as an email such as “⏰ Call James · due today 10:00 AM”. |
-| Pop-ups | off | Per computer or phone: a notification for every reminder, with Done and Snooze buttons, even when Magpie's window is in the background. |
+| Pop-ups | on with the app | The Windows app shows every reminder in the corner of the screen, with Done, Snooze and Open. In a browser (Docker): per computer or phone, a notification even when Magpie's window is in the background. |
 | Categories | none | Your own, each with a colour, in the order you choose (drag, or the arrows). The AI files notes into them; a note written in a category's tab stays there; drag a note onto a tab to move it. |
 | Learn from my changes | on | When you move a note to another category or change its kind, Magpie remembers and files similar notes your way (the last 40 changes; you can forget any of them). |
 | Proactivity | Balanced | *Quiet*: only reminders you ask for. *Balanced*: also before clear deadlines and appointments. *Proactive*: suggests reminders for anything actionable. |

@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = logging.getLogger(__name__)
@@ -43,9 +43,10 @@ class Settings(BaseSettings):
     port: int = 8000
     base_url: str = ""
     password: str | None = None
-    # MAGPIE_LOGIN=false: no password. The dashboard then only answers on this computer
-    # (http://localhost), so the setup also publishes the port on 127.0.0.1 only.
-    login: bool = True
+    # No password: the dashboard only answers on this computer (http://localhost), and
+    # Docker publishes the port on 127.0.0.1 only. Setting MAGPIE_PASSWORD (for a server
+    # other devices reach) turns the login on; MAGPIE_LOGIN=true makes a password up.
+    login: bool = False
     api_token: str | None = None
     secret_key: str | None = None
     timezone: str = "UTC"
@@ -134,6 +135,12 @@ class Settings(BaseSettings):
     def _known_log_level(cls, value: str) -> str:
         value = value.strip().lower()
         return value if value in LOG_LEVELS else "info"
+
+    @model_validator(mode="after")
+    def _login_only_with_a_password(self) -> Settings:
+        if "login" not in self.model_fields_set and self.password:
+            self.login = True
+        return self
 
     @property
     def db_path(self) -> Path:

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "magpie-notes"
-version = "0.3.0"
+version = "0.4.0"
 description = "Voice-first notes: say \"notes on\", talk, and the AI of your choice files it, reminds you when it matters, and reviews the videos and articles you save."
 readme = "README.md"
 license = "MIT"
@@ -45,6 +45,15 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=2.3,<3"]
+# The desktop app (magpie desktop): offline listening, its windows and the tray icon.
+desktop = [
+    "vosk>=0.3.45",
+    "sounddevice>=0.5",
+    "pywebview>=6.2",
+    "pystray>=0.19",
+    "pillow>=10",
+    "tzlocal>=5",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",

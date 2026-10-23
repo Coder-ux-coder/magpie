@@ -2,13 +2,14 @@
 // or type), watch the words appear, then save with “notes off”, Save or
 // Ctrl+Enter. Cancel throws the note away, with Undo. The bar can pop out into a
 // small always-on-top window (Document Picture-in-Picture in Chrome and Edge).
+// With the Magpie app, the app does the listening and this bar drives it.
 
 import { api, createNote } from "./api.js";
 import { watchNote } from "./actions.js";
 import { appendText, compact } from "./phrases.js";
 import { openSettings } from "./settings.js";
 import { speak, speaking, stopSpeaking } from "./speech.js";
-import { emit, local, on, saveLocal, speechLang, state } from "./state.js";
+import { desktopApp, emit, local, on, saveLocal, speechLang, state } from "./state.js";
 import { h, toast } from "./ui.js";
 import { Recorder, VoiceCapture, recordingSupported, speechSupported } from "./voice.js";
 
@@ -35,6 +36,57 @@ const PLACEHOLDER = "Type a note, or press the mic and talk…";
 const wakePhrase = () => state.prefs?.wake_phrase || "notes on";
 const stopPhrase = () => state.prefs?.stop_phrase || "notes off";
 const pipSupported = "documentPictureInPicture" in window;
+
+// ------------------------------------------------------------ the Magpie app
+
+// The Magpie app (Windows) runs this server and listens for the command word itself,
+// all the time, with its own bar over other windows. This page then leaves the
+// microphone to it: the mic button and the listening switch drive the app instead.
+let appTimer = null;
+
+function app() {
+  return state.status?.desktop || {};
+}
+
+function appStatus() {
+  const { state: now, message } = app();
+  const wake = app().wake || wakePhrase();
+  if (now === "standby") return `The Magpie app is listening: say “${wake}” anywhere on this computer, press the mic, or type.`;
+  if (now === "recording") return "Taking a note in the Magpie bar at the bottom of the screen…";
+  if (now === "paused") return "The Magpie app isn't listening for the command word. Press the mic, or turn listening on in the voice options.";
+  if (now === "starting") return message || "The Magpie app is getting ready to listen…";
+  return message || "The Magpie app can't hear a microphone. Press the mic to try again, or type.";
+}
+
+async function appCommand(action) {
+  try {
+    const { ok, ...now } = await api("/api/desktop/command", { method: "POST", body: { action } });
+    if (state.status) state.status.desktop = now;
+  } catch (error) {
+    setNotice(error.message, 8000);
+    return false;
+  }
+  render();
+  followApp(600); // the app takes a moment to change state
+  return true;
+}
+
+// Keep the status line in step with the app while this page is open.
+function followApp(delay = 3000) {
+  clearTimeout(appTimer);
+  if (!desktopApp()) return;
+  appTimer = setTimeout(async () => {
+    if (!document.hidden) {
+      try {
+        state.status.desktop = await api("/api/desktop");
+        render();
+      } catch {
+        // restarting for an update, most likely: keep trying
+      }
+    }
+    followApp();
+  }, delay);
+}
 
 // ---------------------------------------------------------------- install
 
@@ -95,7 +147,7 @@ function useServer() {
 }
 
 function canCapture() {
-  return (speechSupported && !local.serverStt) || useServer();
+  return desktopApp() || (speechSupported && !local.serverStt) || useServer();
 }
 
 function recording() {
@@ -107,6 +159,7 @@ function statusText() {
   if (recorder?.active) return "Recording… press Notes off to save, or Cancel.";
   if (voice?.state === "recording") return `Recording… say “${stopPhrase()}” or press Notes off to save.`;
   if (notice && notice.until > Date.now()) return notice.text;
+  if (desktopApp()) return appStatus();
   if (!canCapture()) {
     return speechSupported || recordingSupported
       ? "Type a note. For voice, use Chrome, Edge or Safari, or set up server transcription."
@@ -128,18 +181,20 @@ function setNotice(text, ms = 6000) {
 
 function render() {
   if (!el) return;
+  const inApp = desktopApp();
   const rec = recording();
-  const listening = voice?.state === "standby";
-  const mode = transcribing ? "busy" : rec ? "recording" : listening ? "standby" : "idle";
+  const appRec = inApp && app().state === "recording";
+  const listening = inApp ? app().state === "standby" : voice?.state === "standby";
+  const mode = transcribing ? "busy" : rec || appRec ? "recording" : listening ? "standby" : "idle";
   el.root.dataset.state = mode;
   const status = statusText();
   if (el.status.textContent !== status) el.status.textContent = status;
-  el.allow.hidden = !offerAllow || rec || listening || permission === "denied";
+  el.allow.hidden = inApp || !offerAllow || rec || listening || permission === "denied";
 
   el.mic.dataset.state = mode;
   el.mic.disabled = !canCapture() || transcribing;
-  el.mic.setAttribute("aria-pressed", String(rec));
-  const micLabel = rec ? "Stop and save" : "Start recording";
+  el.mic.setAttribute("aria-pressed", String(rec || appRec));
+  const micLabel = rec || appRec ? "Stop and save" : "Start recording";
   el.micLabel.textContent = micLabel;
   el.mic.title = `${micLabel} (Alt+N)`;
 
@@ -150,13 +205,16 @@ function render() {
   el.cancel.hidden = !(rec || hasText); // always there while recording
   el.save.disabled = transcribing;
 
-  el.install.hidden = !installPrompt || standalone() || Boolean(pip);
-  el.popout.hidden = !pipSupported || Boolean(pip);
+  // The app is installed and has its own floating bar: no install or pop-out here.
+  el.install.hidden = inApp || !installPrompt || standalone() || Boolean(pip);
+  el.popout.hidden = inApp || !pipSupported || Boolean(pip);
   el.back.hidden = !pip;
   el.options.hidden = Boolean(pip);
   el.undo.hidden = !(pip && undoText);
-  el.handsfree.checked = Boolean(voice?.handsFree);
-  el.handsfree.disabled = !speechSupported || local.serverStt;
+  el.handsfree.checked = inApp ? app().listening !== false : Boolean(voice?.handsFree);
+  el.handsfree.disabled = !inApp && (!speechSupported || local.serverStt);
+  el.autoListen.closest("label").hidden = inApp;
+  el.review.closest("label").hidden = inApp;
 }
 
 // -------------------------------------------------------------- text box
@@ -355,6 +413,10 @@ function setupVoice() {
 
 export function toggleMic() {
   if (!el) return;
+  if (desktopApp()) {
+    appCommand(app().state === "recording" ? "finish" : "start");
+    return;
+  }
   if (useServer()) {
     toggleServerRecording();
     return;
@@ -369,6 +431,13 @@ export function toggleMic() {
 }
 
 export function toggleHandsFree(force) {
+  if (desktopApp()) {
+    const on = typeof force === "boolean" ? force : app().listening === false;
+    appCommand(on ? "listen" : "pause").then((done) => done && setNotice(on
+      ? `The Magpie app is listening for “${wakePhrase()}”.`
+      : "The Magpie app stopped listening for the command word.", 5000));
+    return;
+  }
   if (!voice || local.serverStt) return;
   const on = typeof force === "boolean" ? force : !voice.handsFree;
   offerAllow = false;
@@ -432,7 +501,7 @@ export function syncVoiceSettings() {
     stop: prefs.stop_phrase,
     silenceSeconds: prefs.silence_seconds ?? 8,
   });
-  if (local.serverStt && voice && voice.state !== "off") voice.shutdown();
+  if ((local.serverStt || desktopApp()) && voice && voice.state !== "off") voice.shutdown();
   if (el) {
     el.area.lang = speechLang();
     // Don't overwrite a word being typed in the options when fresh settings arrive.
@@ -457,7 +526,7 @@ async function micPermission() {
 }
 
 async function autoStart() {
-  if (!voice || local.serverStt) return;
+  if (!voice || local.serverStt || desktopApp()) return;
   permission = await micPermission();
   if (local.autoListen === false || userStopped) return render();
   if (permission === "granted") startListening();
@@ -532,7 +601,7 @@ function fillPopover() {
   el.silence.value = String(prefs.silence_seconds ?? 8);
   el.autoListen.checked = local.autoListen !== false;
   el.review.checked = Boolean(local.reviewVoice);
-  el.handsfree.checked = Boolean(voice?.handsFree);
+  el.handsfree.checked = desktopApp() ? app().listening !== false : Boolean(voice?.handsFree);
 }
 
 function openPopover() {
@@ -770,13 +839,16 @@ export function setupCapture() {
   syncVoiceSettings();
   on("prefs", syncVoiceSettings);
   on("status", syncVoiceSettings);
+  on("status", () => followApp());
+  followApp();
   document.addEventListener("visibilitychange", () => {
     // Browsers may stop recognition in a background tab; pick up again on return.
-    if (document.hidden || !voice) return;
+    if (document.hidden || !voice || desktopApp()) return;
     if (voice.handsFree) voice.resume();
     else if (!userStopped && !pausedByOther && local.autoListen !== false && permission === "granted") startListening();
   });
   window.addEventListener("focus", () => {
+    if (desktopApp()) return;
     if (pausedByOther && !userStopped && local.autoListen !== false) startListening();
   });
   if (document.getElementById("welcome-dialog")?.open) {

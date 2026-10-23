@@ -3,10 +3,10 @@
 #
 #   sh setup.sh
 #
-# It asks a few questions (a password and your time zone), writes the
-# answers to .env, starts Magpie and opens http://localhost:8000. Magpie then
-# keeps itself up to date. Run this again any time to change your answers;
-# your notes are kept. On Windows, use setup.cmd.
+# It asks nothing: it writes .env (no password: Magpie opens on this computer
+# only), starts Magpie, adds it to your apps and to the apps that open when you
+# log in, and opens it. Magpie then keeps itself up to date. Run this again any
+# time; your notes are kept. On Windows, setup.cmd installs the Magpie app.
 set -eu
 cd "$(dirname "$0")"
 
@@ -79,21 +79,8 @@ if command -v curl >/dev/null 2>&1; then
   echo
 fi
 
-# A Magpie app, so you never need to type the address. Running this setup again
-# replaces it rather than adding another.
-yes_to_all=no
-for arg in "$@"; do
-  if [ "$arg" = --yes ]; then yes_to_all=yes; fi
-done
-ask() {
-  # Enter means yes; so does running without a terminal or with --yes.
-  if [ "$yes_to_all" = no ] && [ -t 0 ]; then
-    printf '%s [Y/n] ' "$1"
-    read -r answer || answer=
-    case "$answer" in [Nn]*) return 1 ;; esac
-  fi
-  return 0
-}
+# A Magpie app, so you never need to type the address, which also opens when you
+# log in. Running this setup again replaces it rather than adding another.
 here="$PWD"
 icon="$here/src/magpie/web/static/icons/icon-512.png"
 case "$(uname -s)" in
@@ -125,13 +112,10 @@ case "$(uname -s)" in
           touch "$app"
         rm -rf "$work"
       ) >/dev/null 2>&1 || true
-      echo "Magpie is in your Applications folder and Launchpad: open it from there."
-      if ask "Open Magpie when you log in?"; then
-        osascript -e "tell application \"System Events\" to if not (exists login item \"Magpie\") then make login item at end with properties {path:\"$HOME/Applications/Magpie.app\", hidden:false}" >/dev/null 2>&1 ||
-          echo "Couldn't add it. You can add Magpie in System Settings > General > Login Items."
-      else
-        osascript -e 'tell application "System Events" to if (exists login item "Magpie") then delete login item "Magpie"' >/dev/null 2>&1 || true
-      fi
+      echo "Magpie is in your Applications folder and Launchpad, and opens when you log in"
+      echo "(to change that: System Settings > General > Login Items)."
+      osascript -e "tell application \"System Events\" to if not (exists login item \"Magpie\") then make login item at end with properties {path:\"$HOME/Applications/Magpie.app\", hidden:false}" >/dev/null 2>&1 ||
+        echo "Couldn't add it to Login Items. You can add Magpie in System Settings > General > Login Items."
     else
       echo "Couldn't make the Magpie app. You can open Magpie with: sh magpie.sh"
     fi
@@ -150,13 +134,10 @@ Terminal=false
 Categories=Office;Utility;
 EOF
       then
-        echo "Magpie is in your applications menu: open it from there."
-        if ask "Open Magpie when you log in?"; then
-          mkdir -p "$HOME/.config/autostart" && cp "$entry" "$HOME/.config/autostart/magpie.desktop" ||
-            echo "Couldn't add it. Copy $entry to ~/.config/autostart to do it yourself."
-        else
-          rm -f "$HOME/.config/autostart/magpie.desktop"
-        fi
+        echo "Magpie is in your applications menu, and opens when you log in"
+        echo "(to stop that: rm ~/.config/autostart/magpie.desktop)."
+        mkdir -p "$HOME/.config/autostart" && cp "$entry" "$HOME/.config/autostart/magpie.desktop" ||
+          echo "Couldn't add it. Copy $entry to ~/.config/autostart to do it yourself."
       else
         echo "Couldn't add Magpie to your applications menu. You can open it with: sh magpie.sh"
       fi

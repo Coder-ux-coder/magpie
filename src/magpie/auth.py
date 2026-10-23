@@ -28,7 +28,15 @@ class Secrets:
         self.secret_key = settings.secret_key or self._get_or_create(
             "secret_key", lambda: secrets.token_urlsafe(32)
         )
-        # Without a login (MAGPIE_LOGIN=false) there is no password to generate.
+        # Magpie has no password, but an older version made one up for every install,
+        # possibly one open to the network: that one stays until the setup is run again
+        # (which sets MAGPIE_LOGIN=false), so updating never unlocks a server.
+        if (
+            not settings.login
+            and "login" not in settings.model_fields_set
+            and store.get_kv("generated_password")
+        ):
+            settings.login = True
         self.password_generated = settings.login and not settings.password
         self.password = settings.password or (
             self._get_or_create("generated_password", lambda: secrets.token_urlsafe(9))

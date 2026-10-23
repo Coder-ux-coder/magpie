@@ -70,7 +70,7 @@ if exist "%~1" set "browser=%~1"
 exit /b 0
 
 :nodocker
-call :tell "Magpie runs in Docker Desktop, which is not installed. Install it from docker.com, then run setup.cmd in the Magpie folder."
+call :tell "Magpie runs in Docker Desktop, which is not installed. Install it from docker.com, then run setup-docker.cmd in the Magpie folder."
 exit /b 1
 
 :notrunning

@@ -5,11 +5,12 @@ import { noteActions } from "./actions.js";
 import { captureBusy, composeArea, focusCompose, setNoteContext, setupCapture, startVoiceFromShortcut, stopVoice, toggleHandsFree, toggleMic } from "./capture.js";
 import { closeNote, openNote } from "./note-dialog.js";
 import { openSettings, refreshStatus } from "./settings.js";
-import { aiName, applyLocal, categoryOf, deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
+import { aiName, applyLocal, categoryOf, desktopApp, deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
 import { clear, copyText, debounce, h, icon, iconButton, toast } from "./ui.js";
 import { detachList, renderAsk, renderDigests, renderNotes, renderScheduled, visibleNotes } from "./views.js";
 
 const $ = (id) => document.getElementById(id);
+const WINDOWS_APP = "https://github.com/Coder-ux-coder/magpie/releases/latest/download/MagpieSetup.exe";
 
 const VIEWS = [
   { hash: "inbox", label: "Inbox", icon: "inbox", count: "inbox", key: "1" },
@@ -613,6 +614,12 @@ function renderBanners() {
           toast(error.message, { error: true });
         }
       } }, `Use ${device.split("/").pop().replaceAll("_", " ")}`)));
+  }
+  // Magpie in Docker on Windows: the app does more (always listening, real pop-ups)
+  // and brings the notes over by itself.
+  if (status.docker && !desktopApp() && /Windows/.test(navigator.userAgent)) {
+    add(dismissible("windows-app", "info", "Magpie is now an app for Windows: it starts with your computer, listens for your command word all the time and pops up reminders. Your notes come over by themselves.",
+      h("a", { class: "btn small primary", href: WINDOWS_APP }, "Get the app")));
   }
   const configured = status.channels.filter((c) => c.configured && c.enabled);
   if (!configured.length) {

@@ -12,9 +12,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import logging
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -48,6 +50,7 @@ public = APIRouter()
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 WAIT_SECONDS = 60
 _SOURCE = re.compile(r"^[a-z][a-z0-9-]{0,23}$")
+log = logging.getLogger(__name__)
 login_limiter = RateLimiter(attempts=10, window=900)
 
 
@@ -61,11 +64,8 @@ def session_fingerprint(app: Magpie) -> str:
 
 
 LOCAL_NAMES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
-LOCAL_ONLY = (
-    "Magpie has no password, so it only opens on the computer it runs on, at "
-    "http://localhost:8000. To use it from other devices, run the setup again and choose a "
-    "password."
-)
+IN_DOCKER = Path("/.dockerenv").exists()  # the dashboard suggests the Windows app there
+LOCAL_ONLY = "Magpie only opens on the computer it runs on (http://localhost)."
 
 
 def is_local_host(host: str) -> bool:
@@ -338,10 +338,68 @@ async def status(app: User) -> dict[str, Any]:
         },
         "counts": app.store.count_notes(),
         "categories": [c.model_dump() for c in app.store.list_categories()],
+        "desktop": _desktop_status(app),
+        "docker": IN_DOCKER,
         "base_url": app.settings.base_url,
         "password_generated": app.secrets.password_generated,
         "prefs": prefs.model_dump(),
     }
+
+
+def _desktop_status(app: Magpie) -> dict[str, Any]:
+    if app.desktop is None:
+        return {"active": False}
+    try:
+        return {"active": True, **app.desktop.status()}
+    except Exception:  # a status must never fail the page
+        log.exception("The desktop app's status failed")
+        return {"active": True, "state": "error"}
+
+
+class DesktopCommand(BaseModel):
+    action: Literal["start", "finish", "cancel", "write", "open", "listen", "pause"]
+
+
+class DesktopUiCall(BaseModel):
+    window: Literal["bar", "alerts"]
+    action: str = Field(max_length=24, pattern=r"^[a-z_]+$")
+    text: str = Field("", max_length=50000)
+    key: str = Field("", max_length=24)
+    height: float = Field(0, ge=0, le=10000)
+
+
+async def _in_app(work, *args: Any) -> Any:
+    """Run app code off the event loop: it may call back into this server."""
+    try:
+        return await asyncio.to_thread(work, *args)
+    except Exception as exc:
+        log.exception("The desktop app failed")
+        raise HTTPException(500, "The Magpie app couldn't do that. Its log says why.") from exc
+
+
+@router.get("/desktop")
+async def desktop_state(app: User) -> dict[str, Any]:
+    """What the Magpie app is doing (listening, taking a note, …), polled while it runs."""
+    return _desktop_status(app)
+
+
+@router.post("/desktop/command")
+async def desktop_command(app: User, body: DesktopCommand) -> dict[str, Any]:
+    """From the dashboard: start a voice note in the Magpie app, stop listening, …"""
+    if app.desktop is None:
+        raise HTTPException(409, "The Magpie app isn't running on this computer.")
+    await _in_app(app.desktop.command, body.action)
+    return {"ok": True, **_desktop_status(app)}
+
+
+@router.post("/desktop/ui")
+async def desktop_ui(app: User, body: DesktopUiCall) -> dict[str, Any]:
+    """The app's own windows (the voice bar, reminder pop-ups) reaching the app."""
+    if app.desktop is None:
+        raise HTTPException(409, "The Magpie app isn't running on this computer.")
+    details = body.model_dump(exclude={"window", "action"})
+    problem = await _in_app(app.desktop.ui, body.window, body.action, details)
+    return {"ok": problem is None, "problem": problem}
 
 
 # --------------------------------------------------------------------- notes
@@ -707,7 +765,13 @@ async def update_prefs(app: User, body: dict[str, Any] = Body(...)) -> Prefs:
         first = exc.errors()[0]
         field = ".".join(str(part) for part in first.get("loc", ()))
         raise HTTPException(422, f"{field}: {first.get('msg')}") from exc
-    return app.store.save_prefs(prefs)
+    saved = app.store.save_prefs(prefs)
+    if app.desktop is not None:  # a new command word works at once
+        try:
+            await asyncio.to_thread(app.desktop.prefs_changed, saved.model_dump())
+        except Exception:
+            log.exception("The desktop app didn't take the new settings")
+    return saved
 
 
 # -------------------------------------------------------------------- Claude

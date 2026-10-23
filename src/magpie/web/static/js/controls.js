@@ -303,6 +303,26 @@ export async function turnOnPopups() {
   await refreshStatus().catch(() => {});
 }
 
+/** With the Magpie app, reminders pop up from the app itself: nothing to turn on. */
+export function appPopupControls() {
+  const test = h("button", { type: "button", class: "btn small" }, "Show a test pop-up");
+  test.addEventListener("click", async () => {
+    const done = busyButton(test, "Sending…");
+    try {
+      const result = await api("/api/notify/test", { method: "POST", body: { channel: "desktop" } });
+      if (!result.ok) throw new Error(result.results?.desktop || "The Magpie app didn't show it.");
+      toast("Look at the bottom-right corner of your screen.");
+    } catch (error) {
+      toast(error.message, { error: true });
+    } finally {
+      done();
+    }
+  });
+  return h("div", { class: "push-controls" },
+    h("p", { class: "muted small" }, "Reminders pop up in the corner of your screen from the Magpie app, over whatever you're doing, even when this window is closed."),
+    h("div", { class: "row" }, test));
+}
+
 export function pushControls({ onSaved } = {}) {
   const box = h("div", { class: "push-controls" });
   if (!pushSupported()) {

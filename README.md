@@ -6,12 +6,18 @@
 
 <p align="center">
   <strong>Say “notes on”, talk, and Magpie does the rest.</strong><br>
-  A self-hosted, voice-first notebook. The AI you choose files your notes, reminds you<br>
-  when it matters, and writes short reviews of the videos and articles you save.
+  A voice-first notebook that lives on your computer. The AI you choose files your notes,<br>
+  reminds you when it matters, and writes short reviews of the videos and articles you save.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Coder-ux-coder/magpie/releases/latest/download/MagpieSetup.exe"><strong>Download Magpie for Windows</strong></a>
+  · <a href="#quick-start">Mac and Linux</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/Coder-ux-coder/magpie/actions/workflows/ci.yml"><img src="https://github.com/Coder-ux-coder/magpie/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Coder-ux-coder/magpie/actions/workflows/windows-app.yml"><img src="https://github.com/Coder-ux-coder/magpie/actions/workflows/windows-app.yml/badge.svg" alt="Windows app"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+">
 </p>
@@ -24,29 +30,37 @@
 
 ---
 
-You think of things at the worst moments: driving, walking, half asleep. Magpie lets you
-say them out loud and forget about them:
+You think of things at the worst moments: in the middle of an email, a meeting, a game.
+Magpie lets you say them out loud and forget about them. On Windows it's an app that starts
+with your computer and is always listening for its command word, whatever you're doing:
 
 > *“Notes on. Remind me to call James at five about the budget. Notes off.”*
 
-Magpie tidies up your words, gives the note a title, files it as a task in your **Work**
-category, and at 5:00 PM a notification pops up on your computer, and an email arrives on
-your phone: *“⏰ Call James about the budget · due today 5:00 PM”*. Say *“the electricity
+A small bar appears at the bottom of the screen with your words as you speak. Magpie tidies
+them up, gives the note a title, files it as a task in your **Work** category, and at
+5:00 PM a reminder pops up in the corner of your screen (and an email arrives on your phone,
+if you like): *“Call James about the budget · due today 5:00 PM”*. Say *“the electricity
 bill is due on the 10th”* and it decides for itself to nudge you the evening before. Share
 a YouTube video and you get a two-line verdict on whether it's worth your time.
 
 ## Features
 
-**A voice bar that's always there**
-- It sits at the bottom of every view. Say **“notes on”** (or press the mic, or just type),
-  watch your words appear as you speak, fix anything, then say **“notes off”** or press
-  **Save**. **Cancel** throws the note away, with **Undo**.
-- Magpie starts listening for your command word when it opens. Choose your own command and
-  stop words, switch listening off, or check each note before it's saved.
-- **Pop out** keeps the bar in a small window on top of everything else (Chrome and Edge),
-  and **Install** makes Magpie an app with its own window and icon: no typing
-  `localhost:8000`.
-- Elsewhere: share links to it on your phone, send **Telegram** text or voice messages, say
+**Always listening, in any program (the Windows app)**
+- Magpie starts with Windows and waits by the clock. Say **“notes on”** anywhere, in any
+  program, and a small bar floats up at the bottom of the screen with your words as you
+  speak, without taking the keyboard from what you were doing. Say **“notes off”** (or just
+  stop talking, or press **Save**) and it's saved; **“cancel note”** throws it away, with
+  **Undo**. Click the bar to type into it.
+- Listening happens **on your computer**, with an offline speech model: nothing you say
+  leaves it, and only the note's text goes to your AI once it's saved.
+- Reminders **pop up in the corner of the screen** with Done, Snooze and Open.
+- No password, no Docker, nothing to configure, and it **updates itself**. The tray icon
+  opens your notes, starts a note, and turns listening off and on.
+
+**…and everywhere else**
+- In the notes window (or any browser) the voice bar sits at the bottom of every view: say
+  “notes on”, press the mic or type, watch the words appear, fix anything, save.
+- Share links to Magpie on your phone, send **Telegram** text or voice messages, say
   **“Hey Siri, notes on”**, use a bookmarklet, the HTTP API, the command line
   (`magpie add "…"`) or the MCP server for Claude Desktop and Claude Code.
 
@@ -82,9 +96,9 @@ a YouTube video and you get a two-line verdict on whether it's worth your time.
 Choose how proactive it is: *quiet*, *balanced* or *proactive*.
 
 **Reminders where you'll see them**
-- **Pop-ups** on your computer and phone, with Done and Snooze buttons, and **email** for
-  your phone (just your address and an app password). Telegram, ntfy and Slack or Discord
-  webhooks work too.
+- **Pop-ups** on your computer, with Done and Snooze buttons, and **email** for your phone
+  (just your address and an app password). Telegram, ntfy and Slack or Discord webhooks
+  work too.
 - A **daily digest** each morning and a **weekly review** of themes and open loops.
 - **Ask your notes** anything: *“what did I decide about rent?”*
 - A **calendar feed** for Google, Apple or Outlook Calendar.
@@ -101,55 +115,64 @@ Choose how proactive it is: *quiet*, *balanced* or *proactive*.
 - Notes taken offline are kept on the device and synced later.
 
 **Yours**
-- Self-hosted: one small container and one SQLite file. Export everything as JSON or
-  Markdown at any time.
-- No password needed on your own computer (Magpie then only answers there). Set one to use
-  it from your phone or other devices.
-- **Updates itself:** a new version is picked up within the hour, your notes stay as they
-  are, and if an update fails to start Magpie goes back to the version that worked.
+- Your notes are one SQLite file on your computer. Export everything as JSON or Markdown
+  at any time.
+- **No password:** Magpie only answers on your own computer, so there's nothing to log in to.
+- **Updates itself:** the app installs new versions when you're not taking a note (each
+  download is checked against the release before it runs), and Docker installs pick up a
+  new version within the hour, going back to the one that worked if it fails to start.
 
 ## Quick start
 
-Magpie runs on your own computer (Windows, Mac or Linux). You need
-[Docker Desktop](https://www.docker.com/products/docker-desktop/) (free) installed and
-running.
+### Windows
 
-1. **Download Magpie:**
-   [magpie-main.zip](https://github.com/Coder-ux-coder/magpie/archive/refs/heads/main.zip),
-   and unzip it (Windows: right-click → *Extract All*).
-2. **Run the setup:**
-   - **Windows:** open the `magpie-main` folder and double-click **`setup.cmd`**.
-   - **Mac or Linux:** in Terminal, `cd` into the folder and run `sh setup.sh`.
-3. **Answer two questions** (a password, which you can skip, and your time zone). Magpie
-   starts, adds a Magpie icon to your desktop and apps, and opens in its own window.
-4. **The welcome screen** asks which AI to use, how to remind you, your command word and
-   your categories. Then say “notes on”.
+1. **Download [MagpieSetup.exe](https://github.com/Coder-ux-coder/magpie/releases/latest/download/MagpieSetup.exe)**
+   and double-click it. There's nothing to answer and no administrator password: Magpie
+   installs for you, starts, and opens its welcome screen. (Windows may say *Windows
+   protected your PC*, because Magpie isn't signed by a company: click *More info* →
+   *Run anyway*.)
+2. **The welcome screen** asks which AI to use, how to remind you, your command word and
+   your categories.
+3. **Say “notes on”**, in any program. That's it: Magpie starts with Windows from now on,
+   waits by the clock, and keeps itself up to date.
 
-Magpie keeps running in the background, starts again whenever Docker starts, and keeps
-itself up to date. New to all this? The **[step-by-step guide](docs/getting-started.md)**
-walks through every click and fixes common problems.
+**Used Magpie in Docker before?** Install the app the same way. On its first start it
+brings over your notes and settings (but no password) and stops the Docker version, so
+reminders don't arrive twice. Your Docker data stays where it was, untouched.
 
-**Already using an older Magpie?** Download the new ZIP, unzip it over your old folder
-(choose *Replace* when asked), and run the setup again. Press Enter at the password
-question to keep your password, or type `none` to stop using one. Your notes are kept.
-This is needed once; after that Magpie updates itself.
+### Mac and Linux
+
+Magpie runs in [Docker Desktop](https://www.docker.com/products/docker-desktop/) (free):
+download [magpie-main.zip](https://github.com/Coder-ux-coder/magpie/archive/refs/heads/main.zip),
+unzip it, and in Terminal `cd` into the folder and run `sh setup.sh`. Magpie starts, adds a
+Magpie icon to your apps and opens in its own window; there's nothing to answer. Then say
+“notes on” (Magpie listens while its window is open).
+
+New to all this? The **[step-by-step guide](docs/getting-started.md)** walks through every
+click and fixes common problems.
 
 <details>
 <summary>Other ways to install</summary>
 
-**With git:** `git clone https://github.com/Coder-ux-coder/magpie.git`, then run the setup
-in the `magpie` folder as above.
+**The app with Python** (Mac and Linux too, still new there; Python 3.11 or newer, and on
+Linux GTK or Qt for its windows):
+
+```bash
+python3 -m pip install "magpie-notes[desktop] @ https://github.com/Coder-ux-coder/magpie/archive/refs/heads/main.zip"
+python3 -m magpie desktop      # downloads the speech model (40 MB) the first time
+```
+
+**Docker on Windows**, as a server instead of the app: double-click `setup-docker.cmd` in
+the unzipped folder.
 
 **Docker without the script:** `docker compose up -d`, then open <http://localhost:8000>.
-Without a `.env`, Magpie makes a password and prints it in `docker compose logs magpie`; put
-`MAGPIE_LOGIN=false` in `.env` to use it without one on this computer. `.env.example` lists
-every setting.
+`.env.example` lists every setting.
 
-**Without Docker** (Python 3.11 or newer; run it from the same folder every time):
+**A server without Docker** (run it from the same folder every time):
 
 ```bash
 python3 -m pip install https://github.com/Coder-ux-coder/magpie/archive/refs/heads/main.zip
-python3 -m magpie setup     # asks the same questions and writes .env
+python3 -m magpie setup     # writes .env
 python3 -m magpie serve     # on Windows use py instead of python3
 ```
 
@@ -175,8 +198,8 @@ Everything is in **Settings**, no restart needed:
 - **AI:** the service, the model, and its key.
 - **Reminders:** pop-ups on this device, email, Telegram, and a test for each.
 - **Categories:** names, colours and order; what Magpie has learned from your changes.
-- **Voice:** command and stop words, your accent (UK, US, Australian and more), the silence
-  timeout, listening when Magpie opens.
+- **Voice:** command and stop words, the silence timeout, and whether Magpie listens for
+  the command word (in a browser: your accent too).
 - **Your instructions**, **about you**, how **proactive** to be, your **morning**, the
   **snooze** length, the **digest** and **weekly review** times.
 - **Time:** follow this computer's time zone (on by default), or pick one.
@@ -188,11 +211,14 @@ Everything is in **Settings**, no restart needed:
    phone's email address. Or connect Telegram: create a bot with
    [@BotFather](https://t.me/BotFather), set `MAGPIE_TELEGRAM_BOT_TOKEN`, restart, then
    open **Settings → Reminders → Connect Telegram**; you can send it notes too.
-2. **Use Magpie from your phone.** Set a password (run the setup again), and for the
-   microphone put Magpie behind HTTPS ([deployment guide](docs/deployment.md)).
-3. **Hands-free on iPhone:** set up the [“Hey Siri, notes on” Shortcut](docs/integrations.md#iphone-and-ipad-hey-siri-notes-on).
+2. **Hands-free on iPhone:** set up the [“Hey Siri, notes on” Shortcut](docs/integrations.md#iphone-and-ipad-hey-siri-notes-on),
+   or send notes to your Telegram bot.
+3. **Magpie on a server** that your phone can open too: see the
+   [deployment guide](docs/deployment.md) (a server other devices reach needs HTTPS and a
+   password).
 
-Run `magpie doctor` (or `docker compose exec magpie magpie doctor`) to check your setup.
+The app keeps a log in `%LOCALAPPDATA%\Magpie\logs`. For Docker, run
+`docker compose exec magpie magpie doctor` to check your setup.
 
 ## Documentation
 
@@ -226,12 +252,14 @@ Magpie keeps your notes in a SQLite file on your computer. To do its job it send
 
 - **note text and saved pages** to the AI you chose (nothing, with Ollama or no AI) for
   filing, reviews, digests and Ask;
-- **audio** to your browser's speech service when you use the mic (Chrome and Edge use their
-  makers' servers, Safari uses Apple's), or to your speech-to-text provider for Telegram
-  voice notes and server-side transcription;
+- **no audio from the Windows app:** it listens with an offline speech model on your
+  computer. In a browser, the mic uses the browser's speech service (Chrome and Edge use
+  their makers' servers, Safari uses Apple's); Telegram voice notes and server-side
+  transcription go to your speech-to-text provider;
 - **messages** to whichever reminder channels you set up (email, Telegram, ntfy, …);
-- a check for new versions, to GitHub's container registry, about once an hour (turn it off
-  with `MAGPIE_AUTO_UPDATE=false`).
+- a check for new versions: the app asks GitHub every few hours; Docker installs ask
+  GitHub's container registry about once an hour (turn that off with
+  `MAGPIE_AUTO_UPDATE=false`).
 
 Nothing else leaves your computer. See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
@@ -241,7 +269,8 @@ Nothing else leaves your computer. See [SECURITY.md](SECURITY.md) to report a vu
 git clone https://github.com/Coder-ux-coder/magpie.git && cd magpie
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev,mcp]"
-MAGPIE_BRAIN=fake MAGPIE_LOGIN=false magpie serve      # http://localhost:8000
+MAGPIE_BRAIN=fake magpie serve           # http://localhost:8000
+pip install -e ".[desktop]" && MAGPIE_BRAIN=fake magpie desktop   # the app
 
 pytest                                   # Python tests (offline, no API key needed)
 node --test "tests/js/*.test.mjs"        # browser-side tests
@@ -256,7 +285,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before openin
 - WhatsApp reminders (needs the WhatsApp Business API)
 - Photo notes: whiteboards, posters and receipts, read by the AI
 - Two-way calendar sync
-- Speech recognition fully on the device
+- A signed Windows installer, and the app on Mac
 - Shared lists for families and teams
 
 Ideas and pull requests are welcome.

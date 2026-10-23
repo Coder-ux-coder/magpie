@@ -1,0 +1,142 @@
+/* The Magpie app's small windows: the voice bar and reminder pop-ups. */
+
+:root {
+  --bg: #ffffff;
+  --surface: #f4f5f9;
+  --border: #dde0ea;
+  --text: #1a1d29;
+  --muted: #565c6e;
+  --accent: #2f3fa8;
+  --accent-hover: #26348d;
+  --accent-text: #ffffff;
+  --record: #c22a36;
+  --ok: #17703f;
+  --danger: #b4232f;
+  --focus: #1f5fff;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161920;
+    --surface: #1d212a;
+    --border: #2b303c;
+    --text: #e9ebf2;
+    --muted: #a3a9b9;
+    --accent: #9aa6ff;
+    --accent-hover: #b4bdff;
+    --accent-text: #0e1015;
+    --record: #ff7b86;
+    --ok: #6ee7a0;
+    --danger: #ff7b86;
+    --focus: #8fb3ff;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  user-select: none;
+}
+
+button {
+  font: inherit;
+  font-weight: 600;
+  min-height: 44px; /* touch targets: Windows tablets too */
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.primary:hover { background: var(--accent-hover); }
+button.quiet { background: transparent; border-color: transparent; color: var(--muted); padding: 0 8px; }
+button:focus-visible,
+textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+/* ------------------------------------------------------------------ the bar */
+
+.bar {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 6px;
+  height: 100%;
+  padding: 10px 14px 12px;
+  border-top: 3px solid var(--accent);
+}
+.bar[data-state="recording"] { border-top-color: var(--record); }
+.bar[data-state="saved"] { border-top-color: var(--ok); }
+.bar[data-state="error"],
+.bar[data-tone="error"] { border-top-color: var(--danger); }
+.bar[data-tone="error"] .dot { background: var(--danger); }
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+  -webkit-app-region: drag;
+}
+.status-text { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status .hint { color: var(--muted); font-weight: 400; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
+.bar[data-state="recording"] .dot { background: var(--record); animation: pulse 1.4s ease-in-out infinite; }
+.bar[data-state="saved"] .dot { background: var(--ok); }
+.bar[data-state="error"] .dot { background: var(--danger); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
+
+.words { display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+textarea {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 24px;
+  resize: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  user-select: text;
+}
+textarea::placeholder { color: var(--muted); }
+.partial { flex: none; margin: 0; color: var(--muted); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reply { flex: none; margin: 0; color: var(--muted); font-size: 14px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+.actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.actions .spacer { flex: 1; color: var(--muted); font-size: 13px; }
+
+/* ------------------------------------------------------------ the pop-ups */
+
+.alerts { display: grid; gap: 8px; padding: 8px; }
+.alert {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  background: var(--bg);
+}
+.alert .head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.alert .head span { flex: 1; }
+.alert .head button { margin: -12px -10px -12px 0; padding: 0; }
+.alert h1 { margin: 0; font-size: 16px; line-height: 1.3; user-select: text; overflow-wrap: anywhere; }
+.alert p { margin: 0; color: var(--muted); font-size: 14px; user-select: text; overflow-wrap: anywhere; }
+.alert .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.alert .error { color: var(--danger); }

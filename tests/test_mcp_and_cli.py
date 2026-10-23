@@ -89,14 +89,29 @@ def test_cli_add_and_password(tmp_path, monkeypatch, capsys):
 
     with pytest.raises(SystemExit):
         cli.main(["password"])
-    generated = capsys.readouterr().out.strip()
-    assert len(generated) >= 10
+    assert "no password" in capsys.readouterr().out  # none is made up
 
     with pytest.raises(SystemExit) as code:
         cli.main(["doctor"])
     report = capsys.readouterr().out
-    assert "AI" in report and "Time zone" in report and "Password" in report
+    assert "AI" in report and "Time zone" in report and "this computer only" in report
     assert code.value.code == 1  # no notification channel is set up
+
+    monkeypatch.setenv("MAGPIE_LOGIN", "true")  # a server that asks for one
+    with pytest.raises(SystemExit):
+        cli.main(["password"])
+    generated = capsys.readouterr().out.strip()
+    assert len(generated) >= 10
+
+    # Like an older version's made-up password: it stays until the setup turns it off.
+    monkeypatch.delenv("MAGPIE_LOGIN")
+    with pytest.raises(SystemExit):
+        cli.main(["password"])
+    assert capsys.readouterr().out.strip() == generated
+    monkeypatch.setenv("MAGPIE_LOGIN", "false")
+    with pytest.raises(SystemExit):
+        cli.main(["password"])
+    assert "no password" in capsys.readouterr().out
 
 
 def test_settings_from_environment(monkeypatch):
@@ -198,35 +213,27 @@ def test_setup_writes_env_and_keeps_what_is_there(tmp_path, monkeypatch, capsys)
     assert "localhost:9000" in capsys.readouterr().out
 
 
-def test_setup_defaults_to_no_password_on_this_computer(tmp_path, monkeypatch, capsys):
+def test_setup_asks_nothing_and_never_sets_a_password(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     env = tmp_path / ".env"
     with pytest.raises(SystemExit) as code:
-        cli.main(["setup", "--yes", "--timezone", "Europe/London"])
+        cli.main(["setup", "--timezone", "Europe/London"])
     assert code.value.code == 0
     assert "No password" in capsys.readouterr().out
     text = env.read_text()
-    assert "MAGPIE_LOGIN=false" in text and "MAGPIE_BIND=127.0.0.1" in text
-    assert "MAGPIE_PASSWORD" not in text
+    assert "MAGPIE_BIND=127.0.0.1" in text and "MAGPIE_TIMEZONE=Europe/London" in text
+    assert "MAGPIE_PASSWORD" not in text and "MAGPIE_LOGIN=false" in text
     assert Settings(_env_file=str(env)).login is False
 
+    # Only a server other devices reach gets a password, and only when asked for one.
     with pytest.raises(SystemExit):
-        cli.main(["setup", "--yes", "--password", "correct horse"])
+        cli.main(["setup", "--password", "correct horse"])
     text = env.read_text()
     assert "MAGPIE_PASSWORD='correct horse'" in text and "MAGPIE_BIND=0.0.0.0" in text
     assert "MAGPIE_LOGIN" not in text and Settings(_env_file=str(env)).login is True
 
-    with pytest.raises(SystemExit):
-        cli.main(["setup", "--yes"])  # pressing Enter keeps a password that's there
-    assert "MAGPIE_PASSWORD='correct horse'" in env.read_text()
-
-    with pytest.raises(SystemExit):
-        cli.main(["setup", "--yes", "--no-password"])
-    text = env.read_text()
-    assert "MAGPIE_PASSWORD" not in text and "MAGPIE_LOGIN=false" in text
-
     with pytest.raises(SystemExit) as code:
-        cli.main(["setup", "--yes", "--timezone", "Mars/Olympus"])
+        cli.main(["setup", "--timezone", "Mars/Olympus"])
     assert code.value.code == 2
 
 
@@ -252,23 +259,25 @@ def test_setup_without_a_known_zone_leaves_it_to_the_browser(tmp_path, monkeypat
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "detect_timezone", lambda: None)
     with pytest.raises(SystemExit) as code:
-        cli.main(["setup", "--yes"])
+        cli.main(["setup"])
     assert code.value.code == 0
     assert "MAGPIE_TIMEZONE" not in (tmp_path / ".env").read_text()
-    assert "browser's time zone" in capsys.readouterr().out
+    assert "computer's time zone" in capsys.readouterr().out
 
 
-def test_rerunning_setup_keeps_an_old_installs_password(tmp_path, monkeypatch):
-    """The one-time update says "run the setup again and press Enter": nobody is locked out."""
+def test_rerunning_setup_removes_an_old_installs_password(tmp_path, monkeypatch):
+    """Older versions asked for a password; Magpie has none now, and the rest is kept."""
     monkeypatch.chdir(tmp_path)
     env = tmp_path / ".env"
     env.write_text(
-        "MAGPIE_PASSWORD=pw\nMAGPIE_TIMEZONE=Europe/London\nANTHROPIC_API_KEY=sk-ant-x\n"
+        "MAGPIE_PASSWORD=pw\nMAGPIE_LOGIN=true\nMAGPIE_BIND=0.0.0.0\n"
+        "MAGPIE_TIMEZONE=Europe/London\nANTHROPIC_API_KEY=sk-ant-x\n"
     )
     with pytest.raises(SystemExit) as code:
         cli.main(["setup", "--yes"])
     assert code.value.code == 0
     text = env.read_text()
-    assert "MAGPIE_PASSWORD=pw" in text and "MAGPIE_BIND=0.0.0.0" in text  # phones keep working
-    assert "MAGPIE_LOGIN" not in text and "ANTHROPIC_API_KEY=sk-ant-x" in text
+    assert "MAGPIE_PASSWORD" not in text and "MAGPIE_LOGIN=false" in text
+    assert "MAGPIE_BIND=127.0.0.1" in text and "ANTHROPIC_API_KEY=sk-ant-x" in text
     assert "MAGPIE_TIMEZONE=Europe/London" in text
+    assert Settings(_env_file=str(env)).login is False

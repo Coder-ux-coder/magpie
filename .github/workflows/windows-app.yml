@@ -1,0 +1,177 @@
+name: Windows app
+
+# Builds the Magpie app for Windows (MagpieSetup.exe) and checks it on a real Windows
+# machine: the built app, then the installer and the installed app. On main, each new
+# version (the one in pyproject.toml) is published as a GitHub release; installed apps
+# update themselves from its latest.json.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,desktop]" pyinstaller
+      - uses: actions/cache@v4
+        with:
+          path: build/models
+          key: vosk-model-small-en-us-0.15
+      - name: Speech model
+        run: |
+          $name = "vosk-model-small-en-us-0.15"
+          if (-not (Test-Path "build/models/$name/am/final.mdl")) {
+            New-Item -ItemType Directory -Force build/models | Out-Null
+            Invoke-WebRequest "https://alphacephei.com/vosk/models/$name.zip" -OutFile build/model.zip
+            Expand-Archive build/model.zip -DestinationPath build/models -Force
+            Remove-Item build/model.zip
+          }
+          "MAGPIE_VOSK_MODEL=$PWD\build\models\$name" >> $env:GITHUB_ENV
+      - name: Test
+        run: pytest -q tests/test_desktop.py
+      - name: Build the app
+        run: pyinstaller --noconfirm --clean packaging/windows/magpie.spec
+      - name: Check the app
+        run: |
+          $options = @("--self-test", "--windows", "--report", "build/selftest.json")
+          try {
+            ./packaging/windows/speak.ps1 -Path build/note.wav
+            $options += @("--wav", "build/note.wav", "--expect", "milk")
+          } catch {
+            Write-Warning "Windows couldn't record a voice note here ($_); checking without one."
+          }
+          $run = Start-Process dist/Magpie/Magpie.exe -ArgumentList $options -Wait -PassThru
+          Get-Content build/selftest.json
+          if ($run.ExitCode -ne 0) { throw "The self-test failed." }
+      - name: Build the installer
+        run: |
+          $version = python -c "import magpie; print(magpie.__version__)"
+          "MAGPIE_VERSION=$version" >> $env:GITHUB_ENV
+          $found = Get-Command iscc.exe -ErrorAction SilentlyContinue
+          $iscc = if ($found) { $found.Source } else { "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc "/DAppVersion=$version" packaging/windows/Magpie.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
+      - name: Install it and check the installed app
+        run: |
+          $setup = Start-Process dist/MagpieSetup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "The installer failed ($($setup.ExitCode))." }
+          $exe = "$env:LOCALAPPDATA\Programs\Magpie\Magpie.exe"
+          if (-not (Test-Path $exe)) { throw "Magpie.exe wasn't installed." }
+
+          # The installer starts Magpie, as it does on anyone's computer.
+          $running = "$env:LOCALAPPDATA\Magpie\running.json"
+          $port = $null
+          for ($i = 0; $i -lt 120 -and -not $port; $i++) {
+            Start-Sleep -Seconds 1
+            if (Test-Path $running) { $port = (Get-Content $running | ConvertFrom-Json).port }
+          }
+          if (-not $port) { throw "Magpie didn't start after installing." }
+          $base = "http://127.0.0.1:$port"
+          $headers = @{ "X-Magpie" = "1" }
+          Invoke-RestMethod "$base/healthz" | Out-Null
+          for ($i = 0; $i -lt 30; $i++) {
+            $desktop = Invoke-RestMethod "$base/api/desktop"
+            if ($desktop.state -and $desktop.state -ne "starting") { break }
+            Start-Sleep -Seconds 1
+          }
+          $desktop | ConvertTo-Json
+          if (-not $desktop.active) { throw "The dashboard doesn't see the app." }
+          $note = Invoke-RestMethod "$base/api/notes" -Method Post -Headers $headers -ContentType "application/json" -Body '{"text": "Call James at five", "source": "api"}'
+          if (-not $note.note.id) { throw "The installed app didn't save a note." }
+          Invoke-RestMethod "$base/api/desktop/command" -Method Post -Headers $headers -ContentType "application/json" -Body '{"action": "write"}' | Out-Null
+          Invoke-RestMethod "$base/api/notify/test" -Method Post -Headers $headers -ContentType "application/json" -Body '{"channel": "desktop"}' | ConvertTo-Json
+          $start = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name Magpie -ErrorAction SilentlyContinue
+          if (-not $start) { throw "Magpie didn't set itself to start with Windows." }
+          Write-Host "Starts with Windows: $($start.Magpie)"
+
+          $check = Start-Process $exe -ArgumentList "--self-test", "--report", "build/selftest-installed.json" -Wait -PassThru
+          Get-Content build/selftest-installed.json
+          if ($check.ExitCode -ne 0) { throw "The installed app's self-test failed." }
+
+          Stop-Process -Name Magpie -Force
+          $uninstall = Start-Process "$env:LOCALAPPDATA\Programs\Magpie\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "The uninstaller failed." }
+          if (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name Magpie -ErrorAction SilentlyContinue) {
+            throw "Uninstalling left Magpie starting with Windows."
+          }
+      - name: Show the app's log
+        if: always()
+        run: |
+          $log = "$env:LOCALAPPDATA\Magpie\logs\magpie.log"
+          if (Test-Path $log) { Copy-Item $log build/magpie.log; Get-Content $log }
+      - name: Describe the release
+        run: |
+          $file = Get-Item dist/MagpieSetup.exe
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+          $url = "https://github.com/${{ github.repository }}/releases/download/v$env:MAGPIE_VERSION/MagpieSetup.exe"
+          @{ version = $env:MAGPIE_VERSION; windows = @{ url = $url; sha256 = $hash; size = $file.Length } } |
+            ConvertTo-Json | Set-Content dist/latest.json -Encoding utf8NoBOM
+          Get-Content dist/latest.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: magpie-windows
+          path: |
+            dist/MagpieSetup.exe
+            dist/latest.json
+            build/selftest*.json
+            build/magpie.log
+          if-no-files-found: warn
+
+  release:
+    name: Publish the release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: magpie-windows
+          path: release
+      - name: Publish (once for each version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Magpie $version is already released; bump the version to release again."
+            exit 0
+          fi
+          # The release notes: this version's part of CHANGELOG.md.
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on' CHANGELOG.md > notes.md
+          {
+            echo
+            echo "**Windows:** download **MagpieSetup.exe** below and double-click it. Magpie installs"
+            echo "itself, starts with Windows and keeps itself up to date."
+          } >> notes.md
+          gh release create "v$version" release/dist/MagpieSetup.exe release/dist/latest.json \
+            --title "Magpie $version" --notes-file notes.md --target "$GITHUB_SHA"

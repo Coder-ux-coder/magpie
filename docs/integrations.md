@@ -15,6 +15,11 @@ Ways to get notes into Magpie and reminders out of it, beyond the dashboard.
 Most integrations need your **API token** (Settings → Integrations) and, from outside your
 home network, a public HTTPS address for Magpie (see [deployment](deployment.md)).
 
+**With the Magpie app (Windows)**, Magpie only answers on its own computer. Pop-ups, email,
+Telegram (sending notes too), webhooks, ntfy and the MCP server for Claude Desktop all work
+as they are. The Siri shortcut, the Android share target, calendar subscriptions and
+opening Magpie from other devices need Magpie on a server instead.
+
 ## Pop-ups and email
 
 The two simplest ways to get reminders, both set up in **Settings → Reminders** (or on the

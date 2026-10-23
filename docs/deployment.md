@@ -1,38 +1,64 @@
 # Deployment
 
 Magpie is one process (web app, scheduler and Telegram bot together) and one SQLite file.
-It runs happily on a small VPS, a home server or a Raspberry Pi 4/5, using well under
-200 MB of memory.
+On Windows most people use **the Magpie app** ([getting started](getting-started.md#windows)),
+which is that same process with listening, windows and a tray icon added. This guide is
+for running Magpie as a server: in Docker on a Mac or Linux, or on a small VPS, a home
+server or a Raspberry Pi 4/5, using well under 200 MB of memory.
 
-- [Docker Compose (recommended)](#docker-compose)
+- [The Windows app](#the-windows-app)
+- [Docker Compose](#docker-compose)
 - [HTTPS](#https)
 - [Without Docker](#without-docker)
 - [Backups](#backups)
 - [Updates](#updates)
 - [Troubleshooting](#troubleshooting)
 
+## The Windows app
+
+`MagpieSetup.exe` (from the [latest release](https://github.com/Coder-ux-coder/magpie/releases/latest))
+installs Magpie for the current user in `%LOCALAPPDATA%\Programs\Magpie`, with no
+administrator rights and no questions; `/VERYSILENT` installs it without showing anything.
+Its notes and settings live in `%LOCALAPPDATA%\Magpie`, which updates and uninstalling
+leave alone. It runs the server on `127.0.0.1` (port 8000, or a free one if that's taken)
+with no password, starts with Windows (the `Magpie` value under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), and updates itself: every six
+hours it reads `latest.json` from the latest GitHub release, downloads the new installer,
+checks its size and SHA-256, and runs it silently when no note is being taken.
+
+The **Windows app** workflow builds each version on Windows, tests the built app and the
+installed one (a real window, and a note taken from a recording of Windows' own voice), and
+publishes the release. To build it yourself on Windows: `pip install -e ".[desktop]"
+pyinstaller`, download the
+[speech model](https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip), set
+`MAGPIE_VOSK_MODEL` to its folder, run `pyinstaller packaging/windows/magpie.spec`, then
+`iscc /DAppVersion=<version> packaging/windows/Magpie.iss` (Inno Setup 6).
+
 ## Docker Compose
 
 ```bash
 git clone https://github.com/Coder-ux-coder/magpie.git
 cd magpie
-sh setup.sh          # on Windows: double-click setup.cmd
+sh setup.sh          # on Windows: double-click setup-docker.cmd
 ```
 
 The setup script downloads Magpie (a ready-made image that GitHub builds from this
-repository), asks whether you want a password and your time zone, writes the answers to
-`.env`, starts Magpie with [automatic updates](#updates), adds a Magpie icon (Desktop and
-Start menu on Windows, Applications on a Mac, the applications menu on Linux) and opens
-Magpie in its own window, where a welcome screen sets up the AI, reminders and categories.
-Run it again to change the answers. New to Docker? See [getting started](getting-started.md).
+repository), writes `.env` without asking anything (your computer's time zone, no
+password, the port on this computer only), starts Magpie with
+[automatic updates](#updates), adds a Magpie icon (Desktop and Start menu on Windows,
+Applications on a Mac, the applications menu on Linux) and opens Magpie in its own window,
+where a welcome screen sets up the AI, reminders and categories. New to Docker? See
+[getting started](getting-started.md).
 
-To do it by hand instead, copy `.env.example` to `.env`, set at least these, and start it:
+**A server that other devices reach** (your phone on the Wi-Fi, or the internet behind
+[HTTPS](#https)) needs a password: `magpie setup --password 'a long password'` (or
+`sh setup.sh --password '…'`) writes it, with `MAGPIE_BIND=0.0.0.0`. To do it by hand
+instead, copy `.env.example` to `.env`, set these, and start it:
 
 ```dotenv
 MAGPIE_PASSWORD=a-long-password
 MAGPIE_BIND=0.0.0.0               # let other devices in (only with a password)
 MAGPIE_TIMEZONE=Europe/London
-# MAGPIE_LOGIN=false              # instead of a password: this computer only (keep MAGPIE_BIND=127.0.0.1)
 # ANTHROPIC_API_KEY=sk-ant-...    # optional: or choose the AI in Magpie's welcome screen
 ```
 
@@ -43,7 +69,7 @@ docker compose logs -f magpie      # watch it start
 
 Open <http://localhost:8000>. Magpie's port listens only on this computer unless
 `MAGPIE_BIND=0.0.0.0` is set, which lets in other devices at `http://<server-ip>:8000`;
-set a password first. `MAGPIE_HOST_PORT` moves it off port 8000. Notes live in the
+set a password first (without one, Magpie refuses every address but `localhost` anyway). `MAGPIE_HOST_PORT` moves it off port 8000. Notes live in the
 `magpie-data` Docker volume, so they survive restarts and updates.
 
 The image is `ghcr.io/coder-ux-coder/magpie`, published for x86-64 and ARM64 by the
@@ -61,7 +87,6 @@ Useful commands:
 
 ```bash
 docker compose exec magpie magpie doctor      # check the configuration
-docker compose exec magpie magpie password    # show the generated password, if you didn't set one
 docker compose exec magpie magpie backup      # safe database backup into the volume
 docker compose exec magpie magpie add "test note from the server"
 ```
@@ -207,9 +232,11 @@ setup records your socket's path as `DOCKER_SOCKET` in `.env`.
 
 **Installed before automatic updates existed?** Those copies built Magpie on your computer
 and can't update themselves. Update once by hand: download the new ZIP and extract it over
-the old folder, choosing to replace the files (or `git pull`), then run the setup again and
-press Enter to keep each answer. Your notes, in the `magpie_magpie-data` volume, and your
-`.env` are kept. See [getting started](getting-started.md#installed-magpie-before-automatic-updates).
+the old folder, choosing to replace the files (or `git pull`), then run the setup again.
+Your notes, in the `magpie_magpie-data` volume, and your `.env` are kept (a password the old
+version made up is dropped; Magpie then opens on this computer only). On Windows, installing
+the app is easier: it brings the notes over by itself. See
+[getting started](getting-started.md#installed-magpie-in-docker-before-automatic-updates).
 
 Without Docker, update with `pip install --upgrade` and the same package address you
 installed from, then restart Magpie. Back up first if you're cautious.
@@ -230,7 +257,7 @@ Start with `magpie doctor` (in Docker: `docker compose exec magpie magpie doctor
 | Telegram voice notes fail | Voice needs `MAGPIE_STT_API_KEY`. |
 | Done/Snooze buttons in push, ntfy or email don't work | Set `MAGPIE_BASE_URL` to an address your phone can reach. |
 | A link review failed | Some sites block automated access. Magpie then asks Claude to fetch the page; if that fails too, open the note and press **Try again** later. Links to private network addresses are never fetched. |
-| Forgot the password | Set `MAGPIE_PASSWORD` and restart, or run `magpie password` if it was generated. |
-| Phones on the Wi-Fi can't open Magpie | It only listens on the server itself unless `.env` has `MAGPIE_BIND=0.0.0.0` (set a password first, for example by running the setup again). |
+| Forgot the password (a server) | Set a new `MAGPIE_PASSWORD` and restart; `magpie password` shows one Magpie made up. |
+| Phones on the Wi-Fi can't open Magpie | It only listens on the server itself unless `.env` has `MAGPIE_BIND=0.0.0.0` and a password (`magpie setup --password '…'`). |
 | Port 8000 is already in use | Set `MAGPIE_HOST_PORT=8080` in `.env` and run `docker compose up -d` (or the setup). |
 | Magpie didn't update | `docker compose logs updates` says why: no internet, a version that didn't start, or updates turned off. Copies installed before automatic updates need [one update by hand](#updates). |

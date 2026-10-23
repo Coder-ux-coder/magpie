@@ -5,7 +5,7 @@ import { noteActions, reminderActions } from "./actions.js";
 import { KINDS, noteCard } from "./cards.js";
 import { renderMarkdown } from "./markdown.js";
 import { speak } from "./speech.js";
-import { aiName, categoryOf, emit, local, on, snoozeLabel, speechLang, state, tz } from "./state.js";
+import { aiName, categoryOf, desktopApp, emit, local, on, snoozeLabel, speechLang, state, tz } from "./state.js";
 import { clear, clock, dayLabel, h, icon, toast, when } from "./ui.js";
 
 const PAGE = 40;
@@ -43,7 +43,9 @@ function emptyState(route, q) {
       h("h3", {}, "Your inbox is clear"),
       h("p", {}, "Capture anything. Magpie files it and decides when to remind you."),
       h("ul", {},
-        h("li", {}, `Tap the mic, or turn on hands-free and say “${wake}”.`),
+        h("li", {}, desktopApp()
+          ? `Say “${wake}” anywhere on this computer, or press the mic.`
+          : `Tap the mic, or turn on hands-free and say “${wake}”.`),
         h("li", {}, "Type: “remind me to drink water in 10 minutes”."),
         h("li", {}, "Paste a YouTube or article link for a short review."),
         h("li", {}, "Connect Telegram in Settings to capture voice notes on the go."),

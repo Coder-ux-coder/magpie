@@ -6,16 +6,20 @@ the design is in [docs/architecture.md](docs/architecture.md).
 
 ## What Magpie is
 
-A self-hosted, single-user, voice-first notes app. Notes arrive from the browser's voice bar
-(wake phrase “notes on”, mic, typing, share target), Telegram, Siri Shortcuts, the HTTP API,
-the CLI or MCP. An AI files each note (clean text, title, kind, the user's own category,
-tags), decides whether and when to remind the user, and reviews linked videos and articles.
-The AI is Claude by default (Haiku 5.5), or any OpenAI-compatible service, or none (simple
-rules). A scheduler delivers reminders and digests as pop-ups (web push), email, Telegram,
-ntfy or webhooks. Installed copies run in Docker and update themselves.
+A single-user, voice-first notes app with no password. Its main form is **the Magpie app
+for Windows**: it starts with the computer, lives in the tray, listens offline for the wake
+phrase “notes on” all the time and shows a small floating bar with the words as they're
+said. Notes also arrive from the browser's voice bar, typing, the share target, Telegram,
+Siri Shortcuts, the HTTP API, the CLI or MCP. An AI files each note (clean text, title, kind,
+the user's own category, tags), decides whether and when to remind the user, and reviews
+linked videos and articles. The AI is Claude by default (Haiku 5.5), or any
+OpenAI-compatible service, or none (simple rules). A scheduler delivers reminders and digests
+as pop-ups (from the app, or web push), email, Telegram, ntfy or webhooks. The app and Docker
+installs update themselves.
 
 One Python process (FastAPI + background asyncio tasks), one SQLite file, and a
-no-build-step vanilla-JS PWA.
+no-build-step vanilla-JS PWA. The app is that same server running inside a desktop process
+(`magpie.desktop`) with an offline speech model (Vosk), its own windows and a tray icon.
 
 ## Commands
 
@@ -27,17 +31,25 @@ pip install -e ".[dev,mcp]"
 MAGPIE_DATA_DIR=dev-data python scripts/seed_demo.py
 MAGPIE_DATA_DIR=dev-data MAGPIE_BRAIN=fake MAGPIE_LOGIN=false magpie serve   # http://localhost:8000
 
+# The desktop app (needs a screen and a microphone; Windows is the main platform)
+pip install -e ".[desktop]"
+magpie desktop                                  # or: python -m magpie.desktop
+magpie desktop --self-test                      # no screen needed; --windows opens one
+
 # Checks: run all of these before you finish
 pytest -q
 ruff check src tests scripts
 ruff format --check src tests scripts     # `ruff format src tests scripts` to fix
 node --test "tests/js/*.test.mjs"
-for f in src/magpie/web/static/js/*.js src/magpie/web/sw.js; do node --check "$f"; done
+for f in src/magpie/web/static/js/*.js src/magpie/web/static/desktop/*.js src/magpie/web/sw.js; do node --check "$f"; done
 docker build -t magpie .                   # when you touch the Dockerfile or dependencies
 ```
 
 The tests are offline and need no keys. CI (`.github/workflows/ci.yml`) runs the same checks
-on Python 3.11 to 3.13, plus a Docker build and smoke test.
+on Python 3.11 to 3.13, plus a Docker build and smoke test. The **Windows app** workflow
+(`windows-app.yml`) builds `MagpieSetup.exe` on Windows, runs the built app's self-test (a
+real window, and a note taken from a recording of Windows' own voice), installs it, checks
+the installed app, and on main publishes a release for each new version in `pyproject.toml`.
 
 ## Repository map
 
@@ -61,7 +73,7 @@ src/magpie/
   reminders.py     Plans → reminder rows (time zones, RRULE, quiet mode); done/snooze/…
   scheduler.py     Fires due reminders, retries delivery, sends digests on time
   digest.py        Daily digest and weekly review (with a plain-text fallback)
-  notify/          Notifier + channels (telegram, webpush, ntfy, email, webhook)
+  notify/          Notifier + channels (desktop app, telegram, webpush, ntfy, email, webhook)
   telegram.py      The bot: long polling, pairing, commands, inline buttons
   telegram_api.py  Minimal Bot API client
   content/         URL extraction, SSRF guard (links.py), fetching pages/transcripts (fetch.py)
@@ -72,17 +84,34 @@ src/magpie/
                    (MAGPIE_LOGIN=false: no password, localhost only; see api.py LOCAL_ONLY)
   core.py          Magpie container: builds and wires services, starts background tasks
   export.py ics.py JSON/Markdown export + import; iCalendar feed
-  cli.py           `magpie serve|add|digest|doctor|password|token|backup|setup|mcp`
+  cli.py           `magpie serve|desktop|add|digest|doctor|password|token|backup|setup|mcp`
   mcp_server.py    MCP server (optional extra) that talks to the HTTP API
-  web/             index.html, sw.js, manifest, static/{css,js,icons}
+  desktop/         The Magpie app (optional extra `desktop`; Windows first):
+    app.py         DesktopApp: starts everything, the voice bar's states, saving, pop-ups;
+                   Bridge: what the server sees of the app (core.desktop)
+    speech.py      Listener (wake → record → stop, from word timings) and VoiceEngine
+                   (the microphone thread); Vosk models behind small protocols
+    phrases.py     Spotting “notes on”/“notes off”/“cancel note” in recogniser words
+    server.py      EmbeddedServer (uvicorn in a thread, 127.0.0.1) and LocalClient
+    ui.py          pywebview windows (notes, the floating bar, reminders) and the tray
+    paths.py       Where the app keeps things (%LOCALAPPDATA%\Magpie), desktop.json,
+                   finding or downloading the speech model
+    system.py      Start with the computer, one copy at a time, the active window
+    migrate.py     First start: bring notes and settings over from a Docker Magpie
+    update.py      Self-update from the GitHub release's latest.json (sha-256 checked)
+    selftest.py    `--self-test`: what the Windows build checks on the built app
+  web/             index.html, sw.js, manifest, static/{css,js,icons,desktop}
     static/js/     app.js (boot, routing, tabs), capture.js + voice.js (the voice bar),
                    controls.js (AI, email, pop-ups, categories, learning), welcome.js
                    (first-run screen), settings.js, views.js, cards.js, note-dialog.js, …
+    static/desktop/ The app's own pages: bar.html/js (floating voice bar), reminders.html/js
 artifact/          magpie.html: Magpie as a Claude artifact (the user's own Claude account)
+packaging/windows/ magpie.spec (PyInstaller), Magpie.iss (installer), speak.ps1 (test audio)
 tests/             pytest suite (conftest.py has the fixtures) + tests/js (node:test)
 scripts/           seed_demo.py
 docs/              SPEC, architecture, configuration, deployment, integrations
-setup.cmd setup.sh One-step Docker setup; magpie.cmd/magpie.sh open Magpie in an app window
+setup.cmd          Windows: downloads and installs the Magpie app
+setup.sh setup-docker.cmd  One-step Docker setup; magpie.cmd/magpie.sh open it in a window
 docker-compose.yml Magpie + the "updates" helper (hourly pull, health-checked, rolls back)
 ```
 
@@ -135,6 +164,26 @@ docker-compose.yml Magpie + the "updates" helper (hourly pull, health-checked, r
   `prefers-reduced-motion` respected.
 - Pure logic (like `phrases.js`) stays DOM-free so it can be tested with `node --test`.
 - Bump `CACHE` in `sw.js` when you add files to the app shell.
+- When the Magpie app runs the server (`status.desktop.active`, `desktopApp()` in
+  `state.js`), the app does the listening: the page never starts its own microphone, and
+  the mic button and listening switch call `/api/desktop/command`.
+
+### The desktop app (`src/magpie/desktop`)
+
+- Everything that touches the screen, the microphone or the operating system is imported
+  lazily, so the logic runs (and is tested) anywhere; Windows-only calls (`ctypes.windll`,
+  `winreg`, `msvcrt`) sit behind `sys.platform` checks with a quiet fallback elsewhere.
+- The app's pages (`static/desktop/`) reach the app through the server's
+  `/api/desktop/ui`, and the app drives them with `window.run_js()`. Don't use pywebview's
+  `js_api` or `evaluate_js`: both need `eval`, which the CSP refuses (and must keep refusing).
+- The floating bar and the reminders must never take the keyboard from what the user is
+  doing: show, hide and move them through `ui.Floating`, not pywebview's `show()`.
+- Server code calls into the app with `asyncio.to_thread` (the app may call the server back
+  through `LocalClient`, which would deadlock the event loop).
+- Nothing may stop the app: the tray, the microphone, the speech model, Docker and updates
+  can all fail; log it, show it (tray tooltip, bar message) and carry on.
+- `--self-test` is what the Windows build checks; extend it when you add something the
+  installed app needs (a module, a page, a data file in `magpie.spec`).
 
 ### Copy and docs
 
@@ -219,9 +268,14 @@ a strong reason and a capability token, like the calendar feed or action links.
   redirects.
 - State-changing endpoints must require auth; keep the `X-Magpie` CSRF check for cookie
   sessions; one-tap links stay signed, scoped and POST-only for changes.
-- Without a password (`MAGPIE_LOGIN=false`) the dashboard answers only requests whose
-  `Host` is a local name (localhost, 127.0.0.1, ::1), which blocks DNS rebinding; the
-  CSRF header is still required, and the Bearer token works from anywhere. Keep both.
+- Magpie has no password by default: the dashboard answers only requests whose `Host` is a
+  local name (localhost, 127.0.0.1, ::1), which blocks DNS rebinding; the CSRF header is
+  still required, and the Bearer token works from anywhere. Keep both. A password only
+  exists when `MAGPIE_PASSWORD` is set (a server other devices reach), or for an older
+  install whose made-up password is kept until the setup runs again (`auth.Secrets`). The
+  app's server listens on 127.0.0.1 only.
+- The app updates itself only from `latest.json` on this repository's GitHub releases,
+  with the installer's size and SHA-256 checked before it runs (`desktop/update.py`).
 - AI keys and the email app password are secrets: never return them from the API (only
   whether one is saved), and keep a saved key tied to the address it was entered for.
 - Don't loosen the Content-Security-Policy or add third-party scripts.

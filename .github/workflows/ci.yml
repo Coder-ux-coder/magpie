@@ -40,7 +40,7 @@ jobs:
         with:
           node-version: 22
       - name: Syntax check
-        run: for f in src/magpie/web/static/js/*.js src/magpie/web/sw.js; do node --check "$f"; done
+        run: for f in src/magpie/web/static/js/*.js src/magpie/web/static/desktop/*.js src/magpie/web/sw.js; do node --check "$f"; done
       - name: Test
         run: node --test "tests/js/*.test.mjs"
 

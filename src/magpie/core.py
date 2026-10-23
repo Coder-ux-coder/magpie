@@ -23,6 +23,7 @@ from magpie.digest import Digests
 from magpie.models import Note
 from magpie.notify import Notifier
 from magpie.notify.channels import (
+    DesktopChannel,
     EmailChannel,
     NtfyChannel,
     TelegramChannel,
@@ -77,8 +78,11 @@ class Magpie:
         )
         self.webpush = WebPushChannel(self.store, settings)
         self.email = EmailChannel(settings, self.store)
+        # Set by the desktop app when it runs this server: its pop-ups and its microphone.
+        self.desktop: Any = None
         self.notifier = Notifier(
             [
+                DesktopChannel(lambda: self.desktop),
                 TelegramChannel(self.telegram_api, self.telegram_chat_id),
                 self.webpush,
                 NtfyChannel(self.http, settings),
@@ -386,15 +390,12 @@ class Magpie:
         if self.secrets.password_generated:
             log.warning(
                 "\n\n    Log in to Magpie with this password:  %s\n"
-                "    (set MAGPIE_PASSWORD to choose your own; `magpie password` shows it again)\n",
+                "    (`magpie password` shows it again. Run the setup again to stop using a\n"
+                "    password: Magpie then opens straight away, on this computer only.)\n",
                 self.secrets.password,
             )
         if not self.settings.login:
-            log.warning(
-                "Magpie has no password (MAGPIE_LOGIN=false), so the dashboard only opens on "
-                "this computer: http://localhost:%s",
-                self.settings.port,
-            )
+            log.info("Magpie opens on this computer: http://localhost:%s", self.settings.port)
         if not self.brain.available:
             log.warning(
                 "%s isn't connected yet: notes are saved and filed once you set up an AI "

@@ -78,9 +78,40 @@ def test_logging_in_is_not_needed(local):
     assert local.post("/api/login", json={"password": "anything"}).json() == {"authenticated": True}
 
 
-def test_a_password_is_still_required_by_default(tmp_path, router):
-    settings = Settings(_env_file=None, data_dir=tmp_path, brain="fake")
-    magpie = Magpie(settings, http=httpx2.AsyncClient(transport=httpx2.MockTransport(router)))
-    with TestClient(create_app(settings, magpie=magpie, background=False)) as http:
+def test_no_password_unless_one_is_set(tmp_path, router):
+    plain = Settings(_env_file=None, data_dir=tmp_path, brain="fake")
+    assert plain.login is False
+    assert Settings(_env_file=None, data_dir=tmp_path, password="pw").login is True
+    assert Settings(_env_file=None, data_dir=tmp_path, password="pw", login=False).login is False
+
+    magpie = Magpie(plain, http=httpx2.AsyncClient(transport=httpx2.MockTransport(router)))
+    assert magpie.secrets.password_generated is False
+    app = create_app(plain, magpie=magpie, background=False)
+    with TestClient(app) as far, TestClient(app, base_url="http://localhost:8000") as here:
+        assert far.get("/api/status").status_code == 403  # another computer's name
+        assert here.get("/api/status").status_code == 200
+        assert here.get("/api/session").json()["login"] is False
+
+    with_password = Settings(_env_file=None, data_dir=tmp_path / "pw", brain="fake", password="pw")
+    magpie = Magpie(with_password, http=httpx2.AsyncClient(transport=httpx2.MockTransport(router)))
+    with TestClient(create_app(with_password, magpie=magpie, background=False)) as http:
         assert http.get("/api/status").status_code == 401
         assert http.get("/api/session").json()["login"] is True
+
+
+def test_an_older_installs_made_up_password_stays_until_the_setup_runs(tmp_path, router):
+    """Updating never unlocks a server: its port may be open to the whole network."""
+    http = httpx2.AsyncClient(transport=httpx2.MockTransport(router))
+    older = Settings(_env_file=None, data_dir=tmp_path, brain="fake", login=True)
+    made_up = Magpie(older, http=http).secrets.password
+
+    updated = Settings(_env_file=None, data_dir=tmp_path, brain="fake")
+    magpie = Magpie(updated, http=http)
+    assert updated.login is True and magpie.secrets.password == made_up
+    with TestClient(create_app(updated, magpie=magpie, background=False)) as client:
+        assert client.get("/api/status").status_code == 401
+        assert client.get("/api/status", headers={"Host": "localhost"}).status_code == 401
+
+    retired = Settings(_env_file=None, data_dir=tmp_path, brain="fake", login=False)
+    assert Magpie(retired, http=http).secrets.password == ""
+    assert retired.login is False

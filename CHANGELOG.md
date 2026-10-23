@@ -6,6 +6,48 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-23
+
+### Added
+
+- **Magpie is an app for Windows.** Download `MagpieSetup.exe` from the latest release and
+  double-click it: nothing to answer, no administrator rights, no Docker, no password. It
+  starts with Windows, waits by the clock, and listens for **“notes on”** all the time, in
+  any program. A small bar floats up at the bottom of the screen with your words as you
+  speak, without taking the keyboard from what you're doing; “notes off”, a pause or Save
+  saves the note, “cancel note” discards it (with Undo), and a click on the bar lets you
+  type. Listening happens offline on your computer (Vosk); no audio leaves it.
+- Reminders **pop up in the corner of the screen** from the app, with Done, Snooze and
+  Open (a new `desktop` notification channel, with a test button).
+- The tray icon's menu opens your notes, starts a voice note or a typed one, turns
+  listening off and on, and turns starting with Windows off and on.
+- **The app updates itself** from GitHub releases: it checks every few hours, checks the
+  download's size and SHA-256 against the release, and installs it when no note is being
+  taken.
+- **Moving from Docker:** the app's first start brings over the notes and settings of a
+  Magpie running in Docker (but no password), then stops it and its sign-in shortcut so
+  reminders don't arrive twice. Docker's data is left untouched.
+- The dashboard knows when the app runs it: the mic button and the listening switch drive
+  the app, its status line says what the app is doing, and Settings and the welcome screen
+  show the app's pop-ups. Docker installs on Windows suggest the app.
+- `magpie desktop` runs the app from a Python install (the new `desktop` extra), on a Mac
+  or Linux too; `--self-test` checks an installation without a screen or microphone.
+- The **Windows app** workflow builds the installer on Windows, runs the built app's
+  self-test (a real window, and a note taken from a recording of Windows' own voice),
+  installs it, checks the installed app and its uninstaller, and publishes a release for
+  each new version.
+
+### Changed
+
+- **No passwords.** Magpie has no password by default and only answers on its own
+  computer. The setup asks nothing (`setup.sh`, `setup-docker.cmd`, `magpie setup`), and
+  running it again retires a password an older version made up. A server that other
+  devices reach can still set `MAGPIE_PASSWORD` (`magpie setup --password`). Installs
+  that already used a made-up password keep it until the setup runs again, so updating
+  never unlocks a server whose port is open to the network.
+- `setup.cmd` now installs the Windows app; the Docker setup for Windows is
+  `setup-docker.cmd`.
+
 ## [0.3.0] - 2026-10-22
 
 ### Added

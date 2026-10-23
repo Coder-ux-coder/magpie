@@ -228,6 +228,42 @@ class EmailError(Exception):
     """The mail server refused or couldn't be reached; the message says what to do."""
 
 
+class DesktopChannel:
+    """Reminders popping up from the Magpie app on this computer (the desktop app).
+
+    Configured while the app runs Magpie; the app shows the pop-up itself, so nothing
+    leaves the computer.
+    """
+
+    name = "desktop"
+    label = "Pop-ups from the Magpie app"
+
+    def __init__(self, bridge: Callable[[], Any]) -> None:
+        self._bridge = bridge
+
+    @property
+    def configured(self) -> bool:
+        return self._bridge() is not None
+
+    async def send(self, notification: Notification) -> None:
+        bridge = self._bridge()
+        if bridge is None:
+            raise RuntimeError("The Magpie app isn't running.")
+        await asyncio.to_thread(
+            bridge.notify,
+            {
+                "kind": notification.kind,
+                "title": notification.title,
+                "body": notification.body,
+                "due": notification.due,
+                "url": notification.url,
+                "note_id": notification.note_id,
+                "reminder_id": notification.reminder_id,
+                "snooze_minutes": notification.snooze_minutes,
+            },
+        )
+
+
 class EmailChannel:
     name = "email"
     label = "Email"

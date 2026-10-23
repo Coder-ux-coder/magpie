@@ -3,8 +3,8 @@
 // else. It can be skipped at any step and opened again from Settings.
 
 import { api } from "./api.js";
-import { ACCENTS, aiControls, categoriesEditor, emailControls, pushControls, pushSupported, refreshStatus } from "./controls.js";
-import { deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
+import { ACCENTS, aiControls, appPopupControls, categoriesEditor, emailControls, pushControls, pushSupported, refreshStatus } from "./controls.js";
+import { desktopApp, deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
 import { clear, h, icon, iconButton, toast } from "./ui.js";
 
 let shown = false;
@@ -60,17 +60,29 @@ function voiceStep() {
     if (!value) { stop.value = state.prefs.stop_phrase; return; }
     save({ stop_phrase: value }, `Say “${value}” to save a note.`);
   });
-  const listen = h("input", { type: "checkbox", role: "switch", id: "welcome-listen", checked: local.autoListen !== false });
-  listen.addEventListener("change", () => saveLocal({ autoListen: listen.checked }));
+  const inApp = desktopApp();
+  const listen = h("input", { type: "checkbox", role: "switch", id: "welcome-listen", checked: inApp ? state.status.desktop.listening !== false : local.autoListen !== false });
+  listen.addEventListener("change", async () => {
+    if (!inApp) return saveLocal({ autoListen: listen.checked });
+    try {
+      await api("/api/desktop/command", { method: "POST", body: { action: listen.checked ? "listen" : "pause" } });
+    } catch (error) {
+      listen.checked = !listen.checked;
+      toast(error.message, { error: true });
+    }
+  });
   const accent = h("select", { id: "welcome-accent" }, ACCENTS.map(([value, label]) => h("option", { value, selected: value === (prefs.speech_lang || "") }, label)));
   accent.addEventListener("change", () => save({ speech_lang: accent.value }, "Accent saved."));
   return [
-    h("p", {}, "Say your command word to start a note, talk, then say the stop word to save it. You can also press the mic or just type."),
+    h("p", {}, inApp
+      ? "Say your command word anywhere on this computer, even with Magpie closed: a small bar shows your words as you talk. Say the stop word to save the note. You can also press the mic or just type."
+      : "Say your command word to start a note, talk, then say the stop word to save it. You can also press the mic or just type."),
     h("div", { class: "row" },
       h("div", { class: "field" }, h("label", { for: "welcome-wake" }, "Command word"), wake),
       h("div", { class: "field" }, h("label", { for: "welcome-stop" }, "Stop word"), stop)),
-    h("label", { class: "switch", for: "welcome-listen" }, listen, h("span", { class: "switch-track", "aria-hidden": "true" }), h("span", {}, "Listen for the command word when Magpie opens")),
-    h("div", { class: "field" }, h("label", { for: "welcome-accent" }, "Your accent"), accent, h("span", { class: "hint" }, "Magpie listens for English. Your accent helps it hear you.")),
+    h("label", { class: "switch", for: "welcome-listen" }, listen, h("span", { class: "switch-track", "aria-hidden": "true" }), h("span", {}, inApp ? "Always listen for the command word (on this computer, nothing is sent anywhere)" : "Listen for the command word when Magpie opens")),
+    // The app's own listening is American English whatever the accent setting says.
+    inApp ? null : h("div", { class: "field" }, h("label", { for: "welcome-accent" }, "Your accent"), accent, h("span", { class: "hint" }, "Magpie listens for English. Your accent helps it hear you.")),
   ];
 }
 
@@ -100,8 +112,9 @@ const STEPS = [
       h("p", {}, "How should Magpie tell you it's time? Use both if you like: pop-ups while you're at the computer, email for your phone."),
       h("div", { class: "welcome-card" },
         h("h3", {}, icon("bell"), "Pop-ups on this computer"),
-        pushSupported() ? h("p", { class: "muted small" }, "A simple notification, even when Magpie's window is in the background.") : null,
-        pushControls()),
+        desktopApp()
+          ? appPopupControls()
+          : [pushSupported() ? h("p", { class: "muted small" }, "A simple notification, even when Magpie's window is in the background.") : null, pushControls()]),
       h("div", { class: "welcome-card" },
         h("h3", {}, icon("send"), "Email"),
         h("p", { class: "muted small" }, "Every reminder as an email, like “Call James · due today 10:00 AM”."),

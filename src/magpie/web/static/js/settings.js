@@ -2,9 +2,9 @@
 // preferences (saved in this browser).
 
 import { api } from "./api.js";
-import { ACCENTS, aiControls, categoriesEditor, emailControls, learningControls, pushControls, refreshStatus } from "./controls.js";
+import { ACCENTS, aiControls, appPopupControls, categoriesEditor, emailControls, learningControls, pushControls, refreshStatus } from "./controls.js";
 import "./welcome.js";
-import { deviceTimeZone, emit, local, saveLocal, snoozeLabel, state } from "./state.js";
+import { desktopApp, deviceTimeZone, emit, local, saveLocal, snoozeLabel, state } from "./state.js";
 import { speechSupported, recordingSupported } from "./voice.js";
 import { ttsSupported } from "./speech.js";
 import { append, clear, confirmDialog, copyText, debounce, h, icon, iconButton, toast } from "./ui.js";
@@ -14,6 +14,7 @@ const REPO = "https://github.com/Coder-ux-coder/magpie";
 
 const DAYS = [["", "Off"], ["mon", "Monday"], ["tue", "Tuesday"], ["wed", "Wednesday"], ["thu", "Thursday"], ["fri", "Friday"], ["sat", "Saturday"], ["sun", "Sunday"]];
 const CHANNEL_HELP = {
+  desktop: "Install the Magpie app for Windows: reminders then pop up in the corner of the screen.",
   telegram: "Create a bot with @BotFather, set MAGPIE_TELEGRAM_BOT_TOKEN and restart Magpie.",
   ntfy: "Install the ntfy app, pick a secret topic name and set MAGPIE_NTFY_TOPIC.",
   webhook: "Set MAGPIE_WEBHOOK_URL (Slack, Discord, or any URL that accepts JSON).",
@@ -169,8 +170,23 @@ function voiceSection() {
   const silence = h("input", { type: "number", id: "pref-silence", min: 0, max: 120, value: prefs.silence_seconds, inputmode: "numeric" });
   silence.addEventListener("change", () => savePrefs({ silence_seconds: Number(silence.value) || 0 }));
   const stt = state.status.stt.enabled;
+  const inApp = desktopApp();
+  const listen = async (on) => {
+    try {
+      await api("/api/desktop/command", { method: "POST", body: { action: on ? "listen" : "pause" } });
+      toast(on ? "The Magpie app is listening for the command word." : "The Magpie app stopped listening.");
+      await refreshStatus().catch(() => {});
+    } catch (error) {
+      toast(error.message, { error: true });
+    }
+  };
   return section("voice", "Voice",
-    !speechSupported
+    inApp
+      ? toggle("app-listen", "Always listen for the command word", state.status.desktop.listening !== false, listen, {
+          hint: "The Magpie app listens on this computer, even when this window is closed. Nothing you say leaves the computer until a note is saved.",
+        })
+      : null,
+    !inApp && !speechSupported
       ? h("p", { class: "banner" }, icon("alert"), h("span", {}, stt
           ? "This browser can't recognise speech itself, so Magpie records audio and the server transcribes it."
           : "This browser can't recognise speech. Use Chrome, Edge or Safari, set up server transcription, or type."))
@@ -179,10 +195,12 @@ function voiceSection() {
     field("pref-wake", "Wake phrase (hands-free)", wake, "Say it to start a note when hands-free is on."),
     field("pref-stop", "Stop phrase", stop, "Say it to save the note. “End note” also works, and “cancel note” throws it away."),
     field("pref-silence", "Save after this many seconds of silence (0 = never)", silence),
-    toggle("local-review", "Let me check voice notes before saving", local.reviewVoice, (on) => saveLocal({ reviewVoice: on }), {
-      hint: "Voice text goes into the text box so you can fix it, then press Save.",
-    }),
-    recordingSupported
+    inApp
+      ? null
+      : toggle("local-review", "Let me check voice notes before saving", local.reviewVoice, (on) => saveLocal({ reviewVoice: on }), {
+          hint: "Voice text goes into the text box so you can fix it, then press Save.",
+        }),
+    recordingSupported && !inApp
       ? toggle("local-serverstt", "Use the server's speech-to-text instead of the browser's", local.serverStt, (on) => saveLocal({ serverStt: on }), {
           disabled: !stt,
           hint: stt ? "Often more accurate, especially with strong accents; the browser sends audio to your Magpie server." : "Set MAGPIE_STT_API_KEY on the server to enable this.",
@@ -200,7 +218,12 @@ function notificationsSection() {
   const rows = status.channels.map((channel) => {
     const extra = [];
     if (channel.name === "telegram") extra.push(telegramControls());
-    if (channel.name === "webpush") extra.push(h("div", { style: "flex-basis:100%" }, pushControls({ onSaved: () => openSettings("notify") })));
+    if (channel.name === "desktop" && channel.configured) extra.push(h("div", { style: "flex-basis:100%" }, appPopupControls()));
+    if (channel.name === "webpush") {
+      extra.push(h("div", { style: "flex-basis:100%" }, desktopApp()
+        ? h("p", { class: "muted small" }, "Not needed with the Magpie app, which shows reminders itself.")
+        : pushControls({ onSaved: () => openSettings("notify") })));
+    }
     if (channel.name === "email") extra.push(h("div", { style: "flex-basis:100%" }, emailControls({ onSaved: () => openSettings("notify") })));
     if (!channel.configured && CHANNEL_HELP[channel.name] && !(channel.name === "telegram" && status.telegram.configured)) {
       extra.push(h("p", { class: "muted small", style: "flex-basis:100%;margin:0" }, CHANNEL_HELP[channel.name]));
@@ -429,9 +452,9 @@ function accountSection() {
   return section("account", "Privacy & account",
     login
       ? null
-      : h("p", { class: "small" }, "No password: Magpie opens straight away, but only on this computer. To use it from your phone or another device, run the setup again and choose a password."),
+      : h("p", { class: "small" }, "Magpie has no password: it opens straight away, on this computer only. Your notes stay on this computer."),
     login && state.status.password_generated
-      ? h("p", { class: "banner" }, icon("alert"), h("span", {}, "You're using a generated password. Run the setup again to choose your own, or to stop using one."))
+      ? h("p", { class: "banner" }, icon("alert"), h("span", {}, "This Magpie still uses the password an older version made up. Run the setup again to stop using it: Magpie then opens straight away, on this computer only."))
       : null,
     h("p", { class: "muted small" }, `Magpie ${state.status.version} · `, h("a", { href: REPO, target: "_blank", rel: "noopener" }, "Source code")),
     h("div", { class: "row" },

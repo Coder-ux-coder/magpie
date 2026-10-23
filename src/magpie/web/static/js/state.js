@@ -93,6 +93,11 @@ export function speechLang() {
   return englishLang(state.prefs?.speech_lang, navigator.language);
 }
 
+/** The Magpie app runs this server: it listens for the command word and shows pop-ups. */
+export function desktopApp() {
+  return Boolean(state.status?.desktop?.active);
+}
+
 /** The AI that files notes, as messages name it: "Claude", "Gemini", "Magpie" (no AI). */
 export function aiName() {
   return state.status?.brain?.label || "Claude";

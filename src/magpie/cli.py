@@ -116,8 +116,8 @@ def cmd_doctor(settings: Settings, args: argparse.Namespace) -> int:
                 line(False, "AI live test", str(exc))
         line(
             True,
-            "Password",
-            "on" if settings.login else "off: Magpie opens on this computer only",
+            "Opens on",
+            "other devices too (with the password)" if settings.login else "this computer only",
         )
         line(True, "Speech-to-text", "on" if core.stt.enabled else "off (browser speech only)")
         line(True, "Time zone", core.prefs().timezone)
@@ -150,12 +150,10 @@ def cmd_password(settings: Settings, args: argparse.Namespace) -> int:
     async def work(core):
         return core.secrets
 
-    if not settings.login:
-        print("Magpie has no password (MAGPIE_LOGIN=false): it opens on this computer only.")
-        print("Run `magpie setup` and choose a password to use it from other devices.")
-        return 0
     secrets = asyncio.run(_with_core(settings, work))
-    if not secrets.password_generated:
+    if not settings.login:
+        print("Magpie has no password: it opens straight away on this computer.")
+    elif not secrets.password_generated:
         print("The password is set by MAGPIE_PASSWORD.")
     else:
         print(secrets.password)
@@ -262,19 +260,6 @@ def write_env(path, values: dict[str, str | None]) -> None:
         path.chmod(0o600)
 
 
-def _ask(prompt: str, default: str = "", *, secret: bool = False, check=None) -> str:
-    import getpass
-
-    shown = f" [{default}]" if default and not secret else ""
-    while True:
-        answer = (getpass.getpass if secret else input)(f"{prompt}{shown}: ").strip()
-        answer = answer or default
-        problem = check(answer) if check else None
-        if not problem:
-            return answer
-        print(f"  {problem}")
-
-
 def _check_key(key: str) -> str | None:
     if not key:
         return None
@@ -292,16 +277,6 @@ def _check_key(key: str) -> str | None:
             return None
         return str(exc)
     print("  The key works.")
-    return None
-
-
-def _check_password(password: str) -> str | None:
-    if password.lower() == "none":
-        return None
-    if password and len(password) < 8:
-        return "Use at least 8 characters, or press Enter for no password."
-    if "'" in password:
-        return "Please choose a password without a single quote (')."
     return None
 
 
@@ -323,80 +298,52 @@ def _check_zone(zone: str) -> str | None:
 
 
 def cmd_setup(settings: Settings, args: argparse.Namespace) -> int:
-    """Ask a few questions and write them to .env, so nobody has to edit it by hand."""
+    """Write .env for a Docker or server install, without asking anything.
+
+    Magpie has no password: it opens only on this computer, and running the setup again
+    removes a password an older version asked for. --password is for a server that
+    other devices reach over the network.
+    """
     from pathlib import Path
 
     path = Path(args.env_file)
-    interactive = not args.yes and sys.stdin.isatty()
-    print("Magpie setup: a few questions, then you're ready. Press Enter to accept [defaults].\n")
-    # The AI (Claude, ChatGPT, Gemini, Ollama or none) is chosen in Magpie's welcome
-    # screen, where the key is checked; --key still sets a Claude key for scripted installs.
+    print("Magpie setup\n")
     key = args.key or ""
     if key and (problem := _check_key(key)):
         print(problem, file=sys.stderr)
         return 2
-    current = _current_env(path)
-    had_password = bool(current.get("MAGPIE_PASSWORD")) and current.get("MAGPIE_LOGIN") != "false"
-    if args.no_password:
-        password = "none"
-    elif args.password is not None:
-        password = args.password
-    elif interactive:
-        print("1. A password? Without one, Magpie opens straight away, but only on this computer.")
-        print("   Choose one if you also want to open Magpie from your phone or other devices.")
-        if had_password:
-            print("   (Enter keeps your current password; type none to stop using one)")
-        else:
-            print("   (Enter for no password)")
-        password = _ask("   Password", secret=True, check=_check_password)
-    else:
-        password = ""
-    if not password:
-        password = "keep" if had_password else "none"
     saved_zone = settings.timezone if "timezone" in settings.model_fields_set else None
     zone = args.timezone or saved_zone or detect_timezone() or ""
-    if interactive and not args.timezone:
-        print("\n2. Your time zone, for reminders, e.g. Europe/London or America/New_York")
-        if not zone:
-            print("   (Enter to use your browser's time zone when you first open Magpie)")
-        zone = _ask("   Time zone", zone, check=_check_zone)
     if _check_zone(zone):
         print(f"Unknown time zone {zone!r}.", file=sys.stderr)
         return 2
-    telegram = args.telegram_token or ""
-    if interactive and args.telegram_token is None:
-        print(
-            "\n3. Optional: a Telegram bot token, to get reminders and send notes from your phone"
-        )
-        print("   (talk to @BotFather in Telegram, send /newbot, paste the token; Enter to skip)")
-        telegram = _ask("   Bot token")
 
-    values: dict[str, str | None] = {}
-    if password == "none":
-        values.update(MAGPIE_PASSWORD=None, MAGPIE_LOGIN="false", MAGPIE_BIND="127.0.0.1")
-    elif password == "keep":
-        values.update(MAGPIE_LOGIN=None, MAGPIE_BIND="0.0.0.0")
-    else:
-        values.update(MAGPIE_PASSWORD=password, MAGPIE_LOGIN=None, MAGPIE_BIND="0.0.0.0")
+    if args.password:
+        values: dict[str, str | None] = {
+            "MAGPIE_PASSWORD": args.password,
+            "MAGPIE_LOGIN": None,
+            "MAGPIE_BIND": "0.0.0.0",
+        }
+    else:  # MAGPIE_LOGIN=false also retires a password an older version made up
+        values = {"MAGPIE_PASSWORD": None, "MAGPIE_LOGIN": "false", "MAGPIE_BIND": "127.0.0.1"}
     if zone:
         values["MAGPIE_TIMEZONE"] = zone
     if key:
         values["ANTHROPIC_API_KEY"] = key
     elif settings.brain != "claude":
         values["MAGPIE_BRAIN"] = settings.brain
-    if telegram:
-        values["MAGPIE_TELEGRAM_BOT_TOKEN"] = telegram
+    if args.telegram_token:
+        values["MAGPIE_TELEGRAM_BOT_TOKEN"] = args.telegram_token
     write_env(path, values)
-    port = settings.port
-    print(f"\nSaved to {path.resolve()}")
-    print(f"Open Magpie at http://localhost:{port} once it's running.")
-    if password == "none":
-        print("No password: Magpie opens on this computer only.")
+    print(f"Saved to {path.resolve()}")
+    print(f"Open Magpie at http://localhost:{settings.port} once it's running.")
+    if not args.password:
+        print("No password: Magpie opens straight away, on this computer only.")
     if not zone:
-        print("Magpie will use your browser's time zone when you first open it.")
+        print("Magpie will use your computer's time zone when you first open it.")
     if not key:
         print("When Magpie opens, choose your AI: Claude, ChatGPT, Gemini, Ollama, or none.")
-    if telegram:
+    if args.telegram_token:
         print("Then connect Telegram in Settings → Reminders.")
     return 0
 
@@ -412,10 +359,18 @@ def cmd_mcp(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["desktop"]:  # the app has options and settings of its own
+        from magpie.desktop.main import main as desktop
+
+        desktop(argv[1:])
     parser = argparse.ArgumentParser(prog="magpie", description="Voice-first notes.")
     parser.add_argument("--version", action="version", version=f"magpie {__version__}")
     sub = parser.add_subparsers(dest="command")
 
+    sub.add_parser(
+        "desktop", help="run Magpie as an app: in the tray, always listening for “notes on”"
+    )
     serve = sub.add_parser("serve", help="run the web app, scheduler and Telegram bot")
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
@@ -446,16 +401,16 @@ def main(argv: list[str] | None = None) -> None:
     backup.add_argument("path", nargs="?", help="file or folder (default: the data folder)")
     backup.set_defaults(func=cmd_backup)
 
-    setup = sub.add_parser("setup", help="answer a few questions and write the .env file")
+    setup = sub.add_parser("setup", help="write the .env file for a Docker or server install")
     setup.add_argument("--env-file", default=".env", help="where to write (default: ./.env)")
     setup.add_argument("--key", help="Claude API key")
-    setup.add_argument("--password", help="a password, to open Magpie from other devices")
     setup.add_argument(
-        "--no-password", action="store_true", help="no password; Magpie opens on this computer only"
+        "--password", help="only for a server other devices reach: require this password"
     )
+    setup.add_argument("--no-password", action="store_true", help=argparse.SUPPRESS)
     setup.add_argument("--timezone", help="IANA time zone (default: this computer's)")
     setup.add_argument("--telegram-token", help="Telegram bot token")
-    setup.add_argument("--yes", action="store_true", help="don't ask; use the defaults")
+    setup.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)
     setup.set_defaults(func=cmd_setup)
 
     mcp = sub.add_parser("mcp", help="MCP server so Claude Desktop/Code can use your notes")
@@ -465,7 +420,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):
-        args = parser.parse_args(["serve", *(argv or [])])
+        args = parser.parse_args(["serve", *argv])
     try:
         settings = Settings()
     except ValidationError as exc:

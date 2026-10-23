@@ -176,6 +176,7 @@ def test_status(client):
     status = client.get("/api/status").json()
     assert status["brain"]["available"] is True
     assert {c["name"] for c in status["channels"]} == {
+        "desktop",
         "telegram",
         "webpush",
         "ntfy",
@@ -184,6 +185,7 @@ def test_status(client):
     }
     assert status["push"]["public_key"]
     assert status["counts"]["inbox"] == 0
+    assert status["desktop"] == {"active": False}  # no Magpie app runs this server
 
 
 def test_export_and_import_roundtrip(client, core):
