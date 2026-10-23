@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hmac
 import logging
+import os
 import secrets
 import time
 from collections import defaultdict, deque
+from pathlib import Path
+from urllib.parse import urlparse
 
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
@@ -17,6 +20,25 @@ log = logging.getLogger(__name__)
 
 ACTION_MAX_AGE = 14 * 24 * 3600
 ACTIONS = {"done", "snooze", "tomorrow"}
+LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+def open_to_other_devices(settings: Settings) -> bool:
+    """Whether this install looks reachable from other devices, not just this computer.
+
+    Docker passes the .env file's MAGPIE_BIND and MAGPIE_DOMAIN into the container, and
+    always listens on 0.0.0.0 inside it, so there only those say who can get in.
+    """
+    bind = os.environ.get("MAGPIE_BIND", "").strip().lower()
+    if bind and bind not in LOOPBACK:
+        return True
+    if os.environ.get("MAGPIE_DOMAIN", "").strip():
+        return True
+    host = (urlparse(settings.base_url).hostname or "").lower()
+    if host and host not in LOOPBACK and not host.endswith(".localhost"):
+        return True
+    in_docker = Path("/.dockerenv").exists()
+    return not in_docker and settings.host.strip().lower() not in LOOPBACK
 
 
 class Secrets:
@@ -28,13 +50,15 @@ class Secrets:
         self.secret_key = settings.secret_key or self._get_or_create(
             "secret_key", lambda: secrets.token_urlsafe(32)
         )
-        # Magpie has no password, but an older version made one up for every install,
-        # possibly one open to the network: that one stays until the setup is run again
-        # (which sets MAGPIE_LOGIN=false), so updating never unlocks a server.
+        # Magpie has no password, but versions before 0.4 made one up for every install.
+        # One that other devices can reach keeps it (until the setup runs again and sets
+        # MAGPIE_LOGIN=false), so an update never unlocks a server; on its own computer
+        # the made-up password simply goes.
         if (
             not settings.login
             and "login" not in settings.model_fields_set
             and store.get_kv("generated_password")
+            and open_to_other_devices(settings)
         ):
             settings.login = True
         self.password_generated = settings.login and not settings.password

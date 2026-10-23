@@ -37,7 +37,7 @@ makes `magpie` exit with a message that names the variable.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `MAGPIE_PASSWORD` | | Only for a server that other devices reach: the dashboard then asks for this password. Without it (the default) there's no password, and Magpie only answers on its own computer (`localhost`); the Docker setup publishes the port on `127.0.0.1` only. |
-| `MAGPIE_LOGIN` | | Leave it unset. `true` makes up a password (shown by `magpie password`) when `MAGPIE_PASSWORD` isn't set; `false` turns a password off. Installs from before 0.4 that use a password Magpie made up keep it until the setup runs again, which sets `false`. |
+| `MAGPIE_LOGIN` | | Leave it unset. `true` makes up a password (shown by `magpie password`) when `MAGPIE_PASSWORD` isn't set; `false` turns a password off. A password made up by a version before 0.4 goes away by itself, except where other devices can reach Magpie (`MAGPIE_BIND` other than `127.0.0.1`, `MAGPIE_DOMAIN`, or a `MAGPIE_BASE_URL` that isn't `localhost`): there it stays until the setup runs again, which sets `false`. |
 | `MAGPIE_TIMEZONE` | `UTC` | Default time zone (IANA name) for new installs. The dashboard follows your computer's time zone after that (Settings → Time). |
 | `MAGPIE_BASE_URL` | | Public address, e.g. `https://notes.example.com`. Enables links and one-tap buttons in notifications, and secure cookies when it starts with `https://`. |
 | `MAGPIE_DATA_DIR` | `data` (`/data` in Docker) | Where the database lives. |

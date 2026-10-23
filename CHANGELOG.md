@@ -6,6 +6,17 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-23
+
+### Changed
+
+- A password made up by a version before 0.4 now also goes away by itself on an install
+  that only opens on its own computer. It only stays where other devices can reach
+  Magpie (`MAGPIE_BIND` other than `127.0.0.1`, `MAGPIE_DOMAIN`, or a public
+  `MAGPIE_BASE_URL`), until the setup runs again.
+- The Windows build reports each self-test check, and anything the installed app logged
+  as a warning, on the workflow run's summary.
+
 ## [0.4.0] - 2026-10-23
 
 ### Added

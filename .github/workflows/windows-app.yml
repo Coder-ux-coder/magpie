@@ -75,6 +75,7 @@ jobs:
           }
           $code = Run-And-Wait "dist/Magpie/Magpie.exe" $options 10
           if (Test-Path build/selftest.json) { Get-Content build/selftest.json }
+          ./packaging/windows/report.ps1 -Report build/selftest.json -Title "Built app"
           if ($code -ne 0) { throw "The self-test failed ($code)." }
       - name: Build the installer
         run: |
@@ -121,6 +122,7 @@ jobs:
             Start-Sleep -Seconds 1
           }
           $desktop | ConvertTo-Json
+          Write-Host "::notice title=Installed app is running::$($desktop | ConvertTo-Json -Compress)"
           if (-not $desktop.active) { throw "The dashboard doesn't see the app." }
           $note = Invoke-RestMethod "$base/api/notes" -Method Post -Headers $headers -ContentType "application/json" -Body '{"text": "Call James at five", "source": "api"}'
           if (-not $note.note.id) { throw "The installed app didn't save a note." }
@@ -132,6 +134,7 @@ jobs:
 
           $code = Run-And-Wait $exe @("--self-test", "--report", "build/selftest-installed.json") 10
           if (Test-Path build/selftest-installed.json) { Get-Content build/selftest-installed.json }
+          ./packaging/windows/report.ps1 -Report build/selftest-installed.json -Title "Installed app"
           if ($code -ne 0) { throw "The installed app's self-test failed ($code)." }
 
           Stop-Process -Name Magpie -Force
@@ -148,6 +151,7 @@ jobs:
         run: |
           $log = "$env:LOCALAPPDATA\Magpie\logs\magpie.log"
           if (Test-Path $log) { Copy-Item $log build/magpie.log; Get-Content $log }
+          ./packaging/windows/report.ps1 -Log $log
       - name: Describe the release
         run: |
           $file = Get-Item dist/MagpieSetup.exe

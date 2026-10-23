@@ -272,8 +272,8 @@ a strong reason and a capability token, like the calendar feed or action links.
   local name (localhost, 127.0.0.1, ::1), which blocks DNS rebinding; the CSRF header is
   still required, and the Bearer token works from anywhere. Keep both. A password only
   exists when `MAGPIE_PASSWORD` is set (a server other devices reach), or for an older
-  install whose made-up password is kept until the setup runs again (`auth.Secrets`). The
-  app's server listens on 127.0.0.1 only.
+  install that other devices can reach, whose made-up password is kept
+  (`auth.open_to_other_devices`). The app's server listens on 127.0.0.1 only.
 - The app updates itself only from `latest.json` on this repository's GitHub releases,
   with the installer's size and SHA-256 checked before it runs (`desktop/update.py`).
 - AI keys and the email app password are secrets: never return them from the API (only

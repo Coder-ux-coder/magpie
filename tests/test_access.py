@@ -99,19 +99,33 @@ def test_no_password_unless_one_is_set(tmp_path, router):
         assert http.get("/api/session").json()["login"] is True
 
 
-def test_an_older_installs_made_up_password_stays_until_the_setup_runs(tmp_path, router):
-    """Updating never unlocks a server: its port may be open to the whole network."""
+def test_an_older_installs_made_up_password(tmp_path, router, monkeypatch):
+    """Goes on this computer alone; stays where other devices can reach Magpie."""
     http = httpx2.AsyncClient(transport=httpx2.MockTransport(router))
     older = Settings(_env_file=None, data_dir=tmp_path, brain="fake", login=True)
     made_up = Magpie(older, http=http).secrets.password
 
-    updated = Settings(_env_file=None, data_dir=tmp_path, brain="fake")
-    magpie = Magpie(updated, http=http)
-    assert updated.login is True and magpie.secrets.password == made_up
-    with TestClient(create_app(updated, magpie=magpie, background=False)) as client:
+    local = Settings(_env_file=None, data_dir=tmp_path, brain="fake")
+    assert Magpie(local, http=http).secrets.password == "" and local.login is False
+
+    # Updating never unlocks a server whose port is open to the network.
+    for env, base_url in (
+        ({"MAGPIE_BIND": "0.0.0.0"}, ""),
+        ({"MAGPIE_DOMAIN": "notes.example.com"}, ""),
+        ({}, "https://notes.example.com"),
+    ):
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        reachable = Settings(_env_file=None, data_dir=tmp_path, brain="fake", base_url=base_url)
+        magpie = Magpie(reachable, http=http)
+        assert reachable.login is True and magpie.secrets.password == made_up
+        for key in env:
+            monkeypatch.delenv(key)
+    with TestClient(create_app(reachable, magpie=magpie, background=False)) as client:
         assert client.get("/api/status").status_code == 401
         assert client.get("/api/status", headers={"Host": "localhost"}).status_code == 401
 
+    monkeypatch.setenv("MAGPIE_BIND", "0.0.0.0")
     retired = Settings(_env_file=None, data_dir=tmp_path, brain="fake", login=False)
     assert Magpie(retired, http=http).secrets.password == ""
     assert retired.login is False

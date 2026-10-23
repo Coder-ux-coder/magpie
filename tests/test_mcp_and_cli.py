@@ -103,8 +103,13 @@ def test_cli_add_and_password(tmp_path, monkeypatch, capsys):
     generated = capsys.readouterr().out.strip()
     assert len(generated) >= 10
 
-    # Like an older version's made-up password: it stays until the setup turns it off.
+    # Like an older version's made-up password: gone on this computer alone ...
     monkeypatch.delenv("MAGPIE_LOGIN")
+    with pytest.raises(SystemExit):
+        cli.main(["password"])
+    assert "no password" in capsys.readouterr().out
+    # ... kept where other devices can reach Magpie, until the setup turns it off.
+    monkeypatch.setenv("MAGPIE_BIND", "0.0.0.0")
     with pytest.raises(SystemExit):
         cli.main(["password"])
     assert capsys.readouterr().out.strip() == generated
