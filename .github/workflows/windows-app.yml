@@ -60,7 +60,21 @@ jobs:
           python -c "from pathlib import Path; from magpie.desktop.paths import AppPaths; from magpie.desktop.transcribe import fetch_whisper; print(fetch_whisper(AppPaths(Path('build/whisper'))))"
           "MAGPIE_WHISPER_MODEL=$PWD\build\whisper\models\whisper-small.en" >> $env:GITHUB_ENV
       - name: Test
-        run: pytest -q tests/test_desktop.py
+        run: |
+          pytest -q tests/test_desktop.py --junitxml=build/tests.xml
+          $code = $LASTEXITCODE
+          # Each failed test as an annotation, readable on the run's summary page.
+          if ($code -ne 0 -and (Test-Path build/tests.xml)) {
+            [xml]$results = Get-Content build/tests.xml -Raw
+            foreach ($case in $results.SelectNodes("//testcase[failure or error]")) {
+              $problem = $case.SelectSingleNode("failure|error")
+              $text = "$($problem.GetAttribute('message')) $($problem.InnerText)"
+              $text = (($text -replace "%", "%25") -replace "`r|`n", " ").Trim()
+              $text = $text.Substring(0, [Math]::Min(1500, $text.Length))
+              Write-Host "::error title=Test $($case.GetAttribute('name'))::$text"
+            }
+          }
+          exit $code
       - name: Build the app
         run: pyinstaller --noconfirm --clean packaging/windows/magpie.spec
       - name: Check the app

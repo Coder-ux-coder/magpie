@@ -422,7 +422,9 @@ def test_the_engine_listens_and_takes_commands(tmp_path):
         recorder.wait_for("recording")
         for pcm in audio(3):
             sources[0].on_audio(pcm)
-        time.sleep(0.3)
+        deadline = time.monotonic() + 5
+        while not engine._audio.empty() and time.monotonic() < deadline:
+            time.sleep(0.01)  # every chunk heard before "finish" (it's taken in between)
         engine.command("finish")
         recorder.wait_for("standby")
         deadline = time.monotonic() + 5
@@ -851,7 +853,7 @@ def test_whisper_writes_the_note_down_again_before_it_is_saved(app):
     app._on_voice("state", {"state": "recording", "by_voice": True})
     assert whisper.warmed == 1  # loading while the note is said
     voice_note(app, "by milk tomorrow at nine")
-    settle(app, lambda: app.client.notes)
+    settle(app, lambda: app.ui.bar("saved"))  # shown after everything before it
     assert app.client.notes == [("Buy milk tomorrow at 9.", "desktop-voice")]
     assert whisper.heard == [(64000, RATE, "hello magpie", "over and out")]
     saving = app.ui.bar("saving")

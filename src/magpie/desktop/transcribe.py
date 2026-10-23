@@ -247,7 +247,7 @@ class Transcriber:
 
     def release_if_idle(self, idle: float = IDLE_SECONDS) -> None:
         with self._lock:
-            if self._model is not None and time.monotonic() - self._used > idle:
+            if self._model is not None and time.monotonic() - self._used >= idle:
                 self._model = None
                 log.info("Whisper let go after %.0f idle minutes", idle / 60)
 
