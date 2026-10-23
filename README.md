@@ -57,6 +57,8 @@ a YouTube video and you get a two-line verdict on whether it's worth your time.
 - No password, no Docker, nothing to configure, and it **updates itself**. The tray icon
   opens your notes, starts a note, and turns listening off and on.
 
+<p align="center"><img src="docs/images/voice-bar.png" width="560" alt="The Magpie voice bar floating at the bottom of the screen while recording: the words “Remind me to call James at five about the budget” appear as they are spoken, with Cancel and Save buttons"></p>
+
 **…and everywhere else**
 - In the notes window (or any browser) the voice bar sits at the bottom of every view: say
   “notes on”, press the mic or type, watch the words appear, fix anything, save.

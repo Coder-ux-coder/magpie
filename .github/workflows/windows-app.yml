@@ -55,6 +55,17 @@ jobs:
         run: pyinstaller --noconfirm --clean packaging/windows/magpie.spec
       - name: Check the app
         run: |
+          # Start-Process -Wait would also wait for every process these start (the
+          # installer starts Magpie, which keeps running), so wait for each one itself.
+          function Run-And-Wait($file, $arguments, $minutes) {
+            $process = Start-Process $file -ArgumentList $arguments -PassThru
+            $null = $process.Handle  # keeps the exit code readable afterwards
+            if (-not $process.WaitForExit($minutes * 60000)) {
+              Stop-Process -Id $process.Id -Force
+              throw "$file didn't finish within $minutes minutes."
+            }
+            return $process.ExitCode
+          }
           $options = @("--self-test", "--windows", "--report", "build/selftest.json")
           try {
             ./packaging/windows/speak.ps1 -Path build/note.wav
@@ -62,9 +73,9 @@ jobs:
           } catch {
             Write-Warning "Windows couldn't record a voice note here ($_); checking without one."
           }
-          $run = Start-Process dist/Magpie/Magpie.exe -ArgumentList $options -Wait -PassThru
-          Get-Content build/selftest.json
-          if ($run.ExitCode -ne 0) { throw "The self-test failed." }
+          $code = Run-And-Wait "dist/Magpie/Magpie.exe" $options 10
+          if (Test-Path build/selftest.json) { Get-Content build/selftest.json }
+          if ($code -ne 0) { throw "The self-test failed ($code)." }
       - name: Build the installer
         run: |
           $version = python -c "import magpie; print(magpie.__version__)"
@@ -79,8 +90,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
       - name: Install it and check the installed app
         run: |
-          $setup = Start-Process dist/MagpieSetup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait -PassThru
-          if ($setup.ExitCode -ne 0) { throw "The installer failed ($($setup.ExitCode))." }
+          function Run-And-Wait($file, $arguments, $minutes) {
+            $process = Start-Process $file -ArgumentList $arguments -PassThru
+            $null = $process.Handle
+            if (-not $process.WaitForExit($minutes * 60000)) {
+              Stop-Process -Id $process.Id -Force
+              throw "$file didn't finish within $minutes minutes."
+            }
+            return $process.ExitCode
+          }
+          $code = Run-And-Wait "dist/MagpieSetup.exe" @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-") 10
+          if ($code -ne 0) { throw "The installer failed ($code)." }
           $exe = "$env:LOCALAPPDATA\Programs\Magpie\Magpie.exe"
           if (-not (Test-Path $exe)) { throw "Magpie.exe wasn't installed." }
 
@@ -110,13 +130,16 @@ jobs:
           if (-not $start) { throw "Magpie didn't set itself to start with Windows." }
           Write-Host "Starts with Windows: $($start.Magpie)"
 
-          $check = Start-Process $exe -ArgumentList "--self-test", "--report", "build/selftest-installed.json" -Wait -PassThru
-          Get-Content build/selftest-installed.json
-          if ($check.ExitCode -ne 0) { throw "The installed app's self-test failed." }
+          $code = Run-And-Wait $exe @("--self-test", "--report", "build/selftest-installed.json") 10
+          if (Test-Path build/selftest-installed.json) { Get-Content build/selftest-installed.json }
+          if ($code -ne 0) { throw "The installed app's self-test failed ($code)." }
 
           Stop-Process -Name Magpie -Force
-          $uninstall = Start-Process "$env:LOCALAPPDATA\Programs\Magpie\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait -PassThru
-          if ($uninstall.ExitCode -ne 0) { throw "The uninstaller failed." }
+          $code = Run-And-Wait "$env:LOCALAPPDATA\Programs\Magpie\unins000.exe" @("/VERYSILENT", "/SUPPRESSMSGBOXES") 10
+          if ($code -ne 0) { throw "The uninstaller failed ($code)." }
+          # The uninstaller finishes from a copy of itself: give it a moment.
+          for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw "Uninstalling left Magpie.exe behind." }
           if (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name Magpie -ErrorAction SilentlyContinue) {
             throw "Uninstalling left Magpie starting with Windows."
           }
