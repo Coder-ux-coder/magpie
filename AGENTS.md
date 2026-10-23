@@ -13,13 +13,15 @@ said. Notes also arrive from the browser's voice bar, typing, the share target, 
 Siri Shortcuts, the HTTP API, the CLI or MCP. An AI files each note (clean text, title, kind,
 the user's own category, tags), decides whether and when to remind the user, and reviews
 linked videos and articles. The AI is Claude by default (Haiku 5.5), or any
-OpenAI-compatible service, or none (simple rules). A scheduler delivers reminders and digests
+OpenAI-compatible service, or Codex signed in on the computer (no key), or none (simple
+rules); Claude users without a key use the Claude artifact. A scheduler delivers reminders and digests
 as pop-ups (from the app, or web push), email, Telegram, ntfy or webhooks. The app and Docker
 installs update themselves.
 
 One Python process (FastAPI + background asyncio tasks), one SQLite file, and a
 no-build-step vanilla-JS PWA. The app is that same server running inside a desktop process
-(`magpie.desktop`) with an offline speech model (Vosk), its own windows and a tray icon.
+(`magpie.desktop`) with offline speech recognition (Vosk listens; Whisper writes each note
+down again accurately), its own windows and a tray icon.
 
 ## Commands
 
@@ -67,6 +69,7 @@ src/magpie/
                    resolve(): which provider, model, address and key are in force
     claude.py      ClaudeBrain: every Claude API call
     openai_compat.py  OpenAICompatibleBrain: any /chat/completions service, JSON fallbacks
+    codex_cli.py   CodexBrain: runs `codex exec` (signed in on this computer, no key)
     prompts.py     System prompts and the formatting of app data for the AI
     fake.py        FakeBrain (tests and demos) and BasicBrain (“no AI”: simple rules)
   pipeline.py      Triage → reminders → links → reviews; retries; events for listeners
@@ -92,6 +95,8 @@ src/magpie/
     speech.py      Listener (wake → record → stop, from word timings) and VoiceEngine
                    (the microphone thread); Vosk models behind small protocols
     phrases.py     Spotting “notes on”/“notes off”/“cancel note” in recogniser words
+    transcribe.py  Whisper (faster-whisper): writes each note down again from its sound;
+                   the model is downloaded in the background (Whisper.choose/tick)
     server.py      EmbeddedServer (uvicorn in a thread, 127.0.0.1) and LocalClient
     ui.py          pywebview windows (notes, the floating bar, reminders) and the tray
     paths.py       Where the app keeps things (%LOCALAPPDATA%\Magpie), desktop.json,
@@ -182,6 +187,11 @@ docker-compose.yml Magpie + the "updates" helper (hourly pull, health-checked, r
   through `LocalClient`, which would deadlock the event loop).
 - Nothing may stop the app: the tray, the microphone, the speech model, Docker and updates
   can all fail; log it, show it (tray tooltip, bar message) and carry on.
+- A voice note is never lost to Whisper: the listener's words are saved whenever Whisper is
+  missing, fails or runs past its time budget. Whisper's model isn't in the installer (it
+  would make every update hundreds of MB); `Whisper` downloads it once into the app's
+  `models` folder. Tests use stand-ins (`FakeTranscriber`, `load=`, `download=`): never
+  download a model in tests. `MAGPIE_WHISPER_MODEL` points the self-test at a model.
 - `--self-test` is what the Windows build checks; extend it when you add something the
   installed app needs (a module, a page, a data file in `magpie.spec`).
 
@@ -223,6 +233,12 @@ Rules that keep Claude working:
 - Other services vary: `OpenAICompatibleBrain` tries `json_schema` (strict only for OpenAI),
   then `json_object`, then the schema in the prompt, strips `<think>` blocks and code
   fences, and asks once for a repair. Keep that chain when you touch it.
+- `CodexBrain` runs Codex as a program: the prompt goes on **stdin, never on the command
+  line** (an npm install is a batch file on Windows), the arguments are fixed apart from a
+  validated model name, it runs in an empty temporary folder, read-only, with its shell
+  tools off, and the answer's schema goes in a file (`--output-schema`). Never use a Claude
+  subscription the same way: Anthropic doesn't allow apps to offer claude.ai sign-in or
+  its limits. Claude without a key is the artifact (`artifact/magpie.html`).
 
 ## Testing
 

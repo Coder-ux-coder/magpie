@@ -6,6 +6,38 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-23
+
+### Added
+
+- **Far more accurate voice notes.** When a note ends, the app writes it down again with
+  **Whisper** (faster-whisper), offline on your computer: punctuation, capitals, and much
+  better with accents. The bar says *Writing it down…* meanwhile. The quick listener still
+  spots “notes on” and shows your words as you speak; if Whisper fails or takes too long,
+  its words are saved instead, so no note is lost. Whisper's model (480 MB) downloads once,
+  in the background, on the app's first start, and retries if the download fails.
+- Settings → Voice → **Writing down what you say**: *Accurate* (Whisper small, the
+  default), *Most accurate* (Whisper large turbo, best with strong accents; 1.6 GB), or
+  *Quick* (the listener's own words), with the download's progress.
+- **Codex as the AI, with no API key**: choose *Codex* in Settings → AI and Magpie uses
+  Codex, OpenAI's command-line tool, as it's signed in on this computer (with ChatGPT).
+  Each request runs once, read-only and without Codex's tools, in an empty folder; the
+  note goes in on stdin. `MAGPIE_BRAIN=codex` and `MAGPIE_CODEX_PATH` set it on a server.
+- `install.ps1`: one PowerShell line installs (or updates) the app, checks the download's
+  SHA-256, and waits until Magpie answers. The README has a section for AI agents setting
+  Magpie up for someone: install, choose the AI through the API, check it listens.
+- [The guide](docs/guide.md): everyday use, how Magpie hears you, choosing the AI, phones,
+  and fixes for common problems.
+
+### Changed
+
+- Claude without an API key points to **Magpie in Claude** (`artifact/magpie.html`),
+  which runs on your own Claude account, from Settings → AI and the README.
+- The app's self-test checks that Whisper writes down the test recording; the Windows
+  build downloads Whisper's model for it and checks the installed app's speech state.
+- Settings → Voice no longer shows the browser's accent setting in the app, which hears
+  every accent the same way.
+
 ## [0.4.1] - 2026-10-23
 
 ### Changed

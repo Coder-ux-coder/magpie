@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { emit, state } from "./state.js";
 import { append, clear, confirmDialog, h, icon, iconButton, toast } from "./ui.js";
 
+const REPO = "https://github.com/Coder-ux-coder/magpie";
 const CLAUDE_MODELS = [
   ["claude-haiku-5-5", "Haiku 5.5: fast and low-cost (default)"],
   ["claude-sonnet-5-5", "Sonnet 5.5: more capable"],
@@ -80,7 +81,7 @@ export function aiControls({ onSaved } = {}) {
     clear(box);
     const current = ai.providers.find((p) => p.id === chosen) || ai.providers[0];
     const usingIt = current.id === ai.provider;
-    const doing = ai.provider === "basic" ? "Filing notes with simple rules (no AI)" : `Filing notes with ${ai.label} · ${ai.model}`;
+    const doing = ai.provider === "basic" ? "Filing notes with simple rules (no AI)" : `Filing notes with ${ai.label} · ${ai.model || "its own default model"}`;
     box.append(h("p", { class: "ai-status", role: "status" },
       h("span", { class: `status-dot${ai.available ? " on" : ""}`, "aria-hidden": "true" }),
       ai.available ? doing : `${ai.label} isn't connected yet. Your notes are saved and filed once it is.`));
@@ -101,8 +102,9 @@ export function aiControls({ onSaved } = {}) {
     }) : null;
     const address = current.fixed_url ? null : h("input", { type: "url", id: "ai-url", value: current.base_url, placeholder: "https://…/v1", spellcheck: "false", autocomplete: "off" });
     const options = h("datalist", { id: "ai-model-list" }, (current.id === "claude" ? CLAUDE_MODELS : []).map(([value, label]) => h("option", { value }, label)));
-    const model = current.id === "basic" ? null : h("input", { type: "text", id: "ai-model", value: current.model, list: "ai-model-list", spellcheck: "false", autocomplete: "off" });
-    const browse = model ? h("button", { type: "button", class: "btn small" }, "Show available models") : null;
+    const model = current.id === "basic" ? null : h("input", { type: "text", id: "ai-model", value: current.model, list: "ai-model-list", spellcheck: "false", autocomplete: "off", placeholder: current.id === "codex" ? "Codex's own default" : "" });
+    // Codex has no list to show: it uses its own default unless a model is named.
+    const browse = model && current.id !== "codex" ? h("button", { type: "button", class: "btn small" }, "Show available models") : null;
     browse?.addEventListener("click", async () => {
       const done = busyButton(browse, "Looking…");
       try {
@@ -127,7 +129,11 @@ export function aiControls({ onSaved } = {}) {
         current.key_url ? h("span", {}, "Get one at ", h("a", { href: current.key_url, target: "_blank", rel: "noopener" }, new URL(current.key_url).host), ". It's checked, then kept on your Magpie server only.") : "Kept on your Magpie server only.") : null,
       fromServer ? h("p", { class: "muted small" }, "The key is set on the server.") : null,
       address ? field("ai-url", "Address", address, current.id === "ollama" ? "Where Ollama listens. Magpie fills this in; change it only if Ollama runs on another computer." : "The service's OpenAI-compatible address, ending in /v1.") : null,
-      model ? field("ai-model", "Model", h("div", { class: "copy-field" }, model, browse), current.default_model ? `Default: ${current.default_model}.` : "The name of the model to use.") : null,
+      model ? field("ai-model", "Model", h("div", { class: "copy-field" }, model, browse), current.default_model ? `Default: ${current.default_model}.` : current.id === "codex" ? "Leave it empty to use Codex's own default." : "The name of the model to use.") : null,
+      current.id === "claude" && !current.has_key && !fromServer
+        ? h("p", { class: "muted small" }, "No API key? Magpie also runs inside Claude, on your own Claude account: ",
+            h("a", { href: `${REPO}#use-claude-without-an-api-key`, target: "_blank", rel: "noopener" }, "Magpie in Claude"), ".")
+        : null,
       model ? options : null,
       h("div", { class: "row" }, save,
         current.has_key && current.key_source === "dashboard"

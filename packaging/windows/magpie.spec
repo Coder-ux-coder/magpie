@@ -4,8 +4,9 @@
 #   set MAGPIE_VOSK_MODEL=C:\path\to\vosk-model-small-en-us-0.15
 #   pyinstaller --noconfirm packaging\windows\magpie.spec
 #
-# The result is dist\Magpie\Magpie.exe with everything it needs, the speech model
-# included; Magpie.iss turns that folder into MagpieSetup.exe.
+# The result is dist\Magpie\Magpie.exe with everything it needs, the listener's speech
+# model included; Magpie.iss turns that folder into MagpieSetup.exe. Whisper's model (the
+# accurate one, 480 MB or more) isn't included: the app downloads it once, when it starts.
 
 import os
 from pathlib import Path
@@ -70,12 +71,22 @@ datas = [
     *collect_data_files("justext"),
     *collect_data_files("tzdata"),
     *collect_data_files("certifi"),
+    *collect_data_files("faster_whisper"),  # the voice activity model it skips silence with
     (str(model), f"models/{MODEL_NAME}"),
 ]
-binaries = collect_dynamic_libs("vosk")  # libvosk.dll and the runtime it needs
+binaries = [
+    *collect_dynamic_libs("vosk"),  # libvosk.dll and the runtime it needs
+    *collect_dynamic_libs("ctranslate2"),  # Whisper's engine
+    *collect_dynamic_libs("onnxruntime"),
+]
+# Hugging Face's library imports its parts lazily, where PyInstaller can't see them.
+HUB_SKIP = ("huggingface_hub.inference", "huggingface_hub.cli", "huggingface_hub.commands")
 hiddenimports = [
     *collect_submodules("magpie", filter=lambda name: name != "magpie.mcp_server"),
     *collect_submodules("uvicorn"),
+    *collect_submodules("faster_whisper"),
+    *collect_submodules("av"),
+    *collect_submodules("huggingface_hub", filter=lambda name: not name.startswith(HUB_SKIP)),
     "pystray._win32",
     "webview.platforms.winforms",
     "webview.platforms.edgechromium",
@@ -87,7 +98,7 @@ a = Analysis(  # noqa: F821
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    excludes=["tkinter", "mcp", "pytest", "numpy", "IPython"],
+    excludes=["tkinter", "mcp", "pytest", "IPython", "torch", "matplotlib"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)  # noqa: F821

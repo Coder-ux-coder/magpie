@@ -83,6 +83,9 @@ function voiceStep() {
     h("label", { class: "switch", for: "welcome-listen" }, listen, h("span", { class: "switch-track", "aria-hidden": "true" }), h("span", {}, inApp ? "Always listen for the command word (on this computer, nothing is sent anywhere)" : "Listen for the command word when Magpie opens")),
     // The app's own listening is American English whatever the accent setting says.
     inApp ? null : h("div", { class: "field" }, h("label", { for: "welcome-accent" }, "Your accent"), accent, h("span", { class: "hint" }, "Magpie listens for English. Your accent helps it hear you.")),
+    inApp && state.status.desktop.speech
+      ? h("p", { class: "muted small" }, "When you finish a note, Whisper, an accurate speech model, writes it down again on this computer (accents too). Magpie downloads it once, in the background; change it in Settings → Voice.")
+      : null,
   ];
 }
 
@@ -102,7 +105,7 @@ const STEPS = [
   {
     title: "Choose your AI",
     body: () => [
-      h("p", {}, "Pick the AI that files your notes. Claude Haiku 5.5 is the default: fast and low-cost. You can also use ChatGPT, Gemini, a free model on this computer (Ollama), or no AI at all."),
+      h("p", {}, "Pick the AI that files your notes. Claude Haiku 5.5 is the default: fast and low-cost, with an API key. No key? Choose Codex to use your ChatGPT sign-in, a free model on this computer (Ollama), or no AI at all."),
       aiControls({ onSaved: () => {} }),
     ],
   },

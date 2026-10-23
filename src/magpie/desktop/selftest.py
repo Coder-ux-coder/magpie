@@ -1,16 +1,19 @@
 """``Magpie.exe --self-test``: check that the app works, without a microphone or anyone there.
 
 The Windows build runs it on the app it has just built and installed: the server starts
-and saves a note, the speech model loads and takes a note down from a recording, the
-voice bar opens and answers, and everything the tray needs is there. It never touches
-the user's own notes (it works in a temporary folder). The results are printed and, with
-``--report``, written as JSON; the exit code is 1 when a required check failed.
+and saves a note, the speech model loads and takes a note down from a recording, Whisper
+writes that note down again, the voice bar opens and answers, and everything the tray
+needs is there. It never touches the user's own notes (it works in a temporary folder).
+The results are printed and, with ``--report``, written as JSON; the exit code is 1 when
+a required check failed. MAGPIE_WHISPER_MODEL (a downloaded Whisper model) makes the
+Whisper check required.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import tempfile
 import threading
@@ -20,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from magpie import __version__
-from magpie.desktop.paths import AppPaths, find_model, frozen
+from magpie.desktop.paths import AppPaths, app_paths, find_model, frozen
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +36,18 @@ PAGES = [
     "/static/desktop/reminders.js",
     "/static/desktop/desktop.css",
 ]
-APP_MODULES = ["vosk", "sounddevice", "webview", "pystray", "PIL", "tzlocal"]
+APP_MODULES = [
+    "vosk",
+    "sounddevice",
+    "webview",
+    "pystray",
+    "PIL",
+    "tzlocal",
+    "faster_whisper",
+    "ctranslate2",
+    "onnxruntime",
+    "huggingface_hub",
+]
 NOTE_WAIT = 60.0  # seconds for the recording to become a note
 
 
@@ -99,8 +113,17 @@ def self_test(
                 server.stop()
         model = find_model(paths)
         results.run("speech model", lambda: check_model(model), required=frozen() or bool(wav))
+        heard: dict[str, Any] = {}
         if wav is not None:
-            results.run("note from a recording", lambda: check_recording(model, wav, expect))
+            results.run("note from a recording", lambda: check_recording(model, wav, expect, heard))
+        from magpie.desktop.transcribe import find_whisper
+
+        whisper = find_whisper(paths) or find_whisper(app_paths())
+        results.run(
+            "note written down by Whisper",
+            lambda: check_whisper(whisper, wav, expect, heard),
+            required=bool(os.environ.get("MAGPIE_WHISPER_MODEL")),
+        )
         results.run("tray icon", check_tray, required=frozen())
         results.run("microphone", check_microphone, required=False)
     print("Self-test passed" if results.passed else "Self-test FAILED", flush=True)
@@ -305,7 +328,9 @@ def check_model(model: Path | None) -> str:
     return f"{model.name} knows the command words"
 
 
-def check_recording(model: Path | None, wav: Path, expect: str | None) -> str:
+def check_recording(
+    model: Path | None, wav: Path, expect: str | None, heard: dict[str, Any] | None = None
+) -> str:
     """Play a recording of “notes on … notes off” through the real listening thread."""
     from magpie.desktop.speech import VoiceEngine, WavFile
 
@@ -330,9 +355,39 @@ def check_recording(model: Path | None, wav: Path, expect: str | None) -> str:
         seen = [kind if kind != "state" else data.get("state") for kind, data in events]
         raise RuntimeError(f"no note was taken (heard: {seen})")
     text = notes[0]["text"]
+    if heard is not None:
+        heard.update(notes[0])
     if expect and expect.lower() not in text.lower():
         raise RuntimeError(f"the note says {text!r}, without {expect!r}")
     return f"{text!r} (ended by {notes[0]['reason']})"
+
+
+def check_whisper(
+    folder: Path | None, wav: Path | None, expect: str | None, heard: dict[str, Any]
+) -> str:
+    """Whisper writes down the note the listener took (its own sound), or the whole
+    recording when the listener took none."""
+    from magpie.desktop.transcribe import Transcriber
+
+    if folder is None:
+        raise RuntimeError("the Whisper model isn't downloaded (the app gets it when it starts)")
+    transcriber = Transcriber(folder)
+    started = time.monotonic()
+    if heard.get("audio"):
+        source, pcm, rate = "the note's sound", heard["audio"], int(heard["rate"])
+    elif wav is not None:
+        import wave
+
+        with wave.open(str(wav), "rb") as recording:
+            rate = recording.getframerate()
+            source, pcm = "the whole recording", recording.readframes(recording.getnframes())
+    else:
+        source, pcm, rate = "a second of silence", bytes(32000), 16000
+    text = transcriber.transcribe(pcm, rate)
+    took = time.monotonic() - started
+    if expect and wav is not None and expect.lower() not in text.lower():
+        raise RuntimeError(f"Whisper wrote {text!r} from {source}, without {expect!r}")
+    return f"{text!r} from {source} in {took:.1f}s ({folder.name})"
 
 
 def check_tray() -> str:

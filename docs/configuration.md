@@ -47,18 +47,20 @@ makes `magpie` exit with a message that names the variable.
 
 ### AI
 
-Usually chosen in **Settings → AI** (or on the welcome screen): Claude, ChatGPT, Gemini,
-OpenRouter, Ollama on your own computer, any OpenAI-compatible service, or no AI at all.
+Usually chosen in **Settings → AI** (or on the welcome screen): Claude, ChatGPT, Codex
+(signed in on this computer, no key), Gemini, OpenRouter, Ollama on your own computer, any
+OpenAI-compatible service, or no AI at all.
 Keys pasted there are checked first, kept on your server and never shown again. Set these
 only to fix the choice on the server.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MAGPIE_BRAIN` | chosen in Magpie | Fixes the AI: `claude`, `openai`, `gemini`, `openrouter`, `ollama`, `compatible` (any OpenAI-compatible service), `basic` (no AI: simple rules file notes, and reviews are off) or `fake` (an offline stand-in for demos and tests). When set, Settings → AI shows it but can't change it. |
+| `MAGPIE_BRAIN` | chosen in Magpie | Fixes the AI: `claude`, `openai`, `codex` (Codex installed and signed in where Magpie runs; no key), `gemini`, `openrouter`, `ollama`, `compatible` (any OpenAI-compatible service), `basic` (no AI: simple rules file notes, and reviews are off) or `fake` (an offline stand-in for demos and tests). When set, Settings → AI shows it but can't change it. |
 | `ANTHROPIC_API_KEY` | | Claude API key. A key set here wins over one pasted in Magpie. Without any key, notes are saved and filed once one is added. |
 | `MAGPIE_AI_API_KEY` | | API key for the service `MAGPIE_BRAIN` names, when it isn't Claude. |
 | `MAGPIE_AI_BASE_URL` | the service's | Its OpenAI-compatible address, ending in `/v1`. Needed for `compatible`; Ollama defaults to `http://localhost:11434/v1` (`http://host.docker.internal:11434/v1` in Docker). |
-| `MAGPIE_MODEL` | `claude-haiku-5-5` for Claude | The model. Haiku is fast and low-cost; `claude-sonnet-5-5` and `claude-opus-5-5` are more capable. Other services start with their own default (for example `gpt-5-mini`). |
+| `MAGPIE_MODEL` | `claude-haiku-5-5` for Claude | The model. Haiku is fast and low-cost; `claude-sonnet-5-5` and `claude-opus-5-5` are more capable. Other services start with their own default (for example `gpt-5-mini`; Codex uses its own). |
+| `MAGPIE_CODEX_PATH` | `codex` on the PATH | Where the Codex program is, when it isn't on the PATH. |
 
 The rest apply to Claude only:
 
@@ -152,6 +154,7 @@ Open dashboards notice the update and load the new version.
 | Your morning | 09:00 | What “tomorrow morning” and the Tomorrow button mean. |
 | Snooze for | 1 hour | Length of every Snooze button: dashboard, Telegram, push, ntfy and email (5 minutes to 1 day). Snoozing a reminder that isn't due yet moves it later, never earlier. |
 | Your accent | Automatic | Which English the browser listens for: UK, US, Australia, Canada, Ireland, New Zealand or South Africa. *Automatic* uses the browser's English, or UK English if the browser is set to another language. Read-aloud uses the same accent. |
+| Writing down what you say (app) | Accurate | How the app writes each voice note down: *Accurate* (Whisper small, a 480 MB download), *Most accurate* (Whisper large turbo, 1.6 GB, slower; best with strong accents) or *Quick* (the words shown as you speak). Whisper runs on the computer; no audio leaves it. `MAGPIE_WHISPER_MODEL` can point the app at a model folder of its own. |
 | Wake / stop phrase | “notes on” / “notes off” | Any phrase you like. |
 | Silence timeout | 8 s | Save a voice note after this much silence (0 = only when you say the stop phrase). |
 | Channels | all on | Switch each notification channel on or off. |

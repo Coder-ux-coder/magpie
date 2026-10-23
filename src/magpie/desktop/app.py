@@ -21,7 +21,8 @@ from magpie.desktop import system
 from magpie.desktop.paths import AppPaths, DesktopState, find_model, frozen, launch_command
 from magpie.desktop.phrases import DEFAULT_WAKE, append_text
 from magpie.desktop.server import EmbeddedServer, LocalClient, free_port
-from magpie.desktop.speech import VoiceEngine
+from magpie.desktop.speech import RATE, VoiceEngine
+from magpie.desktop.transcribe import DEFAULT_MODEL, Transcriber, Whisper
 from magpie.desktop.update import Updater
 
 log = logging.getLogger("magpie.desktop")
@@ -95,6 +96,7 @@ class Bridge:
             "message": app.voice_message,
             "wake": app.wake_phrase,
             "version": __version__,
+            "speech": app.whisper.status() if app.whisper is not None else None,
         }
 
     def command(self, action: str) -> None:
@@ -157,12 +159,14 @@ class DesktopApp:
         self.server: EmbeddedServer | None = None
         self.client: LocalClient | None = None
         self.engine: VoiceEngine | None = None
+        self.whisper: Whisper | None = None  # writes each note down again, accurately
         self.ui: Any = None
         self.tray: Any = None
         self.updater: Updater | None = None
         self.voice_state = "starting"
         self.voice_message = ""
         self.wake_phrase = DEFAULT_WAKE
+        self.stop_phrase: str | None = None
         self.listening = bool(self.state.get("listening"))
         self.autostart = bool(self.state.get("autostart"))
         self._typed = ""  # what was typed into the bar during this recording
@@ -233,6 +237,7 @@ class DesktopApp:
             system.set_autostart(True, launch_command("--background"))
         model = find_model(self.paths)
         self.engine = VoiceEngine(model, self._on_voice, listening=self.listening)
+        self.whisper = Whisper(self.paths, on_change=self._update_tray)
         self.apply_prefs(self.client.prefs())
         self.engine.start()
         if model is None:
@@ -316,10 +321,13 @@ class DesktopApp:
     def apply_prefs(self, prefs: dict[str, Any]) -> None:
         wake = str(prefs.get("wake_phrase") or DEFAULT_WAKE)
         self.wake_phrase = wake
+        self.stop_phrase = prefs.get("stop_phrase") or None
         if self.engine is not None:
             self.engine.command(
                 "configure", wake, prefs.get("stop_phrase"), prefs.get("silence_seconds", 8)
             )
+        if self.whisper is not None:
+            self.whisper.choose(str(prefs.get("speech_model") or DEFAULT_MODEL))
         self._update_tray()
 
     def set_listening(self, on: bool) -> None:
@@ -371,8 +379,13 @@ class DesktopApp:
             log.debug("Couldn't follow the computer's time zone", exc_info=True)
 
     def _clock_loop(self) -> None:
-        while not self._quitting.wait(900):
-            self._follow_clock()
+        minutes = 0
+        while not self._quitting.wait(60):
+            minutes += 1
+            if self.whisper is not None:
+                self.whisper.tick()
+            if minutes % 15 == 0:
+                self._follow_clock()
 
     # ------------------------------------------------------------------- voice
 
@@ -403,6 +416,8 @@ class DesktopApp:
             "starting": "Magpie is starting…",
         }
         tip = tips.get(self.voice_state) or f"Magpie: {self.voice_message or self.voice_state}"
+        if self.whisper is not None and self.whisper.state == "downloading":
+            tip += " (getting the accurate speech model)"
         self.tray.show(self.voice_state, tip)
 
     def _on_voice(self, kind: str, data: dict[str, Any]) -> None:
@@ -416,11 +431,14 @@ class DesktopApp:
                 self._typed = ""
                 self._said_in = system.active_window() if data.get("by_voice") else ""
                 self._bar("recording", {"hint": self._hint()}, show=True)
+                transcriber = self.whisper.transcriber if self.whisper is not None else None
+                if transcriber is not None:
+                    transcriber.warm()  # ready by the time the note ends
             return
         if kind == "words":
             self._bar("words", {"base": self._typed, **data})
         elif kind == "note":
-            self._save(append_text(self._typed, data.get("text", "")), "desktop-voice")
+            self._save_voice(data)
         elif kind == "empty":
             typed, self._typed = self._typed.strip(), ""
             if typed:
@@ -531,7 +549,40 @@ class DesktopApp:
         self._bar("saving", {"text": text}, show=True)
         self._work.submit(self._submit, text, source, self._said_in)
 
-    def _submit(self, text: str, source: str, said_in: str) -> None:
+    def _save_voice(self, data: dict[str, Any]) -> None:
+        heard = append_text(self._typed, data.get("text", ""))
+        transcriber = self.whisper.transcriber if self.whisper is not None else None
+        if transcriber is None or not data.get("audio"):
+            self._save(heard, "desktop-voice")
+            return
+        self._bar("saving", {"text": heard, "status": "Writing it down…"}, show=True)
+        self._work.submit(
+            self._write_down, transcriber, self._typed, data, self._bar_token, self._said_in
+        )
+
+    def _write_down(
+        self, transcriber: Transcriber, typed: str, data: dict[str, Any], token: int, said_in: str
+    ) -> None:
+        """Whisper writes the note down again, far more accurately than the listener heard
+        it; when it can't (or is too slow), the listener's words are saved instead."""
+        text = ""
+        try:
+            text = transcriber.transcribe(
+                data["audio"],
+                int(data.get("rate") or RATE),
+                wake=self.wake_phrase,
+                stop=self.stop_phrase,
+            )
+        except Exception as exc:
+            log.warning("Whisper couldn't write the note down, so it keeps what was heard: %s", exc)
+        note = append_text(typed, text or str(data.get("text", "")))
+        if token == self._bar_token:  # the bar still shows this note
+            self._bar("saving", {"text": note})
+            self._submit(note, "desktop-voice", said_in)
+        else:  # a new note started meanwhile: save this one without taking the bar
+            self._submit(note, "desktop-voice", said_in, quiet=True)
+
+    def _submit(self, text: str, source: str, said_in: str, *, quiet: bool = False) -> None:
         assert self.client is not None
         try:
             result = self.client.create_note(text, source, said_in)
@@ -543,6 +594,8 @@ class DesktopApp:
                 {"text": text, "status": f"Not saved: {exc} Press Enter to try again."},
                 show=True,
             )
+            return
+        if quiet:
             return
         note = result.get("note") or {}
         self._bar("saved", {"title": note.get("title") or "", "reply": "Filing it…"})

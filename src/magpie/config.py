@@ -58,7 +58,15 @@ class Settings(BaseSettings):
     # AI: Claude by default, or any OpenAI-compatible service (see brain/providers.py).
     # When MAGPIE_BRAIN is set the server decides; otherwise Settings → AI does.
     brain: Literal[
-        "claude", "openai", "gemini", "openrouter", "ollama", "compatible", "basic", "fake"
+        "claude",
+        "openai",
+        "codex",
+        "gemini",
+        "openrouter",
+        "ollama",
+        "compatible",
+        "basic",
+        "fake",
     ] = "claude"
     anthropic_api_key: str | None = Field(
         default=None,
@@ -66,6 +74,7 @@ class Settings(BaseSettings):
     )
     ai_api_key: str | None = None
     ai_base_url: str = ""
+    codex_path: str = ""  # the Codex program, when it isn't on the PATH
     model: str = "claude-haiku-5-5"
     effort: Effort | None = None
     fallbacks: bool = True
@@ -166,6 +175,9 @@ class Prefs(BaseModel):
     wake_phrase: str = Field(default="notes on", max_length=60)
     stop_phrase: str = Field(default="notes off", max_length=60)
     silence_seconds: int = Field(default=8, ge=0, le=120)
+    # How the Magpie app writes notes down: Whisper's models, or "off" for the listener's
+    # own (quicker, less accurate) words. See desktop/transcribe.py.
+    speech_model: Literal["small.en", "large-v3-turbo", "off"] = "small.en"
     snooze_minutes: int = Field(default=60, ge=5, le=1440)
     channels: dict[str, bool] = Field(default_factory=dict, max_length=20)
     web_search: bool = True

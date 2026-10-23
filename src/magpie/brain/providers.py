@@ -2,7 +2,9 @@
 
 Claude is the default. Any service with an OpenAI-compatible chat API works
 too: OpenAI, Google Gemini, OpenRouter, Ollama on your own computer, and
-others such as Groq, Mistral, DeepSeek or LM Studio ("compatible").
+others such as Groq, Mistral, DeepSeek or LM Studio ("compatible"). Codex,
+OpenAI's command-line agent, works without a key where it's installed and
+signed in (brain/codex_cli.py).
 
 The provider comes from MAGPIE_BRAIN when the server sets it, otherwise from
 Settings → AI in the dashboard, which is stored in the database as::
@@ -59,6 +61,18 @@ PROVIDERS: dict[str, Provider] = {
             key_url="https://platform.openai.com/api-keys",
             key_hint="sk-…",
             help="Uses an OpenAI API key (a ChatGPT subscription doesn't include one).",
+        ),
+        Provider(
+            "codex",
+            "Codex (your ChatGPT sign-in, no key)",
+            "Codex",
+            "",
+            "",
+            needs_key=False,
+            key_url="https://github.com/openai/codex",
+            help="No API key: Magpie runs Codex, OpenAI's command-line tool, as it's signed in "
+            "on this computer. Install Codex, run “codex login” and sign in with ChatGPT, then "
+            "choose it here. Slower than the others, and your Codex plan's limits apply.",
         ),
         Provider(
             "gemini",
@@ -141,8 +155,8 @@ class AIConfig:
     @property
     def ready(self) -> bool:
         """Enough is configured to try (the service may still refuse)."""
-        if self.provider.id in ("fake", "basic"):
-            return True
+        if self.provider.id in ("fake", "basic", "codex"):
+            return True  # nothing to set up here (Codex signs in by itself)
         if self.provider.id != "claude" and not (self.base_url and self.model):
             return False
         return bool(self.api_key) or not self.provider.needs_key
@@ -182,6 +196,10 @@ def resolve(settings: Settings, saved: Any, claude_key: str | None = None) -> AI
 
     if provider.id == "basic":
         return AIConfig(provider, provider.model, "", None, None, locked)
+    if provider.id == "codex":  # Codex's own default model unless one is named
+        explicit = locked and "model" in settings.model_fields_set
+        model = (mine.get("model") if chosen_here else None) or (settings.model if explicit else "")
+        return AIConfig(provider, model, "", None, None, locked)
     if provider.id == "claude":
         model = (mine.get("model") if chosen_here else None) or settings.model
         if settings.anthropic_api_key or os.environ.get("ANTHROPIC_AUTH_TOKEN"):

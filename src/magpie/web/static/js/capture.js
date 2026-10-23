@@ -79,6 +79,7 @@ function followApp(delay = 3000) {
     if (!document.hidden) {
       try {
         state.status.desktop = await api("/api/desktop");
+        emit("desktop", state.status.desktop);
         render();
       } catch {
         // restarting for an update, most likely: keep trying

@@ -49,6 +49,16 @@ jobs:
             Remove-Item build/model.zip
           }
           "MAGPIE_VOSK_MODEL=$PWD\build\models\$name" >> $env:GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: build/whisper
+          key: whisper-small.en
+      - name: Whisper model
+        run: |
+          # The app downloads it when it starts; here it's downloaded once (and cached) so
+          # the self-tests can check that Whisper writes a recording down.
+          python -c "from pathlib import Path; from magpie.desktop.paths import AppPaths; from magpie.desktop.transcribe import fetch_whisper; print(fetch_whisper(AppPaths(Path('build/whisper'))))"
+          "MAGPIE_WHISPER_MODEL=$PWD\build\whisper\models\whisper-small.en" >> $env:GITHUB_ENV
       - name: Test
         run: pytest -q tests/test_desktop.py
       - name: Build the app
@@ -124,6 +134,7 @@ jobs:
           $desktop | ConvertTo-Json
           Write-Host "::notice title=Installed app is running::$($desktop | ConvertTo-Json -Compress)"
           if (-not $desktop.active) { throw "The dashboard doesn't see the app." }
+          if ($desktop.speech.state -ne "ready") { throw "Whisper isn't ready in the installed app: $($desktop.speech | ConvertTo-Json -Compress)" }
           $note = Invoke-RestMethod "$base/api/notes" -Method Post -Headers $headers -ContentType "application/json" -Body '{"text": "Call James at five", "source": "api"}'
           if (-not $note.note.id) { throw "The installed app didn't save a note." }
           Invoke-RestMethod "$base/api/desktop/command" -Method Post -Headers $headers -ContentType "application/json" -Body '{"action": "write"}' | Out-Null

@@ -6,6 +6,8 @@ what follows, starting from the exact moment the command word ended (the last fe
 seconds of audio are kept, so “notes on buy milk” said in one breath loses nothing).
 Alongside it a second small recogniser listens only for “notes off” and “cancel note”,
 which a full recogniser often mishears; their timings say exactly where the note ends.
+The note's own sound is kept too, so the app can have it written down again by a much
+more accurate (and slower) recogniser once it's over (transcribe.py).
 
 ``Listener`` is the state machine and is fed audio by one thread; ``VoiceEngine`` is that
 thread, reading the microphone (or a WAV file in tests) and taking commands from others.
@@ -119,7 +121,8 @@ class Listener:
     Events, through ``emit(kind, data)``:
       state      {"state": "standby" | "recording" | "paused", "by_voice": bool}
       words      {"final": str, "partial": str} while recording (settled, still changing)
-      note       {"text": str, "reason": "phrase" | "silence" | "button" | "limit"}
+      note       {"text": str, "reason": "phrase" | "silence" | "button" | "limit",
+                  "audio": bytes, "rate": int}  (the note's sound, without the command words)
       empty      {"reason": ...}  recording ended with nothing said
       cancelled  {"text": str, "reason": "phrase" | "button" | "paused"}
     """
@@ -193,6 +196,7 @@ class Listener:
             self._wake_rec = self.model.free(self.rate)
         self._wake_from = self.samples
         self._dict = self._ctrl = None
+        self._sound = bytearray()
         if announce:
             self.emit("state", {"state": "standby", "by_voice": False})
 
@@ -224,6 +228,7 @@ class Listener:
         self._settled: list[dict[str, Any]] = []
         self._partial: list[dict[str, Any]] = []
         self._cut = 0.0  # words before this (seconds into the note) are no longer shown
+        self._sound = bytearray()  # everything heard since ``start``, for the note's sound
         self._pending: tuple[tuple[str, float], int] | None = None
         self._shown: tuple[str, str] | None = None
         self.emit("state", {"state": "recording", "by_voice": by_voice})
@@ -240,6 +245,7 @@ class Listener:
 
     def _record(self, pcm: bytes) -> None:
         assert self._dict is not None
+        self._sound += pcm
         if self._dict.accept(pcm):
             self._settled += _words(self._dict.result(), "result")
             self._partial = []
@@ -319,11 +325,22 @@ class Listener:
         if cut is not None:
             words = [w for w in words if w["start"] < cut - 0.05]
         text = self._text(words)
+        sound = self._note_sound(words, cut)
         self._standby()
         if text:
-            self.emit("note", {"text": text, "reason": reason})
+            self.emit("note", {"text": text, "reason": reason, "audio": sound, "rate": self.rate})
         else:
             self.emit("empty", {"reason": reason})
+
+    def _note_sound(self, words: list[dict[str, Any]], cut: float | None) -> bytes:
+        """The part of the recording the note's words are in: after the command word (or
+        what was typed over) and before the stop word, without the silence that ended it."""
+        if cut is None:
+            heard = [float(w.get("end", 0.0)) for w in words if w["word"] != UNKNOWN]
+            cut = max(heard) + 0.5 if heard else None
+        start = int(self._cut * self.rate) * 2
+        end = len(self._sound) if cut is None else int(cut * self.rate) * 2
+        return bytes(self._sound[start:end])
 
     def _cancel(self, reason: str, cut: float | None = None) -> None:
         words = self._settled + self._partial

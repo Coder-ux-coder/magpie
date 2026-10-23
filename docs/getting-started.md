@@ -13,8 +13,8 @@ is open. On your phone you use it through email, Telegram or Siri.
 
 Optionally Magpie uses an **AI**, which makes it smart: it files your notes, decides when to
 remind you and reviews links. It works with Claude (Haiku 5.5 is the default), ChatGPT,
-Google Gemini, OpenRouter or a free AI on your own computer (Ollama), and without any AI
-too. You choose on Magpie's welcome screen the first time it opens.
+Codex (your ChatGPT sign-in, no key), Google Gemini, OpenRouter or a free AI on your own
+computer (Ollama), and without any AI too. You choose on Magpie's welcome screen the first time it opens.
 
 ## Windows
 
@@ -176,7 +176,7 @@ new one before running the setup.
 | *Windows protected your PC* when opening MagpieSetup.exe | Click **More info**, then **Run anyway**. |
 | No Magpie icon by the clock | Click the **^** arrow next to the clock; drag the icon onto the taskbar to keep it there. Not there either? Open Magpie from the Start menu. |
 | Magpie doesn't hear “notes on” | Point at the Magpie icon: its tooltip says what's wrong. *Hears only silence*: in Windows Settings → Privacy & security → Microphone, turn on *Let desktop apps access your microphone*, and check that the microphone isn't muted. Say “notes on” at the start of a sentence, or right-click the icon → *Start a voice note*. |
-| The words in the bar are a little wrong | The speech model is small and works offline. Click the bar and fix them before saving; the AI tidies up notes too. Speaking a little slower helps. |
+| The words in the bar are a little wrong | They're the quick listener's. When the note ends, Whisper writes it down again accurately (Settings → Voice shows when its model is ready); see [the guide](guide.md#how-magpie-hears-you). |
 | *Magpie couldn't open its windows* | Install Microsoft Edge WebView2 from <https://developer.microsoft.com/microsoft-edge/webview2/>, then open Magpie again. |
 | Reminders arrive twice | An old Magpie is still running in Docker. Stop it in Docker Desktop (*Containers* → *magpie* → stop), or turn off pop-ups in a browser that has them. |
 | *Magpie is starting* when you open it | It's still getting ready, often bringing over notes from an old Magpie: give it a minute. |

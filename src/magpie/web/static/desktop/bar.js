@@ -59,10 +59,10 @@ window.magpieBar = {
     $("partial").textContent = partial ? `${partial}…` : "";
     $("partial").hidden = !partial;
   },
-  saving({ text: note = "" } = {}) {
+  saving({ text: note = "", status = "" } = {}) {
     text.value = note;
     $("partial").textContent = "";
-    set("saving", "Saving…");
+    set("saving", status || "Saving…");
   },
   saved({ title = "", reply = "" } = {}) {
     set("saved", title ? `Saved: ${title}` : "Saved", { reply });

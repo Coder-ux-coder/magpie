@@ -34,7 +34,10 @@ up and summarised without filing anything by hand.
    of the screen with the words as they are spoken, without taking the keyboard
    from what the user is doing. "notes off", Save or a few seconds of silence
    saves the note; "cancel note" or Cancel discards it, with Undo; clicking the
-   bar lets the user type into it. In the notes window (and any browser) a voice
+   bar lets the user type into it. When the note ends, the app writes it down
+   again from its sound with an accurate offline recogniser (Whisper), which copes
+   with accents and adds punctuation, and saves that; the quick listener's words are
+   the fallback, so a note is never lost. In the notes window (and any browser) a voice
    bar sits at the bottom of every view and works the same way; in a browser it
    can pop out into a small always-on-top window. The same note can come from the
    mic button, typed text, a link shared from the phone's share sheet, a Telegram
@@ -86,7 +89,8 @@ up and summarised without filing anything by hand.
    the app brings the notes and settings along by itself.
 9. **Without an API key.** A version of Magpie runs as a Claude artifact, where
    the user's own Claude account files the notes; its notes can be exported into a
-   self-hosted Magpie.
+   self-hosted Magpie. In the app, ChatGPT users can choose Codex, which runs on
+   their own Codex sign-in, so no key is pasted anywhere.
 
 ### Constraints
 
@@ -152,13 +156,15 @@ verification and paid templates), calendar sync and image notes.
 | Question | Decision | Why |
 | --- | --- | --- |
 | Wake phrase (app) | Vosk offline: a grammar recogniser that only knows the command word listens all the time; from the exact end of the command word (a few seconds of audio are kept) a full recogniser writes the note, and a second grammar listens for the stop and cancel words | Private and free, cheap enough to run all day, and the word timings put the start and end of a note exactly where they were said. |
+| Writing notes down (app) | Whisper (faster-whisper, `small.en` by default, `large-v3-turbo` for strong accents) on the note's own sound once it ends; the model is downloaded once, not shipped | Far more accurate than the always-on recogniser, and offline; running it only when a note ends keeps listening cheap, and keeping it out of the installer keeps updates small. |
 | Wake phrase (browser) | Browser Web Speech API in continuous mode, fuzzy-matching "notes on" and "notes off" | Free, real-time and needs no server audio. Falls back to recording plus server speech-to-text. |
 | The app | The same server runs inside the app (127.0.0.1); pywebview (WebView2) windows, a pystray tray icon; PyInstaller and Inno Setup make a per-user installer; updates come from GitHub releases | One codebase for the app, Docker and servers; no admin rights; the windows are the web app's own pages. |
 | Phone capture | Telegram voice notes, an iOS Shortcut ("Hey Siri, notes on") and the PWA | Background listening is not possible in a mobile browser, so these use the OS's own voice entry points. |
 | Speech-to-text on the server | Any OpenAI-compatible `/audio/transcriptions` endpoint | One integration covers OpenAI, Groq and self-hosted Whisper servers. Claude does not take audio input. |
 | Model | `claude-haiku-5-5` with structured outputs and per-task effort; Sonnet 5.5 and Opus 5.5 selectable | Fast and low-cost for short notes; Settings → AI or `MAGPIE_MODEL` switches it. |
 | Other AIs | One OpenAI-compatible client: JSON schema, then JSON mode, then the schema in the prompt, plus one repair round | Covers OpenAI, Gemini, OpenRouter, Groq, Ollama and others with one integration, whatever each supports. |
-| Claude accounts | A Claude artifact version of Magpie | A self-hosted app can't use a Claude subscription; inside Claude, the user's own account files the notes. |
+| Claude accounts | A Claude artifact version of Magpie | A self-hosted app can't use a Claude subscription (Anthropic doesn't allow apps to offer claude.ai sign-in or its limits); inside Claude, the user's own account files the notes. |
+| ChatGPT accounts | Codex, run as a program (`codex exec`) where it's installed and signed in: read-only, without its tools, the note on stdin, the answer's shape as a JSON schema | No key in Magpie and no sign-in handled by Magpie; Codex's own plan and limits apply. |
 | No password | Listening on 127.0.0.1 only, plus a Host-header check | Simplest for one person on one computer; safe against DNS rebinding. Only a server reachable by other devices sets one. |
 | Updates | The app: latest.json from the GitHub release, size and SHA-256 checked, a silent install when idle. Docker: a small updater container (hourly pull, health check, roll back) | Installs keep up without the user doing anything; notes live outside the program. |
 | Reminder times | Claude returns local wall-clock times; the server converts them with the user's IANA time zone | Avoids offset and DST mistakes in model output. |

@@ -4,7 +4,7 @@
 import { api } from "./api.js";
 import { ACCENTS, aiControls, appPopupControls, categoriesEditor, emailControls, learningControls, pushControls, refreshStatus } from "./controls.js";
 import "./welcome.js";
-import { desktopApp, deviceTimeZone, emit, local, saveLocal, snoozeLabel, state } from "./state.js";
+import { desktopApp, deviceTimeZone, emit, local, on, saveLocal, snoozeLabel, state } from "./state.js";
 import { speechSupported, recordingSupported } from "./voice.js";
 import { ttsSupported } from "./speech.js";
 import { append, clear, confirmDialog, copyText, debounce, h, icon, iconButton, toast } from "./ui.js";
@@ -186,12 +186,14 @@ function voiceSection() {
           hint: "The Magpie app listens on this computer, even when this window is closed. Nothing you say leaves the computer until a note is saved.",
         })
       : null,
+    inApp ? speechControls() : null,
     !inApp && !speechSupported
       ? h("p", { class: "banner" }, icon("alert"), h("span", {}, stt
           ? "This browser can't recognise speech itself, so Magpie records audio and the server transcribes it."
           : "This browser can't recognise speech. Use Chrome, Edge or Safari, set up server transcription, or type."))
       : null,
-    field("pref-lang", "Your accent", lang, "Magpie listens for English. Choosing your accent helps it hear you correctly."),
+    // The app's own listening is the same for every accent (and Whisper hears them all).
+    inApp ? null : field("pref-lang", "Your accent", lang, "Magpie listens for English. Choosing your accent helps it hear you correctly."),
     field("pref-wake", "Wake phrase (hands-free)", wake, "Say it to start a note when hands-free is on."),
     field("pref-stop", "Stop phrase", stop, "Say it to save the note. “End note” also works, and “cancel note” throws it away."),
     field("pref-silence", "Save after this many seconds of silence (0 = never)", silence),
@@ -211,6 +213,34 @@ function voiceSection() {
       : null,
   );
 }
+
+// How the Magpie app writes notes down (desktop/transcribe.py): one of Whisper's models,
+// downloaded once, or the quick listener's own words.
+function speechControls() {
+  const speech = state.status.desktop.speech;
+  if (!speech) return null;
+  const options = { ...(speech.models || {}), off: "Quick (the words shown as you speak; less accurate)" };
+  const chosen = state.prefs.speech_model || "small.en";
+  const select = h("select", { id: "pref-speech", "aria-describedby": "pref-speech-hint" },
+    Object.entries(options).map(([value, label]) => h("option", { value, selected: value === chosen }, label)));
+  select.addEventListener("change", () => savePrefs({ speech_model: select.value }, select.value === "off"
+    ? "Notes now keep the words shown as you speak."
+    : "Saved. Magpie downloads the model if it needs to, and uses it as soon as it's ready."));
+  return field("pref-speech", "Writing down what you say", select, speechStatus(speech));
+}
+
+function speechStatus(speech) {
+  if (!speech) return "";
+  if (speech.state === "ready") return "Ready. Each note is written down again on this computer when you finish it; no audio leaves the computer.";
+  if (speech.state === "downloading") return `Downloading the model: ${Math.round((speech.progress || 0) * 100)}%. Until it's ready, notes keep the words shown as you speak.`;
+  if (speech.state === "off") return "Notes keep the words shown as you speak.";
+  return speech.message || "";
+}
+
+on("desktop", (desktop) => {
+  const hint = document.getElementById("pref-speech-hint");
+  if (hint) hint.textContent = speechStatus(desktop?.speech);
+});
 
 function notificationsSection() {
   const status = state.status;

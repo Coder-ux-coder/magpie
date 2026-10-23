@@ -53,7 +53,9 @@ in one process, plus what makes it an app:
 ```mermaid
 flowchart LR
     MIC[Microphone<br/>sounddevice] --> VE[VoiceEngine thread<br/>speech.py]
-    VE -->|events| APP[DesktopApp<br/>app.py]
+    VE -->|events, the note's sound| APP[DesktopApp<br/>app.py]
+    APP -->|the note's sound| WH[Whisper<br/>transcribe.py]
+    WH -->|model, once| HF[Hugging Face]
     APP -->|run_js| BAR[Voice bar window<br/>static/desktop/bar.html]
     APP -->|run_js| POP[Reminder pop-ups<br/>static/desktop/reminders.html]
     BAR -->|/api/desktop/ui| SRV
@@ -75,7 +77,18 @@ flowchart LR
   where the note ends. A stop word must end what's said, and a stop word only heard in a
   partial result must stand for half a second. Silence (the dashboard's setting) or five
   minutes also end a note. Command words the model doesn't know are matched in the full
-  text instead.
+  text instead. The note's own sound is kept, from the end of the command word (or the
+  last words typed over) to the start of the stop word, or half a second after the last
+  word.
+- **Writing it down** (`transcribe.py`): when a note ends, Whisper (faster-whisper,
+  CTranslate2, int8 on the CPU) writes its sound down again, much more accurately, with
+  punctuation; voice activity detection skips silences, where Whisper would otherwise make
+  words up, and the command words it may still hear are trimmed. Whisper is loaded when a
+  note starts and let go after five idle minutes. Its model isn't in the installer:
+  `Whisper` downloads the chosen one (`small.en`, or `large-v3-turbo`) into
+  `%LOCALAPPDATA%\Magpie\models` once, retrying later if that fails, and the one before
+  keeps working meanwhile. Whenever Whisper is missing, fails or runs past its time budget,
+  the listener's words are saved instead.
 - **Windows** (`ui.py`): pywebview (WebView2) shows the notes window (the web app itself)
   and two floating windows served by the same server: the voice bar and the reminder pop-ups.
   They're shown, hidden and placed with the Windows API, never activated, so they don't
@@ -97,8 +110,9 @@ flowchart LR
   version, the installer's URL (only this repository's releases are accepted), its size and
   SHA-256. A newer installer is downloaded, checked, and run silently once no note is being
   taken; it replaces the app and starts it again in the tray.
-- **Packaging** (`packaging/windows`): PyInstaller bundles Python, the web app and the
-  speech model; Inno Setup makes a per-user installer with no pages. The
+- **Packaging** (`packaging/windows`): PyInstaller bundles Python, the web app, the
+  listener's speech model and Whisper's libraries; Inno Setup makes a per-user installer
+  with no pages. The
   [Windows app workflow](../.github/workflows/windows-app.yml) runs `--self-test` on the
   built and the installed app, and publishes the release.
 
@@ -159,7 +173,7 @@ on its own, so one bad item can't stop the rest.
 | `db.py` | SQLite connection, numbered migrations, FTS5 index |
 | `store.py` | Every SQL statement; returns Pydantic models from `models.py` |
 | `schemas.py` | Structured outputs the AI returns (`Triage`, `LinkReview`, …) |
-| `brain/` | `providers.py` (presets, and `resolve()` for the provider, model, address and key in force), `ClaudeBrain`, `OpenAICompatibleBrain`, `BasicBrain` (no AI) and `FakeBrain` (tests), prompts and the shared interface |
+| `brain/` | `providers.py` (presets, and `resolve()` for the provider, model, address and key in force), `ClaudeBrain`, `OpenAICompatibleBrain`, `CodexBrain` (runs `codex exec`, signed in on the computer), `BasicBrain` (no AI) and `FakeBrain` (tests), prompts and the shared interface |
 | `pipeline.py` | Triage, link reviews, retries, events for listeners (the Telegram bot) |
 | `reminders.py` | Turning plans into reminders; done, snooze, tomorrow, cancel |
 | `scheduler.py` | The clock: due reminders, digests |
@@ -173,7 +187,7 @@ on its own, so one bad item can't stop the rest.
 | `export.py`, `ics.py` | JSON/Markdown export and import, iCalendar feed |
 | `core.py` | Builds and wires every service; starts and stops background tasks |
 | `cli.py`, `mcp_server.py` | Command line and the MCP server |
-| `desktop/` | The Windows app: listening, windows, tray, moving from Docker, updates ([above](#the-desktop-app)) |
+| `desktop/` | The Windows app: listening, writing notes down (Whisper), windows, tray, moving from Docker, updates ([above](#the-desktop-app)) |
 | `web/` | The PWA: `index.html`, `sw.js`, `static/js/*.js` (the voice bar in `capture.js` and `voice.js`, setup controls in `controls.js`, the first-run screen in `welcome.js`), `static/css/app.css` |
 | `artifact/magpie.html` | Magpie as a Claude artifact: notes in the artifact's per-user store, filed with the viewer's own Claude account |
 

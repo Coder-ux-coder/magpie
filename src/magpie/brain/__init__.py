@@ -41,6 +41,10 @@ def make_brain(
         from magpie.brain.claude import ClaudeBrain
 
         return ClaudeBrain(settings, api_key=config.api_key, model=config.model)
+    if config.provider.id == "codex":
+        from magpie.brain.codex_cli import CodexBrain
+
+        return CodexBrain(config, program=settings.codex_path)
     from magpie.brain.openai_compat import OpenAICompatibleBrain
 
     if http is None:
