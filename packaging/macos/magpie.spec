@@ -6,7 +6,8 @@
 #
 # The result is dist/Magpie.app with everything it needs (../bundle.py says what); the
 # workflow zips it as Magpie-mac.zip for the release, and install.sh puts it in
-# Applications. It's for Apple silicon (the build machine's kind of Mac).
+# Applications. It's for Apple silicon (the build machine's kind of Mac) and macOS 14 or
+# newer, which Whisper's libraries need.
 
 import sys
 from pathlib import Path
@@ -54,7 +55,7 @@ BUNDLE(  # noqa: F821
         "CFBundleDisplayName": "Magpie",
         "CFBundleShortVersionString": __version__,
         "CFBundleVersion": __version__,
-        "LSMinimumSystemVersion": "12.0",
+        "LSMinimumSystemVersion": "14.0",
         # A menu bar app: no Dock icon while only the menu bar icon and the bar are up.
         "LSUIElement": True,
         "NSHighResolutionCapable": True,

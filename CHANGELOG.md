@@ -10,7 +10,7 @@ All notable changes to Magpie are documented here. The format follows
 
 ### Added
 
-- **Magpie for Mac** (Apple silicon): paste one line into Terminal
+- **Magpie for Mac** (Apple silicon, macOS 14 or newer): paste one line into Terminal
   (`curl -fsSL https://raw.githubusercontent.com/Coder-ux-coder/magpie/main/install.sh | sh`)
   and Magpie is in Applications and running. It waits in the menu bar, starts when you sign
   in, listens for “notes on” in any app, shows the floating bar without taking the

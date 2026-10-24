@@ -22,6 +22,8 @@ fail() {
   fail "This installs the Magpie app on a Mac. For Windows, see https://github.com/$repo#install"
 [ "$(uname -m)" = "arm64" ] ||
   fail "The Magpie app is for Macs with Apple silicon (M1 or newer). On this Mac, run it from Python: https://github.com/$repo#from-python"
+[ "$(sw_vers -productVersion | cut -d . -f 1)" -ge 14 ] ||
+  fail "The Magpie app needs macOS 14 (Sonoma) or newer. Update macOS in System Settings, then run this again."
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

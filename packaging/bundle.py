@@ -29,6 +29,15 @@ def speech_model() -> Path:
     return model
 
 
+def vosk_library() -> list[tuple[str, str]]:
+    """Vosk's own library. On a Mac it's called libvosk.dyld, which PyInstaller doesn't
+    take for a library by itself."""
+    import vosk
+
+    folder = Path(vosk.__file__).resolve().parent
+    return [(str(path), "vosk") for path in sorted(folder.glob("libvosk.*"))]
+
+
 def contents() -> tuple[list, list, list]:
     """(datas, binaries, hiddenimports) every build needs.
 
@@ -45,6 +54,7 @@ def contents() -> tuple[list, list, list]:
     ]
     binaries = [
         *collect_dynamic_libs("vosk"),  # libvosk and the runtime it needs
+        *vosk_library(),
         *collect_dynamic_libs("ctranslate2"),  # Whisper's engine
         *collect_dynamic_libs("onnxruntime"),
     ]

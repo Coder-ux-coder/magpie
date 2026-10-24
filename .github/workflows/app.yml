@@ -249,6 +249,11 @@ jobs:
       - name: Install it and check the installed app
         timeout-minutes: 15
         run: |
+          # An app opened from Finder doesn't see this job's settings: Whisper's model goes
+          # where the app keeps it, as if it had downloaded it before.
+          models="$HOME/Library/Application Support/Magpie/models"
+          mkdir -p "$models"
+          cp -R "$MAGPIE_WHISPER_MODEL" "$models/whisper-small.en"
           # As anyone would: install.sh puts it in Applications and opens it.
           MAGPIE_INSTALL_FROM=dist/Magpie-mac.zip sh install.sh | tee build/install.txt
           base=$(tail -n 1 build/install.txt)

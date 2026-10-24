@@ -41,7 +41,8 @@ irm https://raw.githubusercontent.com/Coder-ux-coder/magpie/main/install.ps1 | i
 
 ### Mac
 
-For Macs with Apple silicon (M1 or newer). Open **Terminal** and paste:
+For Macs with Apple silicon (M1 or newer) and macOS 14 (Sonoma) or newer. Open
+**Terminal** and paste:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Coder-ux-coder/magpie/main/install.sh | sh
