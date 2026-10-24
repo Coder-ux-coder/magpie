@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ class LiveWriter:
         *,
         wake: str | None = None,
         stop: str | None = None,
+        words: Sequence[str] = (),
         step: float = STEP_SECONDS,
         window: float = WINDOW_SECONDS,
     ) -> None:
@@ -53,6 +54,7 @@ class LiveWriter:
         self.show = show
         self.wake = wake
         self.stop_phrase = stop
+        self.words = list(words)  # names and words to listen out for
         self.step = step
         self.window = window
         self.rate = 0
@@ -123,7 +125,7 @@ class LiveWriter:
             since = (self._written - len(sound)) / (rate * 2)
             until = self._written / (rate * 2)
         text = self.transcriber.transcribe(
-            sound, rate, wake=self.wake, stop=self.stop_phrase, quick=True
+            sound, rate, wake=self.wake, stop=self.stop_phrase, quick=True, words=self.words
         )
         with self._lock:
             if self.stopped or generation != self._generation:

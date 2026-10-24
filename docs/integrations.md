@@ -44,18 +44,17 @@ fetches your messages from Telegram, so nothing has to reach your computer.
 
 Your bot then only answers you; anyone else who finds it gets a polite refusal.
 
-**Voice messages** are written down by a speech-to-text service, which needs a key in
-`magpie.env`:
+**Voice messages** are written down by a speech service of your own: choose one, and paste
+its key, in **Settings → Voice → Writing down what you say → A speech service of your own**
+(OpenAI, Groq, Deepgram, ElevenLabs, AssemblyAI, Gladia, or any server with the OpenAI
+`/audio/transcriptions` endpoint). Or set one in `magpie.env`, which is used when none is
+chosen there:
 
 ```dotenv
-MAGPIE_STT_API_KEY=sk-...                     # OpenAI
-MAGPIE_STT_BASE_URL=https://api.openai.com/v1
-MAGPIE_STT_MODEL=whisper-1
+MAGPIE_STT_API_KEY=gsk_...                    # Groq: fast, with a free tier
+MAGPIE_STT_BASE_URL=https://api.groq.com/openai/v1
+MAGPIE_STT_MODEL=whisper-large-v3
 ```
-
-Groq is a fast, cheap alternative (`MAGPIE_STT_BASE_URL=https://api.groq.com/openai/v1`,
-`MAGPIE_STT_MODEL=whisper-large-v3-turbo`), and any server that implements the OpenAI
-`/audio/transcriptions` endpoint works too.
 
 **Commands:** `/today`, `/upcoming`, `/search budget`, `/ask what did I decide about rent?`,
 `/digest`, `/week`, `/help`. Forwarded messages are saved with who sent them, and links are

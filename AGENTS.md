@@ -81,7 +81,8 @@ src/magpie/
   telegram.py      The bot: long polling, pairing, commands, inline buttons
   telegram_api.py  Minimal Bot API client
   content/         URL extraction, SSRF guard (links.py), fetching pages/transcripts (fetch.py)
-  stt.py           OpenAI-compatible speech-to-text client
+  stt.py           Speech services of the user's own (OpenAI-compatible, Deepgram,
+                   ElevenLabs, AssemblyAI, Gladia): presets, resolve(), Transcriber
   api.py           REST API + public routes (/a/ action links, /calendar/*.ics, /healthz)
   app.py           FastAPI factory, middleware (sessions, security headers), static files
   auth.py          Generated secrets, signed action links, login rate limiter
@@ -179,6 +180,9 @@ docs/              guide (for people), configuration (settings), integrations, S
 - When the Magpie app runs the server (`status.desktop.active`, `desktopApp()` in
   `state.js`), the app does the listening: the page never starts its own microphone, and
   the mic button and listening switch call `/api/desktop/command`.
+- How the app writes down what's said (`speech_model`: a Whisper model, `service`,
+  `dictation` or `off`) and the speech service picker live in `controls.js`, shared by
+  Settings → Voice and the welcome screen (give each its own id `prefix`).
 
 ### The desktop app (`src/magpie/desktop`)
 
@@ -309,8 +313,9 @@ a strong reason and a capability token, like the calendar feed or action links.
   (`auth.open_to_other_devices`). The app's server listens on 127.0.0.1 only.
 - The app updates itself only from `latest.json` on this repository's GitHub releases,
   with the download's size and SHA-256 checked before it's used (`desktop/update.py`).
-- AI keys and the email app password are secrets: never return them from the API (only
-  whether one is saved), and keep a saved key tied to the address it was entered for.
+- AI keys, speech service keys and the email app password are secrets: never return them
+  from the API (only whether one is saved), never log a service's answer to a refused key
+  (it can quote the key), and keep a saved key tied to the address it was entered for.
 - Don't loosen the Content-Security-Policy or add third-party scripts.
 - Escape everything sent to Telegram with `telegram_api.escape` (HTML parse mode).
 

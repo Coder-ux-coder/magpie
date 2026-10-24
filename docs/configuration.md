@@ -30,7 +30,9 @@ the file says. A value that can't be read is named in Magpie's log.
 | Your morning | 09:00 | What “tomorrow morning” and the Tomorrow button mean. |
 | Snooze for | 1 hour | Length of every Snooze button: pop-ups, Telegram and email (5 minutes to 1 day). Snoozing a reminder that isn't due yet moves it later, never earlier. |
 | Listen for the command word | on | Say the command word to start a note (also in Magpie's menu). |
-| Writing down what you say | Automatic | How each voice note is written down once it ends: *Automatic* (the most accurate model on a computer with 8 or more processor threads, the faster one otherwise), *Most accurate* (Whisper large turbo, a 1.6 GB download; best with accents), *Faster* (Whisper small, 480 MB) or *Off* (the quick recogniser's words). Whisper's small model also writes the words in the bar as you speak. It all runs on the computer; no audio leaves it. |
+| Writing down what you say | Automatic | How each voice note is written down once it ends: *Automatic* (the most accurate model on a computer with 8 or more processor threads, the faster one otherwise), *Most accurate* (Whisper large turbo, a 1.6 GB download; best with accents), *Faster* (Whisper small, 480 MB), *A speech service of your own* (OpenAI, Groq, Deepgram, ElevenLabs, AssemblyAI, Gladia or any OpenAI-compatible server, with your key; the note's sound goes to it), *Your own dictation app* (Glaido, Wispr Flow, Superwhisper, voice typing: it types the note into the bar) or *Off* (the quick recogniser's words). Whisper's small model also writes the words in the bar as you speak. Whisper runs on the computer; no audio leaves it. |
+| Speech service | | With *A speech service of your own*: the service, its key (checked, then kept in Magpie's database and never shown again; it's only sent to the address it was entered for), its model and, for another service, its address. |
+| Names and words to listen out for | | People, places and words of your own, separated by commas, for Whisper and the services that take them (OpenAI, Groq, Deepgram). |
 | Wake / stop phrase | “notes on” / “notes off” | Any phrase you like. |
 | Silence timeout | 8 s | Save a voice note after this much silence (0 = only when you say the stop phrase). |
 | Channels | all on | Switch each way of reminding you on or off. |
@@ -65,7 +67,7 @@ Set these only to fix the AI from the file; Settings → AI can't change it then
 | --- | --- | --- |
 | `MAGPIE_TELEGRAM_BOT_TOKEN` | | Bot token from @BotFather ([Telegram](integrations.md#telegram)). |
 | `MAGPIE_TELEGRAM_CHAT_ID` | | Optional: your chat id, instead of pairing from Magpie. |
-| `MAGPIE_STT_API_KEY` | | Speech-to-text for Telegram voice messages (any OpenAI-compatible `/audio/transcriptions` service). |
+| `MAGPIE_STT_API_KEY` | | A speech service for recordings (Telegram voice messages; the app's voice notes with *A speech service of your own*) when none is chosen in Settings → Voice: any OpenAI-compatible `/audio/transcriptions` service. |
 | `MAGPIE_STT_BASE_URL` | `https://api.openai.com/v1` | That service's address (OpenAI, Groq, a Whisper server of your own). |
 | `MAGPIE_STT_MODEL` | `whisper-1` | Its model. |
 | `MAGPIE_NTFY_TOPIC` | | An [ntfy](https://ntfy.sh) topic (a long, secret name). |

@@ -2,7 +2,7 @@
 // preferences (saved in this browser).
 
 import { api } from "./api.js";
-import { ACCENTS, aiControls, appPopupControls, categoriesEditor, emailControls, learningControls, pushControls, refreshStatus } from "./controls.js";
+import { ACCENTS, aiControls, appPopupControls, categoriesEditor, emailControls, learningControls, pushControls, refreshStatus, speechControls } from "./controls.js";
 import "./welcome.js";
 import { desktopApp, deviceTimeZone, emit, local, on, saveLocal, snoozeLabel, state } from "./state.js";
 import { speechSupported, recordingSupported } from "./voice.js";
@@ -214,47 +214,7 @@ function voiceSection() {
   );
 }
 
-// How the Magpie app writes notes down (desktop/transcribe.py): one of Whisper's models,
-// downloaded once, or the quick listener's own words.
-function speechControls() {
-  const speech = state.status.desktop.speech;
-  if (!speech) return null;
-  const options = {
-    auto: "Automatic: the most accurate this computer is quick enough for",
-    ...(speech.models || {}),
-    off: "Off: the listener's own words (quick, but often wrong)",
-  };
-  const chosen = state.prefs.speech_model || "auto";
-  const select = h("select", { id: "pref-speech", "aria-describedby": "pref-speech-hint" },
-    Object.entries(options).map(([value, label]) => h("option", { value, selected: value === chosen }, label)));
-  select.addEventListener("change", () => savePrefs({ speech_model: select.value }, select.value === "off"
-    ? "Notes now keep the words shown as you speak."
-    : "Saved. Magpie downloads the model if it needs to, and uses it as soon as it's ready."));
-  return field("pref-speech", "Writing down what you say", select, speechStatus(speech));
-}
-
-function speechStatus(speech) {
-  if (!speech) return "";
-  const done = `${Math.round((speech.progress || 0) * 100)}%`;
-  if (speech.state === "ready") {
-    const which = speech.chosen === "auto"
-      ? (speech.model === "small.en" ? " Automatic chose the faster model, which suits this computer." : " Automatic chose the most accurate model for this computer.")
-      : "";
-    const ready = `Ready. Whisper writes your words in the bar as you speak, then each note again when you finish it, all on this computer: no audio leaves it.${which}`;
-    return speech.getting ? `${ready} Getting the model for the words shown as you speak: ${done}.` : ready;
-  }
-  if (speech.state === "downloading") {
-    if (speech.getting && speech.getting !== speech.model) return `Downloading the faster model first: ${done}. Until it's there, notes keep the listener's rough words.`;
-    if (speech.meanwhile) return `Downloading this model: ${done}. Until it's ready, Magpie uses the faster one.`;
-    return `Downloading the model: ${done}. Until it's ready, notes keep the listener's rough words.`;
-  }
-  if (speech.state === "off") return "Notes keep the words the listener heard: quick, but often wrong.";
-  return speech.message || "";
-}
-
 on("desktop", (desktop) => {
-  const hint = document.getElementById("pref-speech-hint");
-  if (hint) hint.textContent = speechStatus(desktop?.speech);
   const update = desktop?.update;
   const line = document.getElementById("update-status");
   if (line && update) line.textContent = updateStatus(update);

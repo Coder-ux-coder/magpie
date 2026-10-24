@@ -408,6 +408,12 @@ class Listener:
         if self.state == "recording":
             self._cancel("button")
 
+    def release(self) -> None:
+        """Stop taking the note, without making one: a dictation app of the user's own
+        types it into the bar instead."""
+        if self.state == "recording":
+            self._standby()
+
     def rebase(self) -> None:
         """The words so far were typed over in the bar: only show what's said next."""
         if self.state == "recording":
@@ -535,7 +541,7 @@ def loudest(pcm: bytes) -> int:
 class VoiceEngine:
     """The listening thread: owns the microphone and the Listener, takes commands.
 
-    Commands (thread-safe): start, finish, cancel, rebase, pause, resume,
+    Commands (thread-safe): start, finish, cancel, rebase, release, pause, resume,
     configure(wake, stop, silence_seconds). Besides the Listener's events it emits
     ``state`` {"state": "starting" | "no-mic" | "muted" | "error", "message": str}.
     """
@@ -722,5 +728,5 @@ class VoiceEngine:
                     self.listener.start()
                 elif self.listener is None or self.listener.state == "paused":
                     self._want_start = True
-            elif self.listener is not None and name in ("finish", "cancel", "rebase"):
+            elif self.listener is not None and name in ("finish", "cancel", "rebase", "release"):
                 getattr(self.listener, name)()

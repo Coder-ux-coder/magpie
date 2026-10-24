@@ -176,15 +176,27 @@ class Prefs(BaseModel):
     stop_phrase: str = Field(default="notes off", max_length=60)
     silence_seconds: int = Field(default=8, ge=0, le=120)
     # How the Magpie app writes notes down: one of Whisper's models ("auto": the most
-    # accurate one the computer is quick enough for), or "off" for the listener's own
-    # (quicker, less accurate) words. See desktop/transcribe.py.
-    speech_model: Literal["auto", "large-v3-turbo", "small.en", "off"] = "auto"
+    # accurate one the computer is quick enough for), "service" (the speech service
+    # chosen in Settings → Voice, stt.py), "dictation" (a dictation app of the user's own,
+    # such as Glaido, types into the bar) or "off" for the listener's own (quicker, less
+    # accurate) words. See desktop/transcribe.py.
+    speech_model: Literal["auto", "large-v3-turbo", "small.en", "service", "dictation", "off"] = (
+        "auto"
+    )
+    # Names and words to listen out for ("James, Magpie, Kinnaird Road"), for Whisper and
+    # the speech services that take them.
+    vocabulary: str = Field(default="", max_length=1000)
     snooze_minutes: int = Field(default=60, ge=5, le=1440)
     channels: dict[str, bool] = Field(default_factory=dict, max_length=20)
     web_search: bool = True
     learn: bool = True  # remember the user's corrections and file similar notes their way
     onboarded: bool = False  # the welcome screen was finished or skipped
     telegram_chat_id: int | None = None
+
+    def vocabulary_words(self) -> list[str]:
+        """The words to know, one per comma or line, each at most 50 characters."""
+        words = (" ".join(word.split()) for word in re.split(r"[,;\n]", self.vocabulary))
+        return [word for word in dict.fromkeys(words) if word and len(word) <= 50][:100]
 
     @field_validator("morning_time", "digest_time", "weekly_review_time")
     @classmethod

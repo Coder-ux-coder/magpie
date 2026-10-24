@@ -63,12 +63,48 @@ the download, and choose, in **Settings → Voice → Writing down what you say*
 | **Automatic** (the default) | The most accurate model on a computer with 8 or more processor threads (most from the last few years, and every Mac with Apple silicon), the faster one on others. |
 | **Most accurate** | Whisper's *large turbo* model: the best with accents and noisy rooms. A few seconds a note on a quick computer; on an older one it can take more than twice as long as the note. |
 | **Faster** | Whisper's *small* English model: quicker, with a few more mistakes. |
+| **A speech service of your own** | Below. |
+| **Your own dictation app** | Below. |
 | **Off** | Just the quick recogniser's words. Instant, but often wrong. |
 
 If the chosen model ever fails, Magpie writes the note down with the faster one, and if
 that fails too, it saves the quick recogniser's words, so a note is never lost. Speak
 naturally; you can pause mid-sentence. The AI tidies up whatever is left (“at 4, no, 5 pm”
 becomes 5 pm).
+
+**Names and words to listen out for** (Settings → Voice): list the people, places and
+words of your own that a speech model might not know (“James, Dr Okafor, Kinnaird Road”),
+separated by commas. Whisper listens out for them, and so do OpenAI, Groq and Deepgram.
+
+### A speech service of your own
+
+Choose **A speech service of your own**, pick the service and paste its key (it's checked,
+then kept on your computer, and never shown again). When a note ends, its sound goes to
+the service, and what it writes is saved. Whisper still shows your words as you speak, and
+writes the note down itself if the service fails (the bar says so).
+
+| Service | Good to know |
+| --- | --- |
+| **OpenAI** | *gpt-4o-transcribe*: very accurate, with accents too. Paid by the minute. |
+| **Groq** | Whisper's largest model, in about a second; has a free tier. |
+| **Deepgram** | *Nova-3*: fast and accurate, and listens out for your names and words. |
+| **ElevenLabs** | *Scribe*: among the most accurate. |
+| **AssemblyAI**, **Gladia** | Accurate; a note takes a few seconds longer. |
+| **Another service** | Any server with OpenAI's `/audio/transcriptions`, including one on your own network (Speaches, LocalAI, faster-whisper-server). Enter its address, ending in `/v1`. |
+
+The same service writes down Telegram voice messages.
+
+### Your own dictation app
+
+If you already use a dictation app, such as **Glaido**, **Wispr Flow**, **Superwhisper**,
+**Windows voice typing** (Windows key + H) or **Dictation** on a Mac, choose **Your own
+dictation app**. Then:
+
+1. Say “notes on” (or choose *Start a voice note* in Magpie's menu). The bar opens, with
+   the cursor in it.
+2. Start your dictation app with its own shortcut, and talk. It types into the bar.
+3. End with “notes off”, stop for a few seconds, or press **Enter**: the note is saved.
+   Ending with “cancel note” throws it away (**Undo** brings it back).
 
 ## Choosing the AI
 
@@ -183,7 +219,8 @@ called *magpie*).
 | A note starts when you didn't say “notes on” | Magpie checks with a second recogniser before it starts a note, so this should be rare. If it still happens, choose a wake phrase that sounds like nothing else you say, such as “hello magpie” (Settings → Voice). |
 | Saved notes have mistakes in them | Check Settings → Voice: *Ready* means Whisper writes notes down. While it's *Downloading*, notes keep the quick words or the faster model's. Try *Most accurate* if *Automatic* chose the faster one, and speak towards the microphone. |
 | The download of the speech model fails | Settings → Voice says why. Magpie tries again every 15 minutes. It comes from Hugging Face (huggingface.co), which some networks block. |
-| *Writing it down…* takes long | Whisper is working on a slow computer. Choose *Faster* rather than *Most accurate*. |
+| *Writing it down…* takes long | Whisper is working on a slow computer. Choose *Faster* rather than *Most accurate*, or a speech service such as Groq. |
+| The bar says *Your speech service didn't work* | It says why (a wrong key, no credit left, no internet); Whisper wrote that note instead. Check the service in Settings → Voice. |
 | *Codex isn't installed* or *isn't signed in* | Install Codex and run `codex login` in a new window (see [Codex](#codex-your-chatgpt-sign-in-no-key)), then choose Codex again. |
 | *Codex has reached its usage limit* | Your ChatGPT plan's Codex limit: notes wait and are filed when it resets. |
 | An update doesn't arrive | Settings → Updates → *Check for updates* says what's wrong. On a Mac, Magpie has to be in Applications. |

@@ -229,8 +229,8 @@ class TelegramBot:
         if not self.app.stt.enabled:
             await self.reply(
                 chat_id,
-                "🎙 Voice notes need a speech-to-text key. Add MAGPIE_STT_API_KEY (OpenAI or "
-                "Groq) to your Magpie settings, or type the note instead.",
+                "🎙 Voice notes need a speech service: choose one in Magpie's Settings → Voice "
+                "(or set MAGPIE_STT_API_KEY on the server), or type the note instead.",
             )
             return
         if (voice.get("file_size") or 0) > MAX_VOICE_BYTES:
@@ -242,7 +242,11 @@ class TelegramBot:
             return
         try:
             audio = await self.api.download_file(voice["file_id"])
-            transcript = await self.app.stt.transcribe(audio, voice.get("mime_type") or "audio/ogg")
+            transcript = await self.app.stt.transcribe(
+                audio,
+                voice.get("mime_type") or "audio/ogg",
+                words=self.app.prefs().vocabulary_words(),
+            )
         except (TelegramError, TranscriptionError) as exc:
             await self.reply(chat_id, f"🎙 I couldn't transcribe that: {escape(str(exc))}")
             return

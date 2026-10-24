@@ -33,6 +33,7 @@ PAGES = [
     "/",
     "/static/desktop/bar.html",
     "/static/desktop/bar.js",
+    "/static/js/phrases.js",  # the bar's rules for a dictation app's words
     "/static/desktop/reminders.html",
     "/static/desktop/reminders.js",
     "/static/desktop/desktop.css",

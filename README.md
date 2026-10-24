@@ -152,8 +152,13 @@ Good to know:
   note”** throws it away, with **Undo**. Click the bar to type into it.
 - **Accurate words:** as you speak, Whisper writes your words in the bar, and when the note
   ends it writes the whole note down again, with punctuation, using its most accurate
-  model if your computer is quick enough for it. It copes with accents. It all runs on
-  your computer: no audio leaves it. Settings → Voice lets you choose the model.
+  model if your computer is quick enough for it. It copes with accents, and you can give
+  it names and words to listen out for. It runs on your computer: no audio leaves it.
+- **Or bring your own:** in Settings → Voice (or on the welcome screen), choose a **speech
+  service** of your own with its key (OpenAI, Groq, Deepgram, ElevenLabs, AssemblyAI,
+  Gladia, or any OpenAI-compatible server), or your own **dictation app** (Glaido, Wispr
+  Flow, Superwhisper, Windows voice typing, Dictation on a Mac): “notes on” then opens the
+  bar for it to type into, and the note is saved when its words end with “notes off”.
 - **The AI files it:** it tidies your words, gives the note a title, a kind (task, idea,
   link, …) and one of your own categories, and decides whether and when to remind you:
   “remind me at 5”, “every Monday at 9”, or, for “the bill is due on the 10th”, the evening
@@ -190,7 +195,8 @@ Your notes are a SQLite file on your computer. Magpie sends **note text** (and p
 save) to the AI you chose, for filing, reviews and Ask (nothing with Ollama or no AI);
 **reminders** to the channels you set up (email, Telegram, …); asks GitHub for new versions
 every few hours; and downloads its speech models from Hugging Face once. **No audio leaves
-your computer.** See [SECURITY.md](SECURITY.md) to report a vulnerability.
+your computer**, unless you choose a speech service of your own: then each voice note's
+sound goes to that service. See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Development
 

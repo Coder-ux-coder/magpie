@@ -11,6 +11,7 @@ import {
   afterWake,
   appendText,
   beforeStop,
+  dictationEnd,
   englishLang,
   findWake,
   isCancel,
@@ -115,4 +116,17 @@ test("dictation is added to typed text, keeping line breaks", () => {
   assert.equal(appendText("Call James  ", "at five"), "Call James at five");
   assert.equal(appendText("", "  hello "), "hello");
   assert.equal(appendText("keep this", ""), "keep this");
+});
+
+test("a dictation app's words end the note with the stop phrase, only at the very end", () => {
+  const stops = phraseList("notes off", DEFAULT_STOP, STOP_ALIASES);
+  assert.deepEqual(dictationEnd("Buy milk, notes off.", stops), { state: "stop", text: "Buy milk" });
+  assert.deepEqual(dictationEnd("Call James at 5. Note off", stops), { state: "stop", text: "Call James at 5." });
+  assert.deepEqual(dictationEnd("Take notes off the shelf", stops), { state: "more", text: "Take notes off the shelf" });
+  assert.deepEqual(dictationEnd("Call Mum, cancel note!", stops), { state: "cancel", text: "Call Mum" });
+  assert.deepEqual(dictationEnd("  ", stops), { state: "more", text: "" });
+  assert.deepEqual(dictationEnd("Notes off", stops), { state: "stop", text: "" });
+  const own = phraseList("over and out", DEFAULT_STOP, STOP_ALIASES);
+  assert.deepEqual(dictationEnd("Pay the rent. Over and out.", own), { state: "stop", text: "Pay the rent." });
+  assert.equal(dictationEnd("Pay the rent, notes off", own).state, "more");
 });

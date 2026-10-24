@@ -3,7 +3,7 @@
 // else. It can be skipped at any step and opened again from Settings.
 
 import { api } from "./api.js";
-import { ACCENTS, aiControls, appPopupControls, categoriesEditor, emailControls, pushControls, pushSupported, refreshStatus } from "./controls.js";
+import { ACCENTS, aiControls, appPopupControls, categoriesEditor, emailControls, pushControls, pushSupported, refreshStatus, speechControls } from "./controls.js";
 import { desktopApp, deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
 import { clear, h, icon, iconButton, toast } from "./ui.js";
 
@@ -83,9 +83,17 @@ function voiceStep() {
     h("label", { class: "switch", for: "welcome-listen" }, listen, h("span", { class: "switch-track", "aria-hidden": "true" }), h("span", {}, inApp ? "Always listen for the command word (on this computer, nothing is sent anywhere)" : "Listen for the command word when Magpie opens")),
     // The app's own listening is American English whatever the accent setting says.
     inApp ? null : h("div", { class: "field" }, h("label", { for: "welcome-accent" }, "Your accent"), accent, h("span", { class: "hint" }, "Magpie listens for English. Your accent helps it hear you.")),
-    inApp && state.status.desktop.speech
-      ? h("p", { class: "muted small" }, "When you finish a note, Whisper, an accurate speech model, writes it down again on this computer (accents too). Magpie downloads it once, in the background; change it in Settings → Voice.")
-      : null,
+  ];
+}
+
+function speechStep() {
+  return [
+    h("p", {}, "Magpie's listener hears your command word. Your words are written down by one of these:"),
+    h("ul", { class: "welcome-points" },
+      h("li", {}, icon("mic"), h("span", {}, "Whisper, on this computer: free and private, and good with accents. It shows your words as you speak and writes each note again when you finish.")),
+      h("li", {}, icon("send"), h("span", {}, "A speech service of your own, such as OpenAI, Groq or Deepgram, with your key.")),
+      h("li", {}, icon("list"), h("span", {}, "Your own dictation app, such as Glaido or Wispr Flow: it types each note into Magpie's bar."))),
+    speechControls({ prefix: "welcome" }),
   ];
 }
 
@@ -108,6 +116,11 @@ const STEPS = [
       h("p", {}, "Pick the AI that files your notes. Claude Haiku 5.5 is the default: fast and low-cost, with an API key. No key? Choose Codex to use your ChatGPT sign-in, a free model on this computer (Ollama), or no AI at all."),
       aiControls({ onSaved: () => {} }),
     ],
+  },
+  {
+    title: "Writing down what you say",
+    when: () => desktopApp() && Boolean(state.status?.desktop?.speech),
+    body: speechStep,
   },
   {
     title: "Get reminders",
@@ -144,23 +157,24 @@ const STEPS = [
 export function openWelcome(start = 0) {
   const el = dialog();
   returnFocus = document.activeElement;
-  let index = Math.max(0, Math.min(start, STEPS.length - 1));
+  const steps = STEPS.filter((step) => !step.when || step.when());
+  let index = Math.max(0, Math.min(start, steps.length - 1));
 
   const render = () => {
-    const step = STEPS[index];
-    const last = index === STEPS.length - 1;
+    const step = steps[index];
+    const last = index === steps.length - 1;
     clear(el).append(
       h("div", { class: "sheet-inner" },
         h("div", { class: "sheet-head" },
           h("div", { class: "title-block" },
-            h("p", { class: "eyebrow" }, `Step ${index + 1} of ${STEPS.length}`),
+            h("p", { class: "eyebrow" }, `Step ${index + 1} of ${steps.length}`),
             h("h2", { id: "welcome-title", tabindex: "-1" }, step.title)),
           iconButton("close", "Close the welcome screen", () => finish({ quietly: true })),
         ),
         h("div", { class: "sheet-body welcome-body" }, step.body()),
         h("div", { class: "sheet-foot" },
           h("ol", { class: "steps", "aria-label": "Progress" },
-            STEPS.map((s, i) => h("li", { class: i === index ? "current" : i < index ? "done" : "", "aria-current": i === index ? "step" : null }, h("span", { class: "sr-only" }, s.title)))),
+            steps.map((s, i) => h("li", { class: i === index ? "current" : i < index ? "done" : "", "aria-current": i === index ? "step" : null }, h("span", { class: "sr-only" }, s.title)))),
           index > 0 ? h("button", { type: "button", class: "btn", onclick: () => { index -= 1; render(); } }, "Back") : null,
           last
             ? h("button", { type: "button", class: "btn primary", onclick: () => finish() }, icon("check"), "Start using Magpie")

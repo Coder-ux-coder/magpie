@@ -39,6 +39,7 @@ Magpie is designed to be run by one person on their own server.
 
 ## Third parties
 
-Note text and saved pages are sent to the Claude API. Audio goes to your browser's speech
-service or your speech-to-text provider. Messages go to the notification channels you set
+Note text and saved pages are sent to the AI you chose. Audio stays on the computer (Whisper)
+unless you choose a speech service of your own in Settings → Voice; then each voice note's
+sound goes to it. Messages go to the notification channels you set
 up. See the Privacy section of the [README](README.md#privacy).

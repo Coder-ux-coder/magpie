@@ -16,14 +16,14 @@ from typing import Any
 import httpx2
 
 from magpie import __version__
-from magpie.config import Settings
+from magpie.config import Prefs, Settings
 from magpie.desktop import system
 from magpie.desktop.live import LiveWriter
 from magpie.desktop.paths import AppPaths, DesktopState, find_model, frozen, launch_command
-from magpie.desktop.phrases import DEFAULT_WAKE, append_text, tidy
+from magpie.desktop.phrases import DEFAULT_STOP, DEFAULT_WAKE, append_text, tidy
 from magpie.desktop.server import EmbeddedServer, LocalClient, free_port
 from magpie.desktop.speech import RATE, VoiceEngine
-from magpie.desktop.transcribe import AUTO, QUICK_MODEL, Transcriber, Whisper
+from magpie.desktop.transcribe import AUTO, OFF, QUICK_MODEL, SpeechService, Whisper
 from magpie.desktop.update import Updater
 
 log = logging.getLogger("magpie.desktop")
@@ -137,6 +137,8 @@ class Bridge:
                 "close": app.hide_bar,
                 "undo": app.undo,
                 "edited": lambda: app.bar_edited(text),
+                "save_dictated": lambda: app.save_dictated(text),
+                "discard": lambda: app.discard(text),
                 "focus": lambda: app.ui and app.ui.take_keyboard(),
                 "open_notes": lambda: app.open_notes(),
             }
@@ -173,6 +175,9 @@ class DesktopApp:
         self.voice_message = ""
         self.wake_phrase = DEFAULT_WAKE
         self.stop_phrase: str | None = None
+        self.speech_mode = AUTO  # Settings → Voice: a Whisper model, service, dictation, off
+        self.words: list[str] = []  # names and words to listen out for
+        self.silence_seconds = 8
         self.listening = bool(self.state.get("listening"))
         self.autostart = bool(self.state.get("autostart"))
         self._typed = ""  # what was typed into the bar during this recording
@@ -186,6 +191,7 @@ class DesktopApp:
         self._discarded = ""
         self._bar_gen = itertools.count()
         self._bar_token = 0
+        self._bar_state = ""  # what the bar shows: recording, dictate, saving, …
         self._ready: dict[str, bool] = {"bar": False, "alerts": False}
         self._pending: dict[str, list[tuple[str, Any]]] = {"bar": [], "alerts": []}
         self._alerts: dict[str, dict[str, Any]] = {}
@@ -338,12 +344,21 @@ class DesktopApp:
         wake = str(prefs.get("wake_phrase") or DEFAULT_WAKE)
         self.wake_phrase = wake
         self.stop_phrase = prefs.get("stop_phrase") or None
+        self.speech_mode = str(prefs.get("speech_model") or AUTO)
+        try:
+            self.silence_seconds = max(0, int(prefs.get("silence_seconds", 8)))
+        except (TypeError, ValueError):
+            self.silence_seconds = 8
+        self.words = Prefs(vocabulary=str(prefs.get("vocabulary") or "")[:1000]).vocabulary_words()
         if self.engine is not None:
             self.engine.command(
                 "configure", wake, prefs.get("stop_phrase"), prefs.get("silence_seconds", 8)
             )
         if self.whisper is not None:
-            self.whisper.choose(str(prefs.get("speech_model") or AUTO))
+            # A speech service still has the quick model for the words shown as you speak
+            # (and for when the service fails); a dictation app needs no model here.
+            local = {"service": QUICK_MODEL, "dictation": OFF}.get(self.speech_mode)
+            self.whisper.choose(local or self.speech_mode)
         self._update_tray()
 
     def _upgrade_speech(self, prefs: dict[str, Any]) -> dict[str, Any]:
@@ -426,6 +441,9 @@ class DesktopApp:
 
     def start_note(self) -> None:
         """The mic button or the tray: take a note now, without the command word."""
+        if self.speech_mode == "dictation":  # the user's own app listens, not Magpie
+            self._dictate(by_voice=False)
+            return
         if self.voice_state in ("no-mic", "error"):
             self._bar_message(self.voice_message or "Magpie can't hear a microphone.", error=True)
             return
@@ -472,7 +490,10 @@ class DesktopApp:
             self.voice_state = state
             self.voice_message = data.get("message", "")
             self._update_tray()
-            if state == "recording":
+            if state == "recording" and self.speech_mode == "dictation":
+                self._dictate(by_voice=bool(data.get("by_voice")))
+                self.voice("release")  # the user's dictation app takes the note down
+            elif state == "recording":
                 self._typed = ""
                 self._said_in = system.active_window() if data.get("by_voice") else ""
                 self._bar("recording", {"hint": self._hint()}, show=True)
@@ -484,7 +505,7 @@ class DesktopApp:
             live = self._live
             if live is not None:
                 live.add(data["pcm"], int(data.get("rate") or RATE))
-        elif kind == "words":
+        elif kind == "words" and self.speech_mode != "dictation":
             with self._words_lock:
                 self._heard = data
                 if self._live is not None:
@@ -536,7 +557,11 @@ class DesktopApp:
             self._live, self._live_text, self._live_shown, self._heard = None, "", "", {}
             if quick is not None:
                 self._live = LiveWriter(
-                    quick, self._live_words, wake=self.wake_phrase, stop=self.stop_phrase
+                    quick,
+                    self._live_words,
+                    wake=self.wake_phrase,
+                    stop=self.stop_phrase,
+                    words=self.words,
                 ).start()
 
     def _stop_live(self) -> None:
@@ -602,6 +627,8 @@ class DesktopApp:
     ) -> None:
         token = next(self._bar_gen)
         self._bar_token = token
+        if name != "words":
+            self._bar_state = name
         self._ui_call("bar", name, payload)
         if (show or keyboard) and self.ui is not None:
             self._on_ui(self.ui.show_bar, keyboard=keyboard)
@@ -641,6 +668,29 @@ class DesktopApp:
             return
         self._bar("typing", {"text": ""}, keyboard=True)
 
+    def _dictate(self, *, by_voice: bool) -> None:
+        """The bar takes the keyboard, for the user's own dictation app (Glaido, Wispr
+        Flow, voice typing…) to type the note into; it saves itself when the words end
+        with the stop phrase, after a pause, or with Enter (bar.js)."""
+        if self._bar_state == "dictate" and self.ui is not None and self.ui.bar_visible:
+            return  # already waiting for the words
+        self._typed = ""
+        self._said_in = system.active_window() if by_voice else ""
+        stop = self.stop_phrase or DEFAULT_STOP
+        self._bar("dictate", {"stop": stop, "seconds": self.silence_seconds}, keyboard=True)
+
+    def save_dictated(self, text: str) -> None:
+        if text.strip():
+            self._save(text.strip(), "desktop-voice")
+
+    def discard(self, text: str) -> None:
+        """“Cancel note” (or Esc) while dictating: gone, but Undo brings it back."""
+        self._discarded = text.strip()
+        if self._discarded:
+            self._bar("discarded", {"text": self._discarded}, hide_after=UNDO_SECONDS)
+        else:
+            self._hide_bar()
+
     def undo(self) -> None:
         text, self._discarded = self._discarded, ""
         self._bar("typing", {"text": text}, keyboard=True)
@@ -662,7 +712,9 @@ class DesktopApp:
     def _save_voice(self, data: dict[str, Any]) -> None:
         heard = append_text(self._typed, data.get("text", ""))
         whisper = self.whisper
-        models: list[Transcriber] = []
+        models: list[Any] = []
+        if self.speech_mode == "service" and self.client is not None:
+            models.append(SpeechService(self.client.transcribe))
         for model in (whisper.transcriber, whisper.quick) if whisper is not None else ():
             if model is not None and model not in models:
                 models.append(model)
@@ -678,16 +730,17 @@ class DesktopApp:
 
     def _write_down(
         self,
-        models: list[Transcriber],
+        models: list[Any],
         typed: str,
         data: dict[str, Any],
         token: int,
         said_in: str,
     ) -> None:
-        """Whisper writes the note down again, far more accurately than the listener heard
-        it: the chosen model, or the quick one if that fails. When neither can (or they're
-        too slow), the listener's words are saved instead."""
-        text = ""
+        """The note is written down again, far more accurately than the listener heard it:
+        by the speech service when one is chosen, by Whisper's chosen model, or by its quick
+        one, the first that can. When none can (or they're too slow), the listener's words
+        are saved instead."""
+        text, written, failed = "", False, ""
         for model in models:
             try:
                 text = model.transcribe(
@@ -695,13 +748,21 @@ class DesktopApp:
                     int(data.get("rate") or RATE),
                     wake=self.wake_phrase,
                     stop=self.stop_phrase,
+                    words=self.words,
                 )
+                written = True
                 break
             except Exception as exc:
-                log.warning("Whisper couldn't write the note down: %s", exc)
+                log.warning("The note couldn't be written down: %s", exc)
+                if isinstance(model, SpeechService):
+                    failed = str(exc)
         note = append_text(typed, text or str(data.get("text", "")))
+        shown: dict[str, Any] = {"text": note}
+        if failed:  # say so, or the service's problem goes unnoticed
+            instead = "Whisper wrote it down" if written else "it keeps the words Magpie heard"
+            shown["status"] = f"Your speech service didn't work ({failed}), so {instead}."
         if token == self._bar_token:  # the bar still shows this note
-            self._bar("saving", {"text": note})
+            self._bar("saving", shown)
             self._submit(note, "desktop-voice", said_in)
         else:  # a new note started meanwhile: save this one without taking the bar
             self._submit(note, "desktop-voice", said_in, quiet=True)

@@ -41,7 +41,14 @@ up and summarised without filing anything by hand.
    ends, Whisper writes it down again from its sound, coping with accents and adding
    punctuation, with its most accurate model when the computer is quick enough, and
    that is saved. The faster model and then the quick listener's words are the
-   fallbacks, so a note is never lost. In the notes window a voice bar sits at the
+   fallbacks, so a note is never lost. The user can instead choose a speech service of
+   their own with their key (OpenAI, Groq, Deepgram, ElevenLabs, AssemblyAI, Gladia or
+   any OpenAI-compatible server), which then writes each note down (and Telegram voice
+   messages), or their own dictation app (Glaido, Wispr Flow, voice typing): "notes on"
+   then opens the bar with the keyboard for that app to type into, and the note is saved
+   when its words end with the stop phrase, after a pause, or with Enter. Names and words
+   the user lists are listened out for by Whisper and the services that take them. The
+   choice is on the welcome screen too. In the notes window a voice bar sits at the
    bottom of every view and works the same way. The same note can come from the mic
    button, typed text, a Telegram text or voice message, Claude through MCP, or the
    HTTP API.
@@ -162,7 +169,7 @@ verification and paid templates), calendar sync and image notes.
 | The app | The same server runs inside the app (127.0.0.1); pywebview windows (WebView2, or WebKit on a Mac), a pystray tray or menu bar icon; PyInstaller makes the app, Inno Setup a per-user Windows installer, and a zip plus install.sh the Mac's Magpie.app; updates come from GitHub releases | One codebase for both systems; no admin rights; the windows are the web app's own pages. |
 | Mac distribution | An ad-hoc signed Magpie.app for Apple silicon and macOS 14+, installed with a Terminal line (curl doesn't quarantine it), updated by swapping the bundle | No paid Apple developer account; Gatekeeper only stops apps a browser downloaded. |
 | Phone capture | Telegram text and voice notes, and email for reminders | The app only answers on its own computer; Telegram and email reach the phone without opening it to the network. |
-| Speech-to-text on the server | Any OpenAI-compatible `/audio/transcriptions` endpoint | One integration covers OpenAI, Groq and self-hosted Whisper servers. Claude does not take audio input. |
+| Speech-to-text by a service of the user's own | OpenAI-compatible `/audio/transcriptions` (OpenAI, Groq, self-hosted servers), Deepgram, ElevenLabs, AssemblyAI and Gladia, chosen in Settings → Voice with the key kept like the AI's; `MAGPIE_STT_*` when none is chosen | People already pay for, or trust, a service that hears their accent well; Claude does not take audio input. |
 | Model | `claude-haiku-5-5` with structured outputs and per-task effort; Sonnet 5.5 and Opus 5.5 selectable | Fast and low-cost for short notes; Settings → AI or `MAGPIE_MODEL` switches it. |
 | Other AIs | One OpenAI-compatible client: JSON schema, then JSON mode, then the schema in the prompt, plus one repair round | Covers OpenAI, Gemini, OpenRouter, Groq, Ollama and others with one integration, whatever each supports. |
 | Claude accounts | A Claude artifact version of Magpie | A self-hosted app can't use a Claude subscription (Anthropic doesn't allow apps to offer claude.ai sign-in or its limits); inside Claude, the user's own account files the notes. |

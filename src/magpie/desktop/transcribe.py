@@ -17,13 +17,15 @@ are used.
 from __future__ import annotations
 
 import importlib.util
+import io
 import logging
 import os
 import re
 import shutil
 import threading
 import time
-from collections.abc import Callable
+import wave
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -322,12 +324,14 @@ class Transcriber:
         stop: str | None = None,
         budget: float | None = None,
         quick: bool = False,
+        words: Sequence[str] = (),
     ) -> str:
         """The note's words. Raises TimeoutError past ``budget`` seconds (by default
         30 plus twice the note's length), so a slow computer falls back to the listener.
 
         ``quick`` is for the words shown while you speak: one guess at each word instead of
-        weighing five, and no second tries, so it keeps up.
+        weighing five, and no second tries, so it keeps up. ``words`` are names and words
+        to listen out for (Settings → Voice).
         """
         audio = to_float(pcm, rate)
         seconds = len(audio) / RATE
@@ -337,6 +341,8 @@ class Transcriber:
         limit = budget if budget is not None else 30.0 + 2 * seconds
         model = self._load()
         options: dict[str, Any] = {"beam_size": 1, "temperature": 0.0} if quick else {}
+        if words:
+            options["hotwords"] = ", ".join(words)
         segments, _info = model.transcribe(
             audio,
             language="en",
@@ -359,6 +365,40 @@ class Transcriber:
         else:
             log.info("Whisper (%s) wrote down %.1fs in %.1fs", self.folder.name, seconds, took)
         return clean(" ".join(parts), wake, stop)
+
+
+def wav(pcm: bytes, rate: int) -> bytes:
+    """16-bit mono sound as a WAV file, as speech services take it."""
+    out = io.BytesIO()
+    with wave.open(out, "wb") as file:
+        file.setnchannels(1)
+        file.setsampwidth(2)
+        file.setframerate(rate)
+        file.writeframes(pcm[: len(pcm) // 2 * 2])
+    return out.getvalue()
+
+
+class SpeechService:
+    """The speech service chosen in Settings → Voice (stt.py), written to through Magpie's
+    own server, which keeps its key: ``send`` takes a WAV file and returns its words."""
+
+    name = "your speech service"
+
+    def __init__(self, send: Callable[[bytes], str]) -> None:
+        self._send = send
+
+    def transcribe(
+        self,
+        pcm: bytes,
+        rate: int,
+        *,
+        wake: str | None = None,
+        stop: str | None = None,
+        **_: Any,
+    ) -> str:
+        if len(pcm) < 0.3 * rate * 2:  # too short to hold a word
+            return ""
+        return clean(self._send(wav(pcm, rate)), wake, stop)
 
 
 class Whisper:

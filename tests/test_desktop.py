@@ -631,6 +631,9 @@ def test_the_transcriber_loads_whisper_once_and_lets_go_when_idle(tmp_path):
     options = model.calls[0]
     assert options["language"] == "en" and options["vad_filter"] is True
     assert options["beam_size"] == 5 and "temperature" not in options
+    assert "hotwords" not in options
+    transcriber.transcribe(second, 16000, words=["James", "Kinnaird Road"])
+    assert model.calls[-1]["hotwords"] == "James, Kinnaird Road"  # words to listen out for
     transcriber.transcribe(second, 16000, quick=True)  # the words shown as you speak
     assert model.calls[-1]["beam_size"] == 1 and model.calls[-1]["temperature"] == 0.0
     assert transcriber.transcribe(bytes(3200), 16000) == ""  # a tenth of a second: nothing
@@ -886,6 +889,14 @@ class FakeClient:
         self.changes.append(changes)
         return {"wake_phrase": "notes on", **changes}
 
+    def transcribe(self, wav):  # the speech service chosen in Settings → Voice
+        self.sent = getattr(self, "sent", []) + [wav]
+        if isinstance(self.heard, Exception):
+            raise self.heard
+        return self.heard
+
+    heard: Any = ""
+
     def create_note(self, text, source, captured_in=""):
         if self.fail:
             raise RuntimeError(self.fail)
@@ -983,7 +994,8 @@ class FakeTranscriber:
     def warm(self) -> None:
         self.warmed += 1
 
-    def transcribe(self, pcm, rate, *, wake=None, stop=None, quick=False):
+    def transcribe(self, pcm, rate, *, wake=None, stop=None, quick=False, words=()):
+        self.words = list(words)
         if quick:
             self.live.append(len(pcm))
             return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
@@ -1189,7 +1201,7 @@ class LiveModel:
         self.texts, self.fail, self.wait = list(texts), fail, wait
         self.calls: list[tuple[float, bool]] = []
 
-    def transcribe(self, pcm, rate, *, wake=None, stop=None, quick=False):
+    def transcribe(self, pcm, rate, *, wake=None, stop=None, quick=False, words=()):
         self.calls.append((len(pcm) / (2 * rate), quick))
         if self.wait is not None:
             self.wait.wait(5)
@@ -1295,6 +1307,118 @@ def test_live_words_run_on_their_own_and_give_up_quietly_when_whisper_fails():
         time.sleep(0.02)
     assert not live._thread.is_alive()
     assert len(broken.calls) == GIVE_UP and shown == []
+
+
+def test_a_speech_service_writes_the_note_down_and_whisper_steps_in_when_it_fails(app):
+    app.whisper = FakeWhisper(FakeTranscriber("Call James at 5."))
+    app.apply_prefs({"speech_model": "service", "vocabulary": "James, Kinnaird Road"})
+    assert app.whisper.chosen == ["small.en"]  # still there for the words as you speak
+    app.client.heard = "Notes on, call James at five on Kinnaird Road. Notes off."
+    voice_note(app, "call james at five")
+    settle(app, lambda: app.client.notes)
+    assert app.client.notes == [("Call James at five on Kinnaird Road.", "desktop-voice")]
+    assert app.client.sent[0].startswith(b"RIFF")  # the note's sound, as a WAV file
+    assert app.whisper.transcriber.heard == []  # Whisper wasn't needed
+
+    app.client.heard = RuntimeError("Groq refused the key.")
+    voice_note(app, "call james at five")
+    settle(app, lambda: len(app.client.notes) == 2)
+    assert app.client.notes[-1] == ("Call James at 5.", "desktop-voice")
+    assert app.whisper.transcriber.words == ["James", "Kinnaird Road"]
+    said = [p[0].get("status", "") for p in app.ui.bar("saving")]
+    assert any("Groq refused the key." in s and "Whisper wrote it down" in s for s in said)
+
+    app.whisper = FakeWhisper()  # no Whisper either: the listener's words, and it says so
+    voice_note(app, "water the plants")
+    settle(app, lambda: len(app.client.notes) == 3)
+    assert app.client.notes[-1] == ("water the plants", "desktop-voice")
+    said = [p[0].get("status", "") for p in app.ui.bar("saving")]
+    assert any("keeps the words Magpie heard" in s for s in said)
+
+
+def test_a_dictation_app_of_your_own_types_the_note_into_the_bar(app):
+    app.whisper = FakeWhisper(FakeTranscriber("x"))
+    app.apply_prefs(
+        {"speech_model": "dictation", "stop_phrase": "over and out", "silence_seconds": 5}
+    )
+    assert app.whisper.chosen == ["off"]  # no model needed here
+    app._on_voice("state", {"state": "recording", "by_voice": True})
+    settle(app, lambda: app.ui.bar("dictate"))
+    assert app.ui.bar("dictate")[-1][0] == {"stop": "over and out", "seconds": 5}
+    assert ("show", True) in app.ui.calls  # the bar takes the keyboard for the app to type in
+    assert ("release",) in app.engine.commands  # Magpie's listener lets go of the note
+    app._on_voice("words", {"final": "rough words", "partial": ""})  # not shown over it
+    app._on_voice("state", {"state": "recording", "by_voice": True})  # heard again
+    settle(app)
+    assert len(app.ui.bar("dictate")) == 1 and not app.ui.bar("words")
+
+    bridge = Bridge(app)
+    assert bridge.ui("bar", "save_dictated", {"text": "Buy milk"}) is None
+    settle(app, lambda: app.client.notes)
+    assert app.client.notes == [("Buy milk", "desktop-voice")]
+    bridge.ui("bar", "discard", {"text": "Call Mum"})
+    app.undo()
+    settle(app, lambda: app.ui.bar("typing"))
+    assert app.ui.bar("discarded")[-1][0]["text"] == "Call Mum"
+    assert app.ui.bar("typing")[-1][0]["text"] == "Call Mum"
+
+    app.voice_state = "no-mic"  # the tray's "Start a voice note" needs no microphone here
+    app.start_note()
+    settle(app, lambda: len(app.ui.bar("dictate")) == 2)
+
+
+def test_the_listener_can_let_go_of_a_note_without_making_one():
+    events: list = []
+    listener = Listener(FakeModel(say("buy milk", 1.0)), lambda k, d: events.append((k, d)))
+    listener.start()
+    for pcm in list(audio(2)):
+        listener.feed(pcm)
+    listener.release()
+    assert listener.state == "standby"
+    assert outcome(events) == ["recording", "standby"]  # no note, nothing cancelled
+
+
+def test_a_note_for_a_speech_service_is_a_wav_file_and_tiny_ones_are_not_sent():
+    import wave
+
+    sent: list[bytes] = []
+    service = transcribe.SpeechService(lambda data: sent.append(data) or "Notes on, buy milk.")
+    pcm = bytes(int(RATE * 2) * 2)
+    assert service.transcribe(pcm, RATE, wake="notes on") == "Buy milk."
+    with wave.open(io.BytesIO(sent[0])) as recording:
+        assert (recording.getframerate(), recording.getnchannels(), recording.getnframes()) == (
+            RATE,
+            1,
+            RATE * 2,
+        )
+    assert service.transcribe(bytes(200), RATE) == "" and len(sent) == 1  # too short to send
+
+
+def test_the_apps_client_reaches_the_speech_service_through_the_server():
+    from magpie.desktop.server import LocalClient
+
+    answers = iter(
+        [
+            httpx2.Response(200, json={"text": "Call James."}),
+            httpx2.Response(422, json={"detail": "No speech was detected in the recording."}),
+            httpx2.Response(502, json={"detail": "Groq refused the key."}),
+        ]
+    )
+    seen: list = []
+
+    def handler(request):
+        seen.append(request)
+        return next(answers)
+
+    client = LocalClient("http://127.0.0.1:8000", "token")
+    client._http = httpx2.Client(
+        base_url="http://127.0.0.1:8000", transport=httpx2.MockTransport(handler)
+    )
+    assert client.transcribe(b"RIFF") == "Call James."
+    assert seen[0].url.path == "/api/transcribe" and b'filename="note.wav"' in seen[0].content
+    assert client.transcribe(b"RIFF") == ""  # it heard nothing
+    with pytest.raises(RuntimeError, match="Groq refused the key."):
+        client.transcribe(b"RIFF")
 
 
 def test_reminders_pop_up_and_their_buttons_work(app):
@@ -1857,7 +1981,13 @@ def test_the_apps_own_windows_reach_it_through_the_api(client, core):
         {"window": "alerts", "action": "resize", "height": -1},
     ):
         assert client.post("/api/desktop/ui", json=bad).status_code == 422
-    assert heard.calls == [("bar", "save_text", "Buy milk"), ("alerts", "act", "done")]
+    dictated = {"window": "bar", "action": "save_dictated", "text": "Call James"}
+    assert client.post("/api/desktop/ui", json=dictated).json() == {"ok": True, "problem": None}
+    assert heard.calls == [
+        ("bar", "save_text", "Buy milk"),
+        ("alerts", "act", "done"),
+        ("bar", "save_dictated", "Call James"),  # what a dictation app typed into the bar
+    ]
     client.headers.pop("X-Magpie")
     assert client.post("/api/desktop/ui", json=call).status_code == 403  # no CSRF header
 

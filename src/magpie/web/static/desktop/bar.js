@@ -3,12 +3,18 @@
 // The app (Python) drives it with magpieBar.<state>(details); the buttons and keys reach
 // the app through Magpie's own API on this computer (/api/desktop/ui).
 
+import { CANCEL_PHRASES, DEFAULT_STOP, STOP_ALIASES, dictationEnd, phraseList, tidy } from "../js/phrases.js";
+
 const $ = (id) => document.getElementById(id);
 const bar = $("bar");
 const text = $("text");
 let state = "idle";
 let edited = false; // typed over what was dictated: send the new text to the app
 let editTimer = 0;
+// While a dictation app of the user's own types the note in: {stops, seconds, timer}.
+let dictation = null;
+const SETTLE_MS = 1500; // the stop phrase must stay at the end this long: more may come
+const NOTHING_MS = 60000; // nothing typed in a minute: the bar closes
 
 function call(action, details = {}) {
   return fetch("/api/desktop/ui", {
@@ -19,6 +25,7 @@ function call(action, details = {}) {
 }
 
 function set(next, status, { hint = "", reply = "", keys = "" } = {}) {
+  if (next !== "dictate") stopDictation();
   state = next;
   bar.dataset.state = next;
   bar.dataset.tone = "";
@@ -28,7 +35,7 @@ function set(next, status, { hint = "", reply = "", keys = "" } = {}) {
   $("reply").hidden = !reply;
   $("keys").textContent = keys;
   const recording = next === "recording";
-  const typing = next === "typing";
+  const typing = next === "typing" || next === "dictate";
   $("save").hidden = !(recording || typing);
   $("cancel").hidden = !(recording || typing);
   $("close").hidden = recording || typing || next === "saving";
@@ -86,11 +93,52 @@ window.magpieBar = {
   message({ text: message = "", error = false } = {}) {
     set(error ? "error" : "info", message);
   },
+  // The user's own dictation app types the note in: it's saved when the words end with
+  // the stop phrase, after a pause, or with Enter.
+  dictate({ stop = DEFAULT_STOP, seconds = 8 } = {}) {
+    edited = false;
+    text.value = "";
+    set("dictate", "Dictate your note", { hint: `with your dictation app, then say “${stop}”`, keys: "Enter saves · Esc cancels" });
+    dictation = { stops: phraseList(stop, DEFAULT_STOP, STOP_ALIASES), seconds: Number(seconds) || 0, timer: 0 };
+    dictation.timer = setTimeout(() => finishDictation(""), NOTHING_MS);
+    text.focus();
+  },
 };
+
+function stopDictation() {
+  if (dictation) clearTimeout(dictation.timer);
+  dictation = null;
+}
+
+function dictated() {
+  clearTimeout(dictation.timer);
+  const end = dictationEnd(text.value, dictation.stops, CANCEL_PHRASES);
+  if (end.state === "cancel") dictation.timer = setTimeout(() => discardDictation(end.text), SETTLE_MS);
+  else if (end.state === "stop") dictation.timer = setTimeout(() => finishDictation(end.text), SETTLE_MS);
+  else if (end.text && dictation.seconds) dictation.timer = setTimeout(() => finishDictation(end.text), dictation.seconds * 1000);
+  else if (!end.text) dictation.timer = setTimeout(() => finishDictation(""), NOTHING_MS);
+}
+
+function finishDictation(note) {
+  if (state !== "dictate") return;
+  stopDictation();
+  if (note) call("save_dictated", { text: note });
+  else call("close");
+}
+
+function discardDictation(note) {
+  if (state !== "dictate") return;
+  stopDictation();
+  call("discard", { text: note });
+}
 
 function save() {
   if (state === "recording") call("save");
-  else if (state === "typing") {
+  else if (state === "dictate") {
+    const end = dictationEnd(text.value, dictation.stops, CANCEL_PHRASES);
+    if (end.state === "cancel") discardDictation(end.text);
+    else finishDictation(end.text);
+  } else if (state === "typing") {
     const note = text.value.trim();
     if (note) call("save_text", { text: note });
     else call("close");
@@ -99,6 +147,7 @@ function save() {
 
 function cancel() {
   if (state === "recording") call("cancel");
+  else if (state === "dictate") discardDictation(tidy(text.value));
   else call("close");
 }
 
@@ -109,6 +158,7 @@ $("undo").addEventListener("click", () => call("undo"));
 $("open").addEventListener("click", () => call("open_notes"));
 
 text.addEventListener("input", () => {
+  if (state === "dictate") return dictated();
   if (state !== "recording") return;
   edited = true;
   clearTimeout(editTimer);

@@ -117,6 +117,22 @@ class LocalClient:
     def prefs(self) -> dict[str, Any]:
         return self._json("GET", "/api/prefs")
 
+    def transcribe(self, wav: bytes) -> str:
+        """A note's sound, written down by the speech service chosen in Settings → Voice."""
+        response = self._http.post(
+            "/api/transcribe", files={"file": ("note.wav", wav, "audio/wav")}, timeout=240
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        detail = body.get("detail") if isinstance(body, dict) else None
+        if response.status_code == 422 and isinstance(detail, str):  # it heard nothing
+            return ""
+        if response.status_code >= 400:
+            raise RuntimeError(str(detail or f"Magpie answered {response.status_code}."))
+        return str(body.get("text") or "") if isinstance(body, dict) else ""
+
     def update_prefs(self, changes: dict[str, Any]) -> dict[str, Any]:
         return self._json("PUT", "/api/prefs", json=changes)
 

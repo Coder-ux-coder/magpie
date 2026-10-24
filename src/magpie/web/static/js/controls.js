@@ -1,8 +1,9 @@
 // Setup controls shared by Settings and the welcome screen: which AI files your
-// notes, email and pop-up reminders, your categories, and what Magpie learned.
+// notes, how the app writes down what you say, email and pop-up reminders, your
+// categories, and what Magpie learned.
 
 import { api } from "./api.js";
-import { emit, state } from "./state.js";
+import { emit, on, state } from "./state.js";
 import { append, clear, confirmDialog, h, icon, iconButton, toast } from "./ui.js";
 
 const REPO = "https://github.com/Coder-ux-coder/magpie";
@@ -170,6 +171,196 @@ export function aiControls({ onSaved } = {}) {
       ai = await api(`/api/ai/key?provider=${encodeURIComponent(provider.id)}`, { method: "DELETE" });
       render();
       await refreshStatus().catch(() => {});
+    } catch (error) {
+      toast(error.message, { error: true });
+    }
+  };
+
+  load();
+  return box;
+}
+
+// ------------------------------------------------- writing down what you say
+
+// How the Magpie app writes down what you say (desktop/transcribe.py and stt.py):
+// Whisper on this computer, a speech service of your own, or your own dictation app.
+const SPEECH_CHOICES = {
+  auto: "Automatic: the best this computer runs quickly",
+  service: "A speech service of your own (OpenAI, Groq, Deepgram…)",
+  dictation: "Your own dictation app (Glaido, Wispr Flow…)",
+  off: "Off: the listener's rough words",
+};
+const SPEECH_SAVED = {
+  service: "Saved. Choose your speech service below.",
+  dictation: "Saved. Say your command word and the bar opens for your dictation app.",
+  off: "Notes now keep the words Magpie's listener heard.",
+};
+
+async function savePrefsHere(changes) {
+  state.prefs = await api("/api/prefs", { method: "PUT", body: changes });
+  emit("prefs", state.prefs);
+}
+
+export function speechStatus(speech, chosen = state.prefs?.speech_model || "auto") {
+  if (!speech) return "";
+  const done = `${Math.round((speech.progress || 0) * 100)}%`;
+  if (chosen === "dictation") return "Your dictation app types each note into Magpie's bar. Nothing to download.";
+  if (chosen === "off") return "Notes keep the words the listener heard: quick, but often wrong.";
+  const getting = speech.getting ? ` Getting the model for the words shown as you speak: ${done}.` : "";
+  if (chosen === "service") return `Your speech service writes each note down when you finish it. Whisper, on this computer, shows your words as you speak, and steps in if the service fails.${getting}`;
+  if (speech.state === "ready") {
+    const which = speech.chosen === "auto"
+      ? (speech.model === "small.en" ? " Automatic chose the faster model, which suits this computer." : " Automatic chose the most accurate model for this computer.")
+      : "";
+    return `Ready. Whisper writes your words in the bar as you speak, then each note again when you finish it, all on this computer: no audio leaves it.${which}${getting}`;
+  }
+  if (speech.state === "downloading") {
+    if (speech.getting && speech.getting !== speech.model) return `Downloading the faster model first: ${done}. Until it's there, notes keep the listener's rough words.`;
+    if (speech.meanwhile) return `Downloading this model: ${done}. Until it's ready, Magpie uses the faster one.`;
+    return `Downloading the model: ${done}. Until it's ready, notes keep the listener's rough words.`;
+  }
+  return speech.message || "";
+}
+
+// The app's progress (downloads, a model that couldn't start) as it changes.
+on("desktop", (desktop) => {
+  for (const hint of document.querySelectorAll("[data-speech-hint]")) hint.textContent = speechStatus(desktop?.speech);
+});
+
+export function speechControls({ prefix = "pref" } = {}) {
+  if (!state.status?.desktop?.speech) return null;
+  const box = h("div", { class: "speech-controls" });
+  const render = () => {
+    clear(box);
+    const speech = state.status.desktop.speech;
+    const chosen = state.prefs?.speech_model || "auto";
+    const id = `${prefix}-speech`;
+    const options = { auto: SPEECH_CHOICES.auto, ...(speech.models || {}), service: SPEECH_CHOICES.service, dictation: SPEECH_CHOICES.dictation, off: SPEECH_CHOICES.off };
+    const select = h("select", { id, "aria-describedby": `${id}-hint` },
+      Object.entries(options).map(([value, label]) => h("option", { value, selected: value === chosen }, label)));
+    select.addEventListener("change", async () => {
+      try {
+        await savePrefsHere({ speech_model: select.value });
+        toast(SPEECH_SAVED[select.value] || "Saved. Magpie downloads the model if it needs to, and uses it as soon as it's ready.");
+        render();
+        box.querySelector(`#${id}`)?.focus();
+      } catch (error) {
+        select.value = chosen;
+        toast(error.message, { error: true });
+      }
+    });
+    box.append(h("div", { class: "field" },
+      h("label", { for: id }, "Writing down what you say"), select,
+      h("span", { class: "hint", id: `${id}-hint`, "data-speech-hint": "" }, speechStatus(speech, chosen))));
+    if (chosen === "service") box.append(speechServiceControls({ prefix }));
+    if (chosen === "dictation") box.append(dictationHelp());
+    if (chosen !== "dictation" && chosen !== "off") box.append(wordsField(prefix));
+  };
+  render();
+  return box;
+}
+
+function dictationHelp() {
+  const prefs = state.prefs || {};
+  const wake = prefs.wake_phrase || "notes on";
+  const stop = prefs.stop_phrase || "notes off";
+  const pause = Number(prefs.silence_seconds) ? ` when you stop for ${prefs.silence_seconds} seconds,` : "";
+  return h("div", { class: "welcome-card" },
+    h("h3", {}, icon("mic"), "With your dictation app"),
+    h("p", {}, `Say “${wake}”, or choose Start a voice note in Magpie's menu: the bar opens, ready for your dictation app. Start it with its own shortcut and talk.`),
+    h("p", {}, `The note is saved when its words end with “${stop}”,${pause} or when you press Enter. Ending with “cancel note” throws it away.`),
+    h("p", { class: "muted small" }, "Any app that types what you say works: Glaido, Wispr Flow, Superwhisper, Windows voice typing (Windows key + H) or Dictation on a Mac."));
+}
+
+function wordsField(prefix) {
+  const id = `${prefix}-words`;
+  const words = h("textarea", { id, rows: 2, dir: "auto", maxlength: 1000, spellcheck: "false", placeholder: "e.g. James, Dr Okafor, Kinnaird Road, Magpie" });
+  words.value = state.prefs?.vocabulary || "";
+  words.addEventListener("change", async () => {
+    try {
+      await savePrefsHere({ vocabulary: words.value });
+      toast("Saved. Whisper and your speech service listen out for these words.");
+    } catch (error) {
+      toast(error.message, { error: true });
+    }
+  });
+  return field(id, "Names and words to listen out for", words, "People, places and words of your own that speech models might not know, separated by commas.");
+}
+
+export function speechServiceControls({ prefix = "pref" } = {}) {
+  const box = h("div", { class: "ai-controls" }, h("p", { class: "muted" }, "Loading your speech services…"));
+  let speech = null;
+  let chosen = null;
+
+  const load = async () => {
+    try {
+      speech = await api("/api/speech");
+      chosen = speech.service || chosen || "groq";
+      render();
+    } catch (error) {
+      clear(box);
+      box.append(h("p", { class: "error" }, error.message));
+    }
+  };
+
+  const render = () => {
+    clear(box);
+    const current = speech.services.find((s) => s.id === chosen) || speech.services[0];
+    const doing = speech.ready
+      ? (speech.source === "env" ? "Notes are written down by the speech service set on the server." : `Notes are written down by ${speech.name}.`)
+      : "No speech service yet: choose one, paste its key and save.";
+    box.append(h("p", { class: "ai-status", role: "status" }, h("span", { class: `status-dot${speech.ready ? " on" : ""}`, "aria-hidden": "true" }), doing));
+    const ids = { service: `${prefix}-stt`, key: `${prefix}-stt-key`, model: `${prefix}-stt-model`, url: `${prefix}-stt-url` };
+    const select = h("select", { id: ids.service }, speech.services.map((s) => h("option", { value: s.id, selected: s.id === current.id }, s.label)));
+    select.addEventListener("change", () => {
+      chosen = select.value;
+      render();
+      box.querySelector(`#${ids.service}`)?.focus();
+    });
+    const key = h("input", {
+      type: "password", id: ids.key, autocomplete: "off", spellcheck: "false",
+      placeholder: current.has_key ? "A key is saved. Paste a new one to replace it" : (current.key_hint || "Paste your key"),
+    });
+    const model = current.models ? h("input", { type: "text", id: ids.model, value: current.model, spellcheck: "false", autocomplete: "off", placeholder: "The service's own default" }) : null;
+    const address = current.fixed_url ? null : h("input", { type: "url", id: ids.url, value: current.base_url, placeholder: "http://localhost:8000/v1", spellcheck: "false", autocomplete: "off" });
+    const usingIt = current.id === speech.service && speech.ready;
+    const save = h("button", { type: "submit", class: "btn primary" }, usingIt ? "Save changes" : `Use ${current.name}`);
+    const form = h("form", { class: "ai-form" },
+      field(ids.service, "Speech service", select, current.help),
+      field(ids.key, current.needs_key ? `${current.name} API key` : "API key (if it needs one)", key,
+        current.key_url ? h("span", {}, "Get one at ", h("a", { href: current.key_url, target: "_blank", rel: "noopener" }, new URL(current.key_url).host), ". It's checked, then kept on this computer only.") : "Kept on this computer only."),
+      address ? field(ids.url, "Address", address, "The service's OpenAI-compatible address, ending in /v1.") : null,
+      model ? field(ids.model, "Model", model, current.default_model ? `Default: ${current.default_model}.` : "Leave it empty for the service's own default.") : null,
+      h("div", { class: "row" }, save,
+        current.has_key ? h("button", { type: "button", class: "btn small danger", onclick: () => removeKey(current) }, "Remove saved key") : null),
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const body = { service: current.id };
+      if (key.value.trim()) body.key = key.value.trim();
+      if (model) body.model = model.value.trim();
+      if (address) body.base_url = address.value.trim();
+      const done = busyButton(save, "Checking…");
+      try {
+        speech = await api("/api/speech", { method: "PUT", body, timeout: 60000 });
+        chosen = speech.service;
+        render();
+        toast(speech.warning || `Connected. ${current.name} writes your notes down from now on.`);
+        await refreshStatus().catch(() => {});
+      } catch (error) {
+        done();
+        toast(error.message, { error: true });
+      }
+    });
+    box.append(form);
+  };
+
+  const removeKey = async (service) => {
+    const ok = await confirmDialog({ title: `Remove the ${service.name} key?`, message: "Until you add one again, Whisper writes your notes down on this computer.", confirm: "Remove", danger: true });
+    if (!ok) return;
+    try {
+      speech = await api(`/api/speech/key?service=${encodeURIComponent(service.id)}`, { method: "DELETE" });
+      render();
     } catch (error) {
       toast(error.message, { error: true });
     }

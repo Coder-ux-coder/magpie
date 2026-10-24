@@ -1338,6 +1338,9 @@ dialog.welcome { width: min(100% - 1.5rem, 44rem); }
 .welcome-points { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
 .welcome-points li { display: flex; gap: 0.6rem; align-items: flex-start; }
 .welcome-points .icon { flex: none; width: 1.25rem; height: 1.25rem; margin-top: 0.15rem; color: var(--accent); }
+.speech-controls { display: grid; }
+.speech-controls > .ai-controls,
+.speech-controls > .welcome-card { margin-bottom: 1rem; }
 .welcome-card {
   display: grid;
   gap: 0.5rem;

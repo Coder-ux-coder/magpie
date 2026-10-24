@@ -6,6 +6,33 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-24
+
+### Added
+
+- **Your own speech service.** Settings → Voice → *Writing down what you say* → *A speech
+  service of your own*: choose OpenAI (gpt-4o-transcribe), Groq (Whisper large v3, fast,
+  with a free tier), Deepgram (Nova-3), ElevenLabs (Scribe), AssemblyAI, Gladia, or any
+  server with OpenAI's `/audio/transcriptions`, and paste its key (checked, kept on your
+  computer, never shown again, and only sent to the address it was entered for). Each
+  voice note's sound then goes to it when the note ends. Whisper still shows your words as
+  you speak and writes the note itself if the service fails, and the bar says so. The same
+  service writes down Telegram voice messages.
+- **Your own dictation app.** Choose *Your own dictation app* to use Glaido, Wispr Flow,
+  Superwhisper, Windows voice typing or Dictation on a Mac: “notes on” (or *Start a voice
+  note*) opens the bar with the cursor in it, your app types the note in, and it's saved
+  when the words end with “notes off”, after a pause, or with Enter. Ending with “cancel
+  note” throws it away, with Undo.
+- **Names and words to listen out for** (Settings → Voice): people, places and words of
+  your own, for Whisper and the services that take them (OpenAI, Groq, Deepgram).
+- The welcome screen has a *Writing down what you say* step, so the choice is made at the
+  start.
+
+### Changed
+
+- `MAGPIE_STT_*` on the server is now used when no speech service is chosen in the
+  dashboard.
+
 ## [0.7.0] - 2026-10-24
 
 ### Added

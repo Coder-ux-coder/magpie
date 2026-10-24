@@ -41,7 +41,7 @@ from magpie.models import (
 )
 from magpie.notify import Notification, snooze_label
 from magpie.notify.channels import EmailError, SmtpConfig, smtp_preset
-from magpie.stt import MAX_AUDIO_BYTES, TranscriptionError
+from magpie.stt import MAX_AUDIO_BYTES, SERVICES, TranscriptionError
 from magpie.timeutil import humanize, now_utc
 
 router = APIRouter(prefix="/api")
@@ -316,7 +316,7 @@ async def status(app: User) -> dict[str, Any]:
         # adopts the browser's zone once.
         "timezone_unset": "timezone" not in app.settings.model_fields_set
         and "timezone" not in (app.store.get_kv("prefs") or {}),
-        "stt": {"enabled": app.stt.enabled},
+        "stt": {"enabled": app.stt.enabled, "name": app.stt.config.name},
         "web_search": app.settings.web_search,
         "channels": [
             {
@@ -525,13 +525,17 @@ async def transcribe(app: User, file: UploadFile = File(...)) -> dict[str, str]:
 async def _transcribe(app: Magpie, file: UploadFile) -> str:
     if not app.stt.enabled:
         raise HTTPException(
-            503, "Server-side transcription is not configured (MAGPIE_STT_API_KEY)."
+            503,
+            "No speech service is set up: choose one in Settings → Voice (or set "
+            "MAGPIE_STT_API_KEY on the server).",
         )
     data = await file.read(MAX_AUDIO_BYTES + 1)
     if len(data) > MAX_AUDIO_BYTES:
         raise HTTPException(413, "The recording is larger than 25 MB.")
     try:
-        text = await app.stt.transcribe(data, file.content_type or "audio/webm")
+        text = await app.stt.transcribe(
+            data, file.content_type or "audio/webm", words=app.prefs().vocabulary_words()
+        )
     except TranscriptionError as exc:
         raise HTTPException(502, str(exc)) from exc
     if not text:
@@ -938,6 +942,50 @@ class AIIn(AIModelsIn):
 @router.get("/ai")
 async def ai_settings(app: User) -> dict[str, Any]:
     return app.ai_status()
+
+
+class SpeechIn(BaseModel):
+    service: str = Field(max_length=20, description='A service\'s id, or "" for none')
+    model: str | None = Field(default=None, max_length=100)
+    base_url: str | None = Field(default=None, max_length=300)
+    key: str | None = Field(default=None, max_length=500, description="Leave out to keep it")
+
+    @field_validator("model", "key")
+    @classmethod
+    def _one_word(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if any(char.isspace() for char in value):
+            raise ValueError("It has no spaces.")
+        return value
+
+
+@router.get("/speech")
+async def speech_settings(app: User) -> dict[str, Any]:
+    """The speech service that writes recordings down (Settings → Voice)."""
+    return app.speech_status()
+
+
+@router.put("/speech")
+async def save_speech(app: User, body: SpeechIn) -> dict[str, Any]:
+    try:
+        warning = await app.set_speech(
+            body.service, model=body.model, base_url=body.base_url, key=body.key
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {**app.speech_status(), "warning": warning}
+
+
+@router.delete("/speech/key")
+async def forget_speech_key(
+    app: User, service: str = Query(min_length=1, max_length=20)
+) -> dict[str, Any]:
+    if service not in SERVICES:
+        raise HTTPException(422, "Unknown speech service.")
+    app.forget_speech_key(service)
+    return app.speech_status()
 
 
 @router.put("/ai")

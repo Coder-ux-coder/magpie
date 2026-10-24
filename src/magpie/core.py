@@ -35,7 +35,14 @@ from magpie.reminders import Reminders
 from magpie.scheduler import Scheduler
 from magpie.schemas import Answer
 from magpie.store import Store
-from magpie.stt import Transcriber
+from magpie.stt import (
+    SERVICES,
+    Transcriber,
+    TranscriptionError,
+    address,
+    clean_saved_speech,
+)
+from magpie.stt import resolve as resolve_speech
 from magpie.telegram import TelegramBot
 from magpie.telegram_api import TelegramApi
 from magpie.timeutil import iso, now_utc
@@ -69,7 +76,7 @@ class Magpie:
         )
         self.brain: Brain = brain or self._make_brain(self.ai_config())
         self.fetcher = Fetcher(self.http, settings)
-        self.stt = Transcriber(self.http, settings)
+        self.stt = Transcriber(self.http, settings, lambda: self.store.get_kv("speech"))
         self.reminders = Reminders(self.store, self.prefs)
         self.telegram_api = (
             TelegramApi(self.http, settings.telegram_bot_token)
@@ -263,6 +270,94 @@ class Magpie:
             "locked": config.locked,
             "web_search": config.provider.id == "claude",
             "providers": providers,
+        }
+
+    # ---------------------------------------------------------- speech service
+
+    async def set_speech(
+        self,
+        service: str,
+        *,
+        model: str | None = None,
+        base_url: str | None = None,
+        key: str | None = None,
+    ) -> str | None:
+        """Write recordings down with ``service`` from now on (Settings → Voice), or with
+        none ("") at all. Like the AI, a key is tried first and nothing is saved when the
+        service refuses it (ValueError); a warning says when it couldn't be tried."""
+        stored = clean_saved_speech(self.store.get_kv("speech"))
+        if not service:
+            self.store.set_kv("speech", {**stored, "service": ""})
+            return None
+        info = SERVICES.get(service)
+        if info is None:
+            raise ValueError("Unknown speech service.")
+        entry = dict(stored["settings"].get(service, {}))
+        if model is not None and info.models:
+            entry["model"] = model.strip()
+        if base_url is not None and not info.fixed_url:
+            url = base_url.strip().rstrip("/")
+            if url and not url.startswith(("http://", "https://")):
+                raise ValueError("The address must start with http:// or https://.")
+            entry["base_url"] = url
+        url = address(info, entry)
+        if key:
+            entry["key"], entry["key_for"] = key.strip(), url
+        elif entry.get("key_for") != url:  # a key only ever goes to the address it was for
+            entry.pop("key", None)
+            entry.pop("key_for", None)
+        choice = {"service": service, "settings": {**stored["settings"], service: entry}}
+        config = resolve_speech(self.settings, choice)
+        if not config.base_url:
+            raise ValueError(f"Enter the address of {info.name}.")
+        if not config.ready:
+            raise ValueError(f"Paste your {info.name} API key.")
+        try:
+            warning = await self.stt.check(config)
+        except TranscriptionError as exc:
+            raise ValueError(str(exc)) from exc
+        self.store.set_kv("speech", choice)
+        return warning
+
+    def forget_speech_key(self, service: str) -> None:
+        stored = clean_saved_speech(self.store.get_kv("speech"))
+        entry = stored["settings"].get(service)
+        if entry:
+            entry.pop("key", None)
+            entry.pop("key_for", None)
+            self.store.set_kv("speech", stored)
+
+    def speech_status(self) -> dict[str, Any]:
+        """What Settings → Voice shows: never a key, only whether one is saved."""
+        saved = self.store.get_kv("speech")
+        stored = clean_saved_speech(saved)
+        config = self.stt.config
+        services = []
+        for info in SERVICES.values():
+            shown = resolve_speech(self.settings, saved, info.id)
+            services.append(
+                {
+                    "id": info.id,
+                    "label": info.label,
+                    "name": info.name,
+                    "help": info.help,
+                    "needs_key": info.needs_key,
+                    "key_url": info.key_url,
+                    "key_hint": info.key_hint,
+                    "fixed_url": info.fixed_url,
+                    "models": info.models,
+                    "default_model": info.model,
+                    "model": shown.model,
+                    "base_url": shown.base_url,
+                    "has_key": bool(shown.key),
+                }
+            )
+        return {
+            "service": stored["service"],
+            "source": config.source,
+            "ready": config.ready,
+            "name": config.name if config.service is not None else "",
+            "services": services,
         }
 
     # --------------------------------------------------------------- helpers

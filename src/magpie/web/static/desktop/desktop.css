@@ -78,6 +78,7 @@ textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   border-top: 3px solid var(--accent);
 }
 .bar[data-state="recording"] { border-top-color: var(--record); }
+.bar[data-state="dictate"] { border-top-color: var(--accent); }
 .bar[data-state="saved"] { border-top-color: var(--ok); }
 .bar[data-state="error"],
 .bar[data-tone="error"] { border-top-color: var(--danger); }
@@ -95,6 +96,7 @@ textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .status .hint { color: var(--muted); font-weight: 400; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
 .bar[data-state="recording"] .dot { background: var(--record); animation: pulse 1.4s ease-in-out infinite; }
+.bar[data-state="dictate"] .dot { animation: pulse 1.4s ease-in-out infinite; }
 .bar[data-state="saved"] .dot { background: var(--ok); }
 .bar[data-state="error"] .dot { background: var(--danger); }
 @keyframes pulse { 50% { opacity: 0.35; } }

@@ -162,6 +162,32 @@ export function noteFromResults(results, { from = 0, fromWake = false, wake = []
   };
 }
 
+// ------------------------------------------------- a dictation app's words
+
+// What a dictation app of the user's own (Glaido, Wispr Flow, voice typing…) has typed
+// into the bar: {state: "stop" | "cancel" | "more", text}. The stop or cancel phrase only
+// counts at the very end ("take notes off the shelf" goes on), and the text is what came
+// before it: "Buy milk, notes off." -> {state: "stop", text: "Buy milk"}.
+export function dictationEnd(text, stops, cancels = CANCEL_PHRASES) {
+  for (const [state, phrases] of [["cancel", cancels], ["stop", stops]]) {
+    const at = endsWith(text, phrases);
+    if (at !== null) return { state, text: tidy(String(text).slice(0, at)) };
+  }
+  return { state: "more", text: tidy(text) };
+}
+
+// Where a phrase that ends the text starts (punctuation after it aside), or null.
+function endsWith(text, phrases) {
+  const toks = tokens(text);
+  for (const phrase of phrases) {
+    const words = tokens(phrase).map((t) => compact(t.word));
+    if (!words.length || words.length > toks.length) continue;
+    const tail = toks.slice(-words.length);
+    if (tail.every((t, i) => compact(t.word) === words[i])) return tail[0].start;
+  }
+  return null;
+}
+
 // Add words to what is already in the text box, keeping its line breaks.
 export function appendText(base, addition) {
   const before = String(base ?? "");

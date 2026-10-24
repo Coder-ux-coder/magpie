@@ -20,7 +20,7 @@ flowchart LR
     end
     subgraph Outside[External services]
         C[AI: Claude, or any<br/>OpenAI-compatible API]
-        STT[Speech-to-text<br/>OpenAI-compatible]
+        STT[Speech service of your own<br/>OpenAI, Groq, Deepgram, …]
         WEB[YouTube / websites]
     end
     subgraph Notify[Notifications]
@@ -94,7 +94,13 @@ flowchart LR
   timings. When the note ends, the chosen model writes its sound down once more, and
   that's saved; if it fails, the quick model does. The default, `auto`, is
   `large-v3-turbo` on a computer with 8 or more processor threads and `small.en` on
-  others (on four, the large model takes over twice as long as the note). Sound is low-pass filtered before it's resampled to 16 kHz,
+  others (on four, the large model takes over twice as long as the note). With a speech
+  service of the user's own, the note's sound goes as a WAV file to the server's
+  `/api/transcribe` (which holds the key, `stt.py`) first; with a dictation app of their
+  own, “notes on” opens the bar with the keyboard instead, the listener lets go of the
+  note (`release`), and the bar saves what the app types once it ends with the stop
+  phrase, after a pause, or on Enter (`dictationEnd` in `phrases.js`). Names and words to
+  listen out for go to Whisper as hotwords and to the services that take them. Sound is low-pass filtered before it's resampled to 16 kHz,
   and quiet sound brought up; voice activity detection skips silences, where Whisper would
   otherwise make words up, and the command words it may still hear are trimmed. Both
   models are loaded when a note starts and let go after five idle minutes. They aren't in
@@ -202,7 +208,7 @@ on its own, so one bad item can't stop the rest.
 | `notify/` | Channels: the desktop app's pop-ups, web push, email (dashboard or `MAGPIE_SMTP_*`), Telegram, ntfy, webhook |
 | `telegram.py`, `telegram_api.py` | The bot (long polling, pairing, commands, buttons) and a small API client |
 | `content/` | Finding URLs, blocking private addresses, fetching pages and transcripts |
-| `stt.py` | OpenAI-compatible speech-to-text |
+| `stt.py` | Speech services of the user's own (OpenAI-compatible, Deepgram, ElevenLabs, AssemblyAI, Gladia): chosen in Settings → Voice, keys kept like the AI's |
 | `api.py`, `app.py` | HTTP API, auth, public endpoints (action links, calendar), static files |
 | `auth.py` | Generated secrets, signed action links, login rate limiting |
 | `export.py`, `ics.py` | JSON/Markdown export and import, iCalendar feed |
