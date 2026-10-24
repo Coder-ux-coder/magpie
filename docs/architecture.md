@@ -53,8 +53,10 @@ in one process, plus what makes it an app:
 flowchart LR
     MIC[Microphone<br/>sounddevice] --> VE[VoiceEngine thread<br/>speech.py]
     VE -->|events, the note's sound| APP[DesktopApp<br/>app.py]
-    APP -->|the note's sound| WH[Whisper<br/>transcribe.py]
-    WH -->|model, once| HF[Hugging Face]
+    APP -->|the sound as it comes| LV[Live words<br/>live.py]
+    LV -->|quick model| WH[Whisper<br/>transcribe.py]
+    APP -->|the note's sound| WH
+    WH -->|models, once| HF[Hugging Face]
     APP -->|run_js| BAR[Voice bar window<br/>static/desktop/bar.html]
     APP -->|run_js| POP[Reminder pop-ups<br/>static/desktop/reminders.html]
     BAR -->|/api/desktop/ui| SRV
@@ -69,9 +71,12 @@ flowchart LR
 - **Listening** (`speech.py`): the `VoiceEngine` thread reads the microphone in quarter-second
   chunks and feeds a `Listener`. In standby a Vosk recogniser restricted to the command word
   (plus "[unk]") runs all the time; it costs a few percent of one core. The command word
-  only counts at the start of what's said (at most one word before it). When it's heard, a
-  full recogniser starts from the exact sample where the command word ended (the last eight
-  seconds are kept in a ring buffer, so “notes on buy milk” in one breath loses nothing),
+  only counts at the start of what's said (at most one word before it). A recogniser that
+  knows nothing else hears its word in all sorts of things, so only its settled result
+  counts, and then a full recogniser listens to the same stretch of audio again and must
+  hear the command word too. Then a full recogniser starts from the exact sample where the
+  command word ended (the last 20 seconds are kept in a ring buffer, so “notes on buy milk”
+  in one breath loses nothing),
   and a small grammar recogniser listens for the stop and cancel words, whose timings say
   where the note ends. A stop word must end what's said, and a stop word only heard in a
   partial result must stand for half a second. Silence (the dashboard's setting) or five
@@ -79,15 +84,22 @@ flowchart LR
   text instead. The note's own sound is kept, from the end of the command word (or the
   last words typed over) to the start of the stop word, or half a second after the last
   word.
-- **Writing it down** (`transcribe.py`): when a note ends, Whisper (faster-whisper,
-  CTranslate2, int8 on the CPU) writes its sound down again, much more accurately, with
-  punctuation; voice activity detection skips silences, where Whisper would otherwise make
-  words up, and the command words it may still hear are trimmed. Whisper is loaded when a
-  note starts and let go after five idle minutes. Its model isn't in the installer:
-  `Whisper` downloads the chosen one (`small.en`, or `large-v3-turbo`) into the app's
-  `models` folder once, retrying later if that fails, and the one before
-  keeps working meanwhile. Whenever Whisper is missing, fails or runs past its time budget,
-  the listener's words are saved instead.
+- **Writing it down** (`transcribe.py`, `live.py`): Whisper (faster-whisper, CTranslate2,
+  int8 on the CPU) writes the note down far more accurately than the listener, with
+  punctuation, twice over. While the note is said, a `LiveWriter` has the quick model
+  (`small.en`, one guess per word) write down the note so far, from its start, once a
+  second more has been said (less often in a pause, and only the last 28 seconds of a long
+  note); the bar shows its words followed by the listener's for the audio it hasn't
+  reached, lined up by the listener's word timings. When the note ends, the chosen model
+  (`large-v3-turbo` by default) writes its sound down once more, and that's saved; if it
+  fails, the quick model does. Sound is low-pass filtered before it's resampled to 16 kHz,
+  and quiet sound brought up; voice activity detection skips silences, where Whisper would
+  otherwise make words up, and the command words it may still hear are trimmed. Both
+  models are loaded when a note starts and let go after five idle minutes. They aren't in
+  the installer: `Whisper` downloads the quick one, then the chosen one, into the app's
+  `models` folder once, retrying later if that fails; the quick one does both jobs
+  meanwhile. Whenever Whisper is missing, fails or runs past its time budget, the
+  listener's words are saved instead.
 - **Windows** (`ui.py`): pywebview (WebView2 on Windows, WebKit on a Mac) shows the notes
   window (the web app itself) and two floating windows served by the same server: the voice
   bar and the reminder pop-ups. They're shown, hidden and placed without being activated

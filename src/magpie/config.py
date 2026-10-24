@@ -177,7 +177,7 @@ class Prefs(BaseModel):
     silence_seconds: int = Field(default=8, ge=0, le=120)
     # How the Magpie app writes notes down: Whisper's models, or "off" for the listener's
     # own (quicker, less accurate) words. See desktop/transcribe.py.
-    speech_model: Literal["small.en", "large-v3-turbo", "off"] = "small.en"
+    speech_model: Literal["large-v3-turbo", "small.en", "off"] = "large-v3-turbo"
     snooze_minutes: int = Field(default=60, ge=5, le=1440)
     channels: dict[str, bool] = Field(default_factory=dict, max_length=20)
     web_search: bool = True

@@ -18,11 +18,12 @@ import httpx2
 from magpie import __version__
 from magpie.config import Settings
 from magpie.desktop import system
+from magpie.desktop.live import LiveWriter
 from magpie.desktop.paths import AppPaths, DesktopState, find_model, frozen, launch_command
-from magpie.desktop.phrases import DEFAULT_WAKE, append_text
+from magpie.desktop.phrases import DEFAULT_WAKE, append_text, tidy
 from magpie.desktop.server import EmbeddedServer, LocalClient, free_port
 from magpie.desktop.speech import RATE, VoiceEngine
-from magpie.desktop.transcribe import DEFAULT_MODEL, Transcriber, Whisper
+from magpie.desktop.transcribe import DEFAULT_MODEL, QUICK_MODEL, Transcriber, Whisper
 from magpie.desktop.update import Updater
 
 log = logging.getLogger("magpie.desktop")
@@ -176,6 +177,11 @@ class DesktopApp:
         self.autostart = bool(self.state.get("autostart"))
         self._typed = ""  # what was typed into the bar during this recording
         self._said_in = ""  # the window in front when the note was started
+        self._live: LiveWriter | None = None  # Whisper's words while you speak
+        self._live_text = ""
+        self._live_until = 0.0  # seconds into the note that Whisper's words go up to
+        self._heard: dict[str, Any] = {}  # the listener's latest words
+        self._words_lock = threading.Lock()
         self._discarded = ""
         self._bar_gen = itertools.count()
         self._bar_token = 0
@@ -243,7 +249,7 @@ class DesktopApp:
         model = find_model(self.paths)
         self.engine = VoiceEngine(model, self._on_voice, listening=self.listening)
         self.whisper = Whisper(self.paths, on_change=self._update_tray)
-        self.apply_prefs(self.client.prefs())
+        self.apply_prefs(self._upgrade_speech(self.client.prefs()))
         self.engine.start()
         if model is None:
             threading.Thread(target=self._fetch_model, name="magpie-model", daemon=True).start()
@@ -338,6 +344,21 @@ class DesktopApp:
         if self.whisper is not None:
             self.whisper.choose(str(prefs.get("speech_model") or DEFAULT_MODEL))
         self._update_tray()
+
+    def _upgrade_speech(self, prefs: dict[str, Any]) -> dict[str, Any]:
+        """Once: the smaller model was everyone's default before 0.7, and the most
+        accurate one is now (Settings → Voice goes back)."""
+        if self.state.get("speech_v2") or self.client is None:
+            return prefs
+        self.state.set(speech_v2=True)
+        if prefs.get("speech_model") != QUICK_MODEL:
+            return prefs
+        try:
+            prefs = self.client.update_prefs({"speech_model": DEFAULT_MODEL})
+            log.info("Notes are now written down with the most accurate speech model")
+        except Exception:
+            log.warning("Couldn't move to the most accurate speech model", exc_info=True)
+        return prefs
 
     def set_listening(self, on: bool) -> None:
         self.listening = on
@@ -454,21 +475,32 @@ class DesktopApp:
                 self._typed = ""
                 self._said_in = system.active_window() if data.get("by_voice") else ""
                 self._bar("recording", {"hint": self._hint()}, show=True)
-                transcriber = self.whisper.transcriber if self.whisper is not None else None
-                if transcriber is not None:
-                    transcriber.warm()  # ready by the time the note ends
+                self._start_live()
+            else:
+                self._stop_live()
             return
-        if kind == "words":
-            self._bar("words", {"base": self._typed, **data})
+        if kind == "sound":
+            live = self._live
+            if live is not None:
+                live.add(data["pcm"], int(data.get("rate") or RATE))
+        elif kind == "words":
+            with self._words_lock:
+                self._heard = data
+                if self._live is not None:
+                    self._live.heard()
+                self._show_words()
         elif kind == "note":
+            self._stop_live()
             self._save_voice(data)
         elif kind == "empty":
+            self._stop_live()
             typed, self._typed = self._typed.strip(), ""
             if typed:
                 self._save(typed, "desktop-text")
             else:
                 self._bar("empty", {}, hide_after=3.0)
         elif kind == "cancelled":
+            self._stop_live()
             text = append_text(self._typed, data.get("text", "")).strip()
             self._typed = ""
             self._discarded = text
@@ -480,7 +512,55 @@ class DesktopApp:
                 self._hide_bar()
 
     def _hint(self) -> str:
+        whisper = self.whisper
+        if whisper is not None and whisper.quick is None and whisper.getting:
+            done = round(whisper.progress * 100)
+            return f"the words get better once Whisper is downloaded ({done}%)"
         return "say “notes off” to save, “cancel note” to discard"
+
+    # ------------------------------------------------------ words as you speak
+
+    def _start_live(self) -> None:
+        """Whisper's quick model writes the note down as it's said (live.py), and the
+        chosen one gets ready to write it down once more at the end."""
+        whisper = self.whisper
+        quick = whisper.quick if whisper is not None else None
+        if whisper is not None:
+            for model in (whisper.quick, whisper.transcriber):
+                if model is not None:
+                    model.warm()
+        with self._words_lock:
+            if self._live is not None:
+                self._live.stop()
+            self._live, self._live_text, self._live_until, self._heard = None, "", 0.0, {}
+            if quick is not None:
+                self._live = LiveWriter(
+                    quick, self._live_words, wake=self.wake_phrase, stop=self.stop_phrase
+                ).start()
+
+    def _stop_live(self) -> None:
+        with self._words_lock:
+            live, self._live = self._live, None
+        if live is not None:
+            live.stop()
+
+    def _live_words(self, live: LiveWriter, text: str, until: float) -> None:
+        with self._words_lock:
+            if live is not self._live:  # from a note that has ended
+                return
+            self._live_text, self._live_until = text, until
+            self._show_words()
+
+    def _show_words(self) -> None:
+        """Whisper's words, then the listener's for what was said after Whisper's last go
+        (holding the words lock)."""
+        heard = self._heard
+        final, partial = str(heard.get("final", "")), str(heard.get("partial", ""))
+        if self._live is not None and self._live_text:
+            final = self._live_text
+            later = [word for word, start in heard.get("timed", ()) if start >= self._live_until]
+            partial = tidy(" ".join(later))
+        self._bar("words", {"base": self._typed, "final": final, "partial": partial})
 
     # ----------------------------------------------------------------- the bar
 
@@ -547,6 +627,10 @@ class DesktopApp:
 
     def bar_edited(self, text: str) -> None:
         self._typed = text
+        with self._words_lock:
+            self._live_text, self._live_until = "", 0.0
+            if self._live is not None:
+                self._live.reset()
         self.voice("rebase")
 
     def write_note(self) -> None:
@@ -574,30 +658,44 @@ class DesktopApp:
 
     def _save_voice(self, data: dict[str, Any]) -> None:
         heard = append_text(self._typed, data.get("text", ""))
-        transcriber = self.whisper.transcriber if self.whisper is not None else None
-        if transcriber is None or not data.get("audio"):
+        whisper = self.whisper
+        models: list[Transcriber] = []
+        for model in (whisper.transcriber, whisper.quick) if whisper is not None else ():
+            if model is not None and model not in models:
+                models.append(model)
+        if not models or not data.get("audio"):
             self._save(heard, "desktop-voice")
             return
-        self._bar("saving", {"text": heard, "status": "Writing it down…"}, show=True)
+        live = self._live_text  # Whisper's words as you spoke, closer than the listener's
+        shown = append_text(self._typed, live) if live and not live.startswith("…") else heard
+        self._bar("saving", {"text": shown, "status": "Writing it down…"}, show=True)
         self._work.submit(
-            self._write_down, transcriber, self._typed, data, self._bar_token, self._said_in
+            self._write_down, models, self._typed, data, self._bar_token, self._said_in
         )
 
     def _write_down(
-        self, transcriber: Transcriber, typed: str, data: dict[str, Any], token: int, said_in: str
+        self,
+        models: list[Transcriber],
+        typed: str,
+        data: dict[str, Any],
+        token: int,
+        said_in: str,
     ) -> None:
         """Whisper writes the note down again, far more accurately than the listener heard
-        it; when it can't (or is too slow), the listener's words are saved instead."""
+        it: the chosen model, or the quick one if that fails. When neither can (or they're
+        too slow), the listener's words are saved instead."""
         text = ""
-        try:
-            text = transcriber.transcribe(
-                data["audio"],
-                int(data.get("rate") or RATE),
-                wake=self.wake_phrase,
-                stop=self.stop_phrase,
-            )
-        except Exception as exc:
-            log.warning("Whisper couldn't write the note down, so it keeps what was heard: %s", exc)
+        for model in models:
+            try:
+                text = model.transcribe(
+                    data["audio"],
+                    int(data.get("rate") or RATE),
+                    wake=self.wake_phrase,
+                    stop=self.stop_phrase,
+                )
+                break
+            except Exception as exc:
+                log.warning("Whisper couldn't write the note down: %s", exc)
         note = append_text(typed, text or str(data.get("text", "")))
         if token == self._bar_token:  # the bar still shows this note
             self._bar("saving", {"text": note})

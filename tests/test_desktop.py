@@ -23,6 +23,7 @@ import pytest
 
 from magpie.desktop import migrate, paths, phrases, system, transcribe, update
 from magpie.desktop.app import Bridge, DesktopApp
+from magpie.desktop.live import GIVE_UP, LONGEST_STEP, LiveWriter
 from magpie.desktop.speech import (
     NOTHING_SAID_SECONDS,
     Listener,
@@ -63,9 +64,12 @@ class FakeRecognizer:
     utterance settles (a final result) after half a second without words.
     """
 
-    def __init__(self, script: list, grammar: list[str] | None = None) -> None:
+    def __init__(
+        self, script: list, grammar: list[str] | None = None, misheard: dict | None = None
+    ) -> None:
         self.script = script
         self.grammar = None if grammar is None else {w for p in grammar for w in p.split()}
+        self.misheard = misheard or {}  # what a grammar takes words for: {"no it's": "notes"}
         self.origin: float | None = None
         self.now = 0.0
         self.taken = 0.0
@@ -81,6 +85,7 @@ class FakeRecognizer:
 
     def _heard(self) -> list[dict[str, Any]]:
         assert self.origin is not None
+        script = self.script if self.grammar is None else self._mishear(self.script)
         return [
             {
                 "word": w if self.grammar is None or w in self.grammar else "[unk]",
@@ -88,9 +93,23 @@ class FakeRecognizer:
                 "end": round(e - self.origin, 3),
                 "conf": 1.0,
             }
-            for w, s, e in self.script
+            for w, s, e in script
             if s >= self.taken - 1e-6 and e <= self.now + 1e-6
         ]
+
+    def _mishear(self, script: list) -> list:
+        out, i = [], 0
+        while i < len(script):
+            for said, heard in self.misheard.items():
+                size = len(said.split())
+                if " ".join(w for w, _, _ in script[i : i + size]) == said:
+                    out.append((heard, script[i][1], script[i + size - 1][2]))
+                    i += size
+                    break
+            else:
+                out.append(script[i])
+                i += 1
+        return out
 
     @staticmethod
     def _text(words: list[dict[str, Any]]) -> str:
@@ -119,24 +138,31 @@ class FakeRecognizer:
 
 
 class FakeModel:
-    def __init__(self, script: list, unknown: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self, script: list, unknown: tuple[str, ...] = (), misheard: dict | None = None
+    ) -> None:
         self.script = script
         self.unknown = set(unknown)
+        self.misheard = misheard
+        self.free_made = 0
 
     def knows(self, word: str) -> bool:
         return word == "[unk]" or word not in self.unknown
 
     def free(self, rate: int) -> FakeRecognizer:
+        self.free_made += 1
         return FakeRecognizer(self.script)
 
     def grammar(self, phrases: list[str], rate: int) -> FakeRecognizer:
-        return FakeRecognizer(self.script, phrases)
+        return FakeRecognizer(self.script, phrases, self.misheard)
 
 
-def listen(script: list, seconds: float, unknown: tuple[str, ...] = (), **options):
+def listen(script: list, seconds: float, unknown: tuple[str, ...] = (), misheard=None, **options):
     events: list[tuple[str, dict[str, Any]]] = []
     listener = Listener(
-        FakeModel(script, unknown), lambda kind, data: events.append((kind, data)), **options
+        FakeModel(script, unknown, misheard),
+        lambda kind, data: events.append((kind, data)),
+        **options,
     )
     for pcm in audio(seconds):
         listener.feed(pcm)
@@ -172,11 +198,27 @@ def test_notes_on_then_notes_off_takes_down_exactly_the_note():
     assert started["by_voice"] is True
     shown = [data for kind, data in events if kind == "words"]
     assert any("buy milk" in (w["final"] + " " + w["partial"]) for w in shown)
+    # When each word began (seconds into the note), for the bar to line them up with
+    # Whisper's words.
+    timed = max((w["timed"] for w in shown), key=len)
+    assert timed[:3] == [("buy", 0.35), ("milk", 0.7), ("tomorrow", 1.05)]
 
 
 def test_a_note_said_in_one_breath_keeps_its_first_words():
     """The words right after the command word were already heard: none are lost."""
     _, events = listen(say("notes on buy milk", 1.0), 6, silence_seconds=2)
+    assert ("note", "buy milk", "silence") in outcome(events)
+
+
+def test_something_that_only_sounds_like_the_command_word_starts_nothing():
+    """The command-word recogniser takes “no, it's on” for “notes on”; the full
+    recogniser, listening to the same moment again, doesn't, so no note starts."""
+    script = say("no it's on", 1.0) + say("the kettle is boiling", 2.4)
+    listener, events = listen(script, 8, misheard={"no it's": "notes"})
+    assert "recording" not in outcome(events) and listener.state == "standby"
+    assert listener.model.free_made == 1  # it was checked once, not again and again
+    # Said properly, the same command word starts a note straight away.
+    _, events = listen(say("notes on", 1.0) + say("buy milk", 2.0), 7, silence_seconds=2)
     assert ("note", "buy milk", "silence") in outcome(events)
 
 
@@ -305,6 +347,9 @@ def test_the_note_comes_with_its_own_sound_without_the_command_words():
     note = next(data for kind, data in events if kind == "note")
     assert note["rate"] == RATE
     assert heard_between(note["audio"]) == (1.65, 3.5)  # after "on", up to "notes off"
+    # The same sound comes as it's heard, for Whisper to write down while you speak.
+    streamed = b"".join(data["pcm"] for kind, data in events if kind == "sound")
+    assert streamed.startswith(note["audio"]) and heard_between(streamed)[0] == 1.65
 
     # Ended by silence: up to half a second after the last word, not the quiet after it.
     _, events = listen(say("notes on", 1.0) + say("call james", 2.0), 9, silence_seconds=3)
@@ -513,8 +558,41 @@ def test_whisper_hears_sound_at_its_own_rate():
     second = array("h", [16384] * 48000).tobytes()  # a second at 48 kHz
     audio = transcribe.to_float(second, 48000)
     assert audio.dtype == np.float32 and len(audio) == 16000
-    assert abs(float(audio[100]) - 0.5) < 1e-6
+    assert abs(float(audio[100]) - 0.5) < 1e-3
     assert len(transcribe.to_float(second[:-1], 16000)) == 47999  # half a sample is dropped
+
+
+def tone(np, hertz: float, rate: int, level: float, seconds: float = 1.0):
+    return level * np.sin(2 * np.pi * hertz * np.arange(int(rate * seconds)) / rate)
+
+
+def strength(np, audio, hertz: float, rate: int = 16000) -> float:
+    spectrum = np.abs(np.fft.rfft(audio * np.hanning(len(audio))))
+    return float(spectrum[int(round(hertz * len(audio) / rate))])
+
+
+def test_sounds_too_high_for_whisper_do_not_fold_back_over_the_words():
+    np = pytest.importorskip("numpy")
+    # A voice at 1 kHz and a whine at 12 kHz, heard at 48 kHz: at 16 kHz, the whine
+    # would come back as a 4 kHz one unless it's filtered out first.
+    sound = tone(np, 1000, 48000, 0.3) + tone(np, 12000, 48000, 0.3)
+    pcm = (sound * 32767).astype(np.int16).tobytes()
+    audio = transcribe.to_float(pcm, 48000)
+    voice, whine = strength(np, audio, 1000), strength(np, audio, 4000)
+    assert whine < voice / 300  # more than 50 dB down
+
+
+def test_a_quiet_microphone_is_brought_up_and_a_loud_one_left_alone():
+    np = pytest.importorskip("numpy")
+
+    def level(peak: float) -> float:
+        pcm = (tone(np, 440, 16000, peak) * 32767).astype(np.int16).tobytes()
+        return float(np.max(np.abs(transcribe.to_float(pcm, 16000))))
+
+    assert level(0.05) == pytest.approx(0.5, rel=0.01)  # brought up to half the most
+    assert level(0.001) == pytest.approx(0.02, rel=0.05)  # but never more than 20 times
+    assert level(0.8) == pytest.approx(0.8, rel=0.01)  # never turned down
+    assert not np.any(transcribe.to_float(bytes(32000), 16000))  # silence stays silent
 
 
 class FakeSegment:
@@ -552,6 +630,9 @@ def test_the_transcriber_loads_whisper_once_and_lets_go_when_idle(tmp_path):
     assert loads == [(tmp_path, 2)]  # loaded once
     options = model.calls[0]
     assert options["language"] == "en" and options["vad_filter"] is True
+    assert options["beam_size"] == 5 and "temperature" not in options
+    transcriber.transcribe(second, 16000, quick=True)  # the words shown as you speak
+    assert model.calls[-1]["beam_size"] == 1 and model.calls[-1]["temperature"] == 0.0
     assert transcriber.transcribe(bytes(3200), 16000) == ""  # a tenth of a second: nothing
     transcriber.release_if_idle(idle=60)
     assert transcriber.loaded
@@ -590,7 +671,8 @@ def test_the_whisper_model_is_downloaded_whole_or_not_at_all(tmp_path, monkeypat
     assert not (folder / ".cache").exists() and not folder.with_name(folder.name + ".part").exists()
     assert asked == [("Systran/faster-whisper-small.en", "whisper-small.en.part", transcribe.FILES)]
     assert heard[-1] == 1.0
-    assert transcribe.find_whisper(home) == folder
+    assert transcribe.find_whisper(home, "small.en") == folder
+    assert transcribe.find_whisper(home) is None  # the default is the most accurate one
     assert transcribe.fetch_whisper(home, "small.en", download=download) == folder  # once
 
     def broken(repo, folder, patterns):
@@ -602,11 +684,17 @@ def test_the_whisper_model_is_downloaded_whole_or_not_at_all(tmp_path, monkeypat
     assert transcribe.find_whisper(home, "large-v3-turbo") is None  # the rest comes next time
     with pytest.raises(RuntimeError, match="incomplete"):
         transcribe.fetch_whisper(home, "large-v3-turbo", download=lambda *args: None)
-    # MAGPIE_WHISPER_MODEL points at a model elsewhere (the Windows build's tests).
-    elsewhere = tmp_path / "elsewhere"
+    # MAGPIE_WHISPER_MODEL points at a model elsewhere (the builds' tests), used for every
+    # model unless the one asked for is next to it.
+    elsewhere = tmp_path / "elsewhere" / "whisper-large-v3-turbo"
     whisper_files(elsewhere)
     monkeypatch.setenv("MAGPIE_WHISPER_MODEL", str(elsewhere))
     assert transcribe.find_whisper(home, "large-v3-turbo") == elsewhere
+    assert transcribe.find_whisper(home, "small.en") == elsewhere
+    whisper_files(elsewhere.with_name("whisper-small.en"))
+    assert transcribe.find_whisper(home, "small.en") == elsewhere.with_name("whisper-small.en")
+    monkeypatch.setenv("MAGPIE_WHISPER_MODEL", "/")  # nothing useful
+    assert transcribe.find_whisper(home, "small.en") == folder
 
 
 def wait_until(check, timeout: float = 5.0) -> None:
@@ -642,14 +730,18 @@ def test_the_chosen_whisper_model_is_downloaded_in_the_background(tmp_path, monk
     whisper.choose("small.en")  # already here
     assert whisper.state == "ready" and whisper.transcriber.folder.name == "whisper-small.en"
     small = whisper.transcriber
+    assert whisper.quick is small  # it also writes the words shown as you speak
+    assert whisper.status()["live"] is True and whisper.status()["meanwhile"] is False
 
     whisper.choose("large-v3-turbo")
-    assert whisper.status()["state"] == "downloading"
+    status = whisper.status()
+    assert status["state"] == "downloading" and status["getting"] == "large-v3-turbo"
     wait_until(lambda: whisper.progress == 0.4)
-    assert whisper.transcriber is small  # the one before keeps working meanwhile
+    assert whisper.transcriber is small and whisper.meanwhile  # the faster one meanwhile
     gate.set()
     wait_until(lambda: whisper.state == "ready")
     assert whisper.transcriber.folder.name == "whisper-large-v3-turbo"
+    assert whisper.quick is small and not whisper.meanwhile and whisper.getting == ""
 
     def no_memory(folder, threads):
         raise MemoryError("not enough memory")
@@ -659,12 +751,58 @@ def test_the_chosen_whisper_model_is_downloaded_in_the_background(tmp_path, monk
     wait_until(lambda: whisper.transcriber.problem)
     status = whisper.status()  # says why, rather than "ready"
     assert status["state"] == "error" and "not enough memory" in status["message"]
+    assert "faster one" in status["message"]  # which writes notes down instead
 
     whisper.choose("off")
-    assert whisper.state == "off" and whisper.transcriber is None
+    assert whisper.state == "off" and whisper.transcriber is None and whisper.quick is None
     whisper.choose("something else")  # an unknown choice means the default
-    assert whisper.choice == "small.en" and whisper.state == "ready"
+    assert whisper.choice == "large-v3-turbo" and whisper.state == "ready"
     assert changes[-1] == "ready"
+
+
+def test_the_quick_model_comes_first_and_does_both_jobs_until_the_other_is_here(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("MAGPIE_WHISPER_MODEL", raising=False)
+    home = paths.AppPaths(tmp_path)
+    gates = {"small.en": threading.Event(), "large-v3-turbo": threading.Event()}
+    asked: list[str] = []
+
+    def fetch(app_paths, name, progress):
+        asked.append(name)
+        progress(0.5)
+        gates[name].wait(5)
+        whisper_files(transcribe.model_folder(app_paths, name))
+
+    whisper = transcribe.Whisper(
+        home,
+        fetch=fetch,
+        make=lambda folder: transcribe.Transcriber(folder, load=lambda *a: None),
+        available=True,
+    )
+    whisper.choose("large-v3-turbo")  # a new install: nothing is here yet
+    wait_until(lambda: whisper.progress == 0.5)
+    status = whisper.status()
+    assert status["state"] == "downloading" and status["getting"] == "small.en"
+    assert whisper.transcriber is None and whisper.quick is None
+
+    gates["small.en"].set()
+    wait_until(lambda: whisper.getting == "large-v3-turbo")
+    assert whisper.quick is not None and whisper.transcriber is whisper.quick
+    assert whisper.status()["meanwhile"] and whisper.state == "downloading"
+
+    gates["large-v3-turbo"].set()
+    wait_until(lambda: whisper.state == "ready")
+    assert whisper.transcriber.folder.name == "whisper-large-v3-turbo"
+    assert whisper.quick.folder.name == "whisper-small.en"
+    assert asked == ["small.en", "large-v3-turbo"]
+    wait_until(lambda: not whisper._downloading)
+
+    # Both are let go when they've been idle a while.
+    for model in (whisper.transcriber, whisper.quick):
+        model._model, model._used = object(), 0.0
+    whisper.tick()
+    assert not whisper.transcriber.loaded and not whisper.quick.loaded
 
 
 def test_a_failed_whisper_download_is_tried_again_later(tmp_path, monkeypatch):
@@ -683,7 +821,9 @@ def test_a_failed_whisper_download_is_tried_again_later(tmp_path, monkeypatch):
     )
     whisper.choose("small.en")
     wait_until(lambda: whisper.state == "error")
-    assert "no internet" in whisper.status()["message"] and whisper.transcriber is None
+    message = whisper.status()["message"]
+    assert "no internet" in message and "tries again later" in message
+    assert whisper.transcriber is None
     whisper.tick()
     assert tries == ["small.en"]  # not straight away
     whisper._failed_at -= transcribe.RETRY_SECONDS + 1
@@ -730,6 +870,11 @@ class FakeClient:
         self.fail = fail
         self.notes: list[tuple] = []
         self.reminders: list[tuple] = []
+        self.changes: list[dict] = []
+
+    def update_prefs(self, changes):
+        self.changes.append(changes)
+        return {"wake_phrase": "notes on", **changes}
 
     def create_note(self, text, source, captured_in=""):
         if self.fail:
@@ -811,15 +956,27 @@ def test_typed_words_and_dictation_are_saved_together(app):
 
 
 class FakeTranscriber:
-    def __init__(self, text: str = "", *, fail: str = "", wait: threading.Event | None = None):
+    def __init__(
+        self,
+        text: str = "",
+        *,
+        fail: str = "",
+        wait: threading.Event | None = None,
+        live: list[str] | None = None,
+    ):
         self.text, self.fail, self.wait = text, fail, wait
+        self.texts = list(live or [text])  # for the words shown as you speak, in turn
         self.heard: list[tuple] = []
+        self.live: list[int] = []  # how much sound each go while you spoke had
         self.warmed = 0
 
     def warm(self) -> None:
         self.warmed += 1
 
-    def transcribe(self, pcm, rate, *, wake=None, stop=None):
+    def transcribe(self, pcm, rate, *, wake=None, stop=None, quick=False):
+        if quick:
+            self.live.append(len(pcm))
+            return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
         self.heard.append((len(pcm), rate, wake, stop))
         if self.wait is not None:
             self.wait.wait(5)
@@ -829,9 +986,11 @@ class FakeTranscriber:
 
 
 class FakeWhisper:
-    def __init__(self, transcriber=None) -> None:
+    def __init__(self, transcriber=None, quick=None) -> None:
         self.transcriber = transcriber
+        self.quick = quick
         self.state = "ready" if transcriber else "off"
+        self.getting, self.progress = "", 0.0
         self.chosen: list[str] = []
 
     def choose(self, name):
@@ -859,7 +1018,7 @@ def test_whisper_writes_the_note_down_again_before_it_is_saved(app):
     saving = app.ui.bar("saving")
     assert saving[0][0] == {"text": "by milk tomorrow at nine", "status": "Writing it down…"}
     assert saving[-1][0] == {"text": "Buy milk tomorrow at 9."}
-    assert app.whisper.chosen == ["small.en"]  # the default model
+    assert app.whisper.chosen == ["large-v3-turbo"]  # the default model
 
 
 def test_the_listeners_words_are_saved_when_whisper_fails_or_hears_nothing(app):
@@ -898,6 +1057,217 @@ def test_a_new_note_started_while_whisper_works_keeps_the_bar(app):
     bar = [call[1] for call in app.ui.calls if call[0] == "bar"]
     assert bar[-1] == "recording"  # the old note was saved without taking the bar
     assert Bridge(app).status()["speech"] == {"model": "small.en", "state": "ready"}
+
+
+def sound(app, seconds: float, chunk: float = 0.25) -> None:
+    for _ in range(round(seconds / chunk)):
+        app._on_voice("sound", {"pcm": bytes(int(RATE * chunk) * 2), "rate": RATE})
+
+
+def shown_words(app) -> list[dict]:
+    return [payload[0] for payload in app.ui.bar("words")]
+
+
+def last_words(app) -> dict:
+    shown = shown_words(app)
+    return shown[-1] if shown else {}
+
+
+def test_whispers_words_show_in_the_bar_as_you_speak(app):
+    quick = FakeTranscriber(live=["Buy milk."])
+    app.whisper = FakeWhisper(FakeTranscriber("Buy milk tomorrow at 9."), quick=quick)
+    app._on_voice("state", {"state": "recording", "by_voice": True})
+    assert quick.warmed == 1 and app.whisper.transcriber.warmed == 1  # both get ready
+    timed = [("by", 0.2), ("milk", 0.5)]
+    app._on_voice("words", {"final": "", "partial": "by milk", "timed": timed})
+    settle(app, lambda: last_words(app).get("partial") == "by milk")  # until Whisper's
+    sound(app, 1.5)
+    settle(app, lambda: last_words(app).get("final") == "Buy milk.")
+    assert quick.live and quick.live[0] >= RATE * 2  # once a second had been said
+    # The listener's words for what Whisper hasn't reached yet come after Whisper's.
+    timed += [("to", 1.6), ("morrow", 1.8)]
+    app._on_voice("words", {"final": "by milk", "partial": "to morrow", "timed": timed})
+    settle(app)
+    assert last_words(app) == {"base": "", "final": "Buy milk.", "partial": "to morrow"}
+    # The note ends: Whisper's words stay up while the chosen model writes it all down.
+    voice_note(app, "by milk to morrow at nine")
+    settle(app, lambda: app.client.notes)
+    assert app.ui.bar("saving")[0][0] == {"text": "Buy milk.", "status": "Writing it down…"}
+    assert app.client.notes == [("Buy milk tomorrow at 9.", "desktop-voice")]
+    assert app._live is None
+
+
+def test_the_faster_model_writes_the_note_down_when_the_chosen_one_fails(app):
+    quick = FakeTranscriber("Call James at 5.")
+    app.whisper = FakeWhisper(FakeTranscriber(fail="not enough memory"), quick=quick)
+    voice_note(app, "call james at five")
+    settle(app, lambda: app.client.notes)
+    assert app.client.notes == [("Call James at 5.", "desktop-voice")]
+    assert app.whisper.transcriber.heard and quick.heard  # tried in that order
+
+
+def test_typing_over_the_words_starts_whisper_again_from_what_is_said_next(app):
+    quick = FakeTranscriber(live=["Shopping list.", "Eggs."])
+    app.whisper = FakeWhisper(FakeTranscriber("Eggs and bread."), quick=quick)
+    app._on_voice("state", {"state": "recording", "by_voice": False})
+    sound(app, 1.0)
+    settle(app, lambda: last_words(app).get("final") == "Shopping list.")
+    app.bar_edited("Shopping list:\n")
+    sound(app, 1.0)
+    settle(app, lambda: last_words(app).get("final") == "Eggs.")
+    assert last_words(app)["base"] == "Shopping list:\n"
+    assert quick.live[-1] == RATE * 2  # only the second said after typing
+    voice_note(app, "eggs and bred")
+    settle(app, lambda: app.client.notes)
+    assert app.client.notes == [("Shopping list:\nEggs and bread.", "desktop-voice")]
+
+
+def test_whispers_words_from_a_note_that_has_ended_are_not_shown(app):
+    app.whisper = FakeWhisper(FakeTranscriber("Call James."), quick=FakeTranscriber())
+    app._on_voice("state", {"state": "recording", "by_voice": True})
+    live = app._live
+    app._on_voice("state", {"state": "standby", "by_voice": False})
+    assert app._live is None and live.stopped
+    app._live_words(live, "Too late.", 2.0)
+    settle(app)
+    assert all(words["final"] != "Too late." for words in shown_words(app))
+
+
+def test_the_bar_says_the_words_get_better_once_whisper_is_downloaded(app):
+    app.whisper = FakeWhisper()
+    app.whisper.getting, app.whisper.progress = "small.en", 0.25
+    app._on_voice("state", {"state": "recording", "by_voice": True})
+    settle(app, lambda: app.ui.bar("recording"))
+    assert "once Whisper is downloaded (25%)" in app.ui.bar("recording")[-1][0]["hint"]
+    app.whisper = FakeWhisper(FakeTranscriber("x"), quick=FakeTranscriber("x"))
+    assert "notes off" in app._hint()
+
+
+def test_installs_from_before_move_once_to_the_most_accurate_model(app):
+    prefs = app._upgrade_speech({"speech_model": "small.en"})
+    assert prefs["speech_model"] == "large-v3-turbo"
+    assert app.client.changes == [{"speech_model": "large-v3-turbo"}]
+    assert paths.DesktopState(app.paths.state_file).get("speech_v2") is True
+    # Only once: choosing the faster model again afterwards sticks.
+    assert app._upgrade_speech({"speech_model": "small.en"})["speech_model"] == "small.en"
+    assert len(app.client.changes) == 1
+    # Whisper turned off stays off.
+    app.state.set(speech_v2=False)
+    assert app._upgrade_speech({"speech_model": "off"}) == {"speech_model": "off"}
+    assert len(app.client.changes) == 1 and app.state.get("speech_v2") is True
+
+
+# ------------------------------------------------------- words as you speak
+
+
+class LiveModel:
+    def __init__(self, *texts: str, fail: str = "", wait: threading.Event | None = None):
+        self.texts, self.fail, self.wait = list(texts), fail, wait
+        self.calls: list[tuple[float, bool]] = []
+
+    def transcribe(self, pcm, rate, *, wake=None, stop=None, quick=False):
+        self.calls.append((len(pcm) / (2 * rate), quick))
+        if self.wait is not None:
+            self.wait.wait(5)
+        if self.fail:
+            raise RuntimeError(self.fail)
+        return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
+
+
+def writer(model, **options) -> tuple[LiveWriter, list]:
+    shown: list[tuple[str, float]] = []
+    live = LiveWriter(model, lambda w, text, until: shown.append((text, until)), **options)
+    return live, shown
+
+
+QUARTER = bytes(int(RATE * 0.25) * 2)
+
+
+def test_whisper_writes_the_note_so_far_again_as_it_grows():
+    model = LiveModel("Buy", "Buy milk.", "Buy milk.", "Buy milk.")
+    live, shown = writer(model, wake="notes on", stop="notes off")
+    for _ in range(3):
+        live.add(QUARTER, RATE)
+    assert not live.due()  # not a second yet
+    live.add(QUARTER, RATE)
+    assert live.due()
+    live.write()
+    assert shown == [("Buy", 1.0)] and model.calls == [(1.0, True)]
+    for _ in range(4):
+        live.add(QUARTER, RATE)
+    live.write()  # from the start of the note again, so earlier words can be put right
+    assert shown[-1] == ("Buy milk.", 2.0) and model.calls[-1] == (2.0, True)
+    # Nothing changed (a pause): the next go waits longer, up to a limit.
+    for _ in range(4):
+        live.add(QUARTER, RATE)
+    live.write()
+    for _ in range(4):
+        live.add(QUARTER, RATE)
+    assert not live.due()  # it now waits for two seconds more
+    live.heard()  # the listener heard new words: no more waiting
+    assert live.due()
+    for _ in range(4):
+        live.write()
+    assert live._wait == LONGEST_STEP
+
+
+def test_a_long_note_shows_the_end_of_what_was_said():
+    model = LiveModel("and that's the end")
+    live, shown = writer(model, window=5.0)
+    live.add(bytes(RATE * 2 * 8), RATE)  # eight seconds
+    live.write()
+    assert model.calls == [(5.0, True)]
+    assert shown == [("… and that's the end", 8.0)]
+
+
+def test_words_typed_over_are_not_written_down_again():
+    model = LiveModel("Eggs.")
+    live, shown = writer(model)
+    live.add(bytes(RATE * 2 * 2), RATE)
+    live.reset()
+    assert not live.due() and live.text == ""
+    live.add(bytes(RATE * 2), RATE)
+    live.write()
+    assert model.calls == [(1.0, True)] and shown == [("Eggs.", 3.0)]
+
+
+def test_words_written_after_the_note_ended_or_was_typed_over_are_not_shown():
+    gate = threading.Event()
+    live, shown = writer(LiveModel("Too late.", wait=gate))
+    live.add(bytes(RATE * 2), RATE)
+    going = threading.Thread(target=live.write)
+    going.start()
+    live.stop()
+    gate.set()
+    going.join(5)
+    gate.clear()
+    live, shown2 = writer(LiveModel("Typed over.", wait=gate))
+    live.add(bytes(RATE * 2), RATE)
+    going = threading.Thread(target=live.write)
+    going.start()
+    live.reset()
+    gate.set()
+    going.join(5)
+    assert shown == [] and shown2 == []
+
+
+def test_live_words_run_on_their_own_and_give_up_quietly_when_whisper_fails():
+    model = LiveModel("Call James.")
+    live, shown = writer(model, step=0.25)
+    live.start()
+    live.add(bytes(RATE), RATE)  # half a second
+    wait_until(lambda: shown)
+    live.stop()
+    assert shown[0] == ("Call James.", 0.5)
+
+    broken = LiveModel(fail="out of memory")
+    live, shown = writer(broken, step=0.25)
+    live.start()
+    for _ in range(20):
+        live.add(QUARTER, RATE)
+        time.sleep(0.02)
+    wait_until(lambda: not live._thread.is_alive())
+    assert len(broken.calls) == GIVE_UP and shown == []
 
 
 def test_reminders_pop_up_and_their_buttons_work(app):

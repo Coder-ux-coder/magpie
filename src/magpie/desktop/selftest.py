@@ -1,12 +1,13 @@
 """``Magpie.exe --self-test``: check that the app works, without a microphone or anyone there.
 
-The Windows build runs it on the app it has just built and installed: the server starts
+The App workflow runs it on the app it has just built and installed: the server starts
 and saves a note, the speech model loads and takes a note down from a recording, Whisper
-writes that note down again, the voice bar opens and answers, and everything the tray
-needs is there. It never touches the user's own notes (it works in a temporary folder).
-The results are printed and, with ``--report``, written as JSON; the exit code is 1 when
-a required check failed. MAGPIE_WHISPER_MODEL (a downloaded Whisper model) makes the
-Whisper check required.
+writes that note down as it's said (the quick model) and again once it's over (the chosen
+one), the voice bar opens and answers, and everything the tray needs is there. It never
+touches the user's own notes (it works in a temporary folder). The results are printed
+and, with ``--report``, written as JSON; the exit code is 1 when a required check failed.
+MAGPIE_WHISPER_MODEL (a downloaded Whisper model, with the quick one next to it) makes the
+Whisper checks required.
 """
 
 from __future__ import annotations
@@ -116,13 +117,21 @@ def self_test(
         heard: dict[str, Any] = {}
         if wav is not None:
             results.run("note from a recording", lambda: check_recording(model, wav, expect, heard))
-        from magpie.desktop.transcribe import find_whisper
+        from magpie.desktop.transcribe import DEFAULT_MODEL, QUICK_MODEL, find_whisper
 
-        whisper = find_whisper(paths) or find_whisper(app_paths())
+        def whisper(name: str) -> Path | None:
+            return find_whisper(paths, name) or find_whisper(app_paths(), name)
+
+        downloaded = bool(os.environ.get("MAGPIE_WHISPER_MODEL"))
+        results.run(
+            "words written down as they're said",
+            lambda: check_live(whisper(QUICK_MODEL), expect, heard),
+            required=downloaded,
+        )
         results.run(
             "note written down by Whisper",
-            lambda: check_whisper(whisper, wav, expect, heard),
-            required=bool(os.environ.get("MAGPIE_WHISPER_MODEL")),
+            lambda: check_whisper(whisper(DEFAULT_MODEL), wav, expect, heard),
+            required=downloaded,
         )
         results.run("tray icon", check_tray, required=frozen())
         results.run("microphone", check_microphone, required=False)
@@ -373,6 +382,9 @@ def check_whisper(
         raise RuntimeError("the Whisper model isn't downloaded (the app gets it when it starts)")
     transcriber = Transcriber(folder)
     started = time.monotonic()
+    transcriber.load()
+    loaded = time.monotonic() - started
+    started = time.monotonic()
     if heard.get("audio"):
         source, pcm, rate = "the note's sound", heard["audio"], int(heard["rate"])
     elif wav is not None:
@@ -387,7 +399,46 @@ def check_whisper(
     took = time.monotonic() - started
     if expect and wav is not None and expect.lower() not in text.lower():
         raise RuntimeError(f"Whisper wrote {text!r} from {source}, without {expect!r}")
-    return f"{text!r} from {source} in {took:.1f}s ({folder.name})"
+    seconds = len(pcm) / 2 / rate
+    return (
+        f"{text!r} from {source} ({seconds:.1f}s) in {took:.1f}s, after loading for "
+        f"{loaded:.1f}s ({folder.name}, {transcriber.threads} threads)"
+    )
+
+
+def check_live(folder: Path | None, expect: str | None, heard: dict[str, Any]) -> str:
+    """The quick model writes the note down a second at a time as its sound comes, as
+    it does for the bar while you speak; says how long each go takes here."""
+    from magpie.desktop.live import LiveWriter
+    from magpie.desktop.transcribe import Transcriber
+
+    if folder is None:
+        raise RuntimeError("the quick Whisper model isn't downloaded")
+    if heard.get("audio"):
+        pcm, rate = heard["audio"], int(heard["rate"])
+    else:  # no recording to go by: two seconds of silence, which should show nothing
+        pcm, rate, expect = bytes(64000), 16000, None
+    transcriber = Transcriber(folder)
+    transcriber.load()
+    shown: list[tuple[str, float]] = []
+    live = LiveWriter(transcriber, lambda writer, text, until: shown.append((text, until)))
+    goes: list[float] = []
+    chunk = int(rate * 0.25) * 2
+    for offset in range(0, len(pcm), chunk):
+        live.add(pcm[offset : offset + chunk], rate)
+        if live.due() or offset + chunk >= len(pcm):
+            started = time.monotonic()
+            live.write()
+            goes.append(time.monotonic() - started)
+    if not goes:
+        raise RuntimeError("there was no sound to write down")
+    text = shown[-1][0] if shown else ""
+    if expect and expect.lower() not in text.lower():
+        raise RuntimeError(f"the words shown were {[t for t, _ in shown]!r}, without {expect!r}")
+    return (
+        f"{text!r} in {len(goes)} goes of {sum(goes) / len(goes):.1f}s on average, the "
+        f"longest {max(goes):.1f}s ({folder.name}, {transcriber.threads} threads)"
+    )
 
 
 def check_tray() -> str:

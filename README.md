@@ -58,8 +58,9 @@ It puts Magpie in Applications and opens it. Allow the microphone when your Mac 
 
 Magpie starts with your computer and waits by the clock (Windows) or in the menu bar
 (Mac). It keeps itself up to date, and **Settings → Updates** has an update button. On its
-first start it downloads Whisper, its accurate speech model (480 MB), in the background.
-There's no account and no password, and your notes stay on your computer.
+first start it downloads Whisper's speech models (2 GB in all) in the background, the
+quicker one first. There's no account and no password, and your notes stay on your
+computer.
 
 ## No API key?
 
@@ -149,9 +150,10 @@ Good to know:
   bottom of the screen with your words as you speak, without taking the keyboard from what
   you're doing. **“Notes off”** saves the note (so does a pause, or **Save**); **“cancel
   note”** throws it away, with **Undo**. Click the bar to type into it.
-- **Accurate words:** when a note ends, Whisper writes it down again from its sound, with
-  punctuation, and copes with accents. Both speech models run on your computer: no audio
-  leaves it. Settings → Voice has a *Most accurate* model for strong accents.
+- **Accurate words:** as you speak, Whisper writes your words in the bar, and when the note
+  ends its most accurate model writes the whole note down again, with punctuation. It
+  copes with accents. It all runs on your computer: no audio leaves it. Settings → Voice
+  has a faster model for older computers.
 - **The AI files it:** it tidies your words, gives the note a title, a kind (task, idea,
   link, …) and one of your own categories, and decides whether and when to remind you:
   “remind me at 5”, “every Monday at 9”, or, for “the bill is due on the 10th”, the evening
@@ -187,7 +189,7 @@ python3 -m magpie desktop
 Your notes are a SQLite file on your computer. Magpie sends **note text** (and pages you
 save) to the AI you chose, for filing, reviews and Ask (nothing with Ollama or no AI);
 **reminders** to the channels you set up (email, Telegram, …); asks GitHub for new versions
-every few hours; and downloads its speech model from Hugging Face once. **No audio leaves
+every few hours; and downloads its speech models from Hugging Face once. **No audio leaves
 your computer.** See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Development
