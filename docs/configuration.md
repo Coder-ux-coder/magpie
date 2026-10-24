@@ -30,7 +30,7 @@ the file says. A value that can't be read is named in Magpie's log.
 | Your morning | 09:00 | What “tomorrow morning” and the Tomorrow button mean. |
 | Snooze for | 1 hour | Length of every Snooze button: pop-ups, Telegram and email (5 minutes to 1 day). Snoozing a reminder that isn't due yet moves it later, never earlier. |
 | Listen for the command word | on | Say the command word to start a note (also in Magpie's menu). |
-| Writing down what you say | Most accurate | How each voice note is written down once it ends: *Most accurate* (Whisper large turbo, a 1.6 GB download; best with accents), *Faster* (Whisper small, 480 MB; for older computers) or *Off* (the quick recogniser's words). Whisper's small model also writes the words in the bar as you speak. It all runs on the computer; no audio leaves it. |
+| Writing down what you say | Automatic | How each voice note is written down once it ends: *Automatic* (the most accurate model on a computer with 8 or more processor threads, the faster one otherwise), *Most accurate* (Whisper large turbo, a 1.6 GB download; best with accents), *Faster* (Whisper small, 480 MB) or *Off* (the quick recogniser's words). Whisper's small model also writes the words in the bar as you speak. It all runs on the computer; no audio leaves it. |
 | Wake / stop phrase | “notes on” / “notes off” | Any phrase you like. |
 | Silence timeout | 8 s | Save a voice note after this much silence (0 = only when you say the stop phrase). |
 | Channels | all on | Switch each way of reminding you on or off. |

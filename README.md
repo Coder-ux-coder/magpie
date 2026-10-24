@@ -58,9 +58,9 @@ It puts Magpie in Applications and opens it. Allow the microphone when your Mac 
 
 Magpie starts with your computer and waits by the clock (Windows) or in the menu bar
 (Mac). It keeps itself up to date, and **Settings → Updates** has an update button. On its
-first start it downloads Whisper's speech models (2 GB in all) in the background, the
-quicker one first. There's no account and no password, and your notes stay on your
-computer.
+first start it downloads Whisper's speech models in the background (480 MB, plus 1.6 GB
+for the most accurate one on a quick computer). There's no account and no password, and
+your notes stay on your computer.
 
 ## No API key?
 
@@ -151,9 +151,9 @@ Good to know:
   you're doing. **“Notes off”** saves the note (so does a pause, or **Save**); **“cancel
   note”** throws it away, with **Undo**. Click the bar to type into it.
 - **Accurate words:** as you speak, Whisper writes your words in the bar, and when the note
-  ends its most accurate model writes the whole note down again, with punctuation. It
-  copes with accents. It all runs on your computer: no audio leaves it. Settings → Voice
-  has a faster model for older computers.
+  ends it writes the whole note down again, with punctuation, using its most accurate
+  model if your computer is quick enough for it. It copes with accents. It all runs on
+  your computer: no audio leaves it. Settings → Voice lets you choose the model.
 - **The AI files it:** it tidies your words, gives the note a title, a kind (task, idea,
   link, …) and one of your own categories, and decides whether and when to remind you:
   “remind me at 5”, “every Monday at 9”, or, for “the bill is due on the 10th”, the evening

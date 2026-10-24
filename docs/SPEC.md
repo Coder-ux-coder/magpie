@@ -38,9 +38,10 @@ up and summarised without filing anything by hand.
    must not start a note: a second, fuller recogniser hears the same moment again
    and must agree. While the user speaks, the bar shows the words an accurate
    offline recogniser (Whisper) writes down, a second or so behind; when the note
-   ends, Whisper's most accurate model writes it down again from its sound, coping
-   with accents and adding punctuation, and that is saved. The faster model and then
-   the quick listener's words are the fallbacks, so a note is never lost. In the notes window a voice bar sits at the
+   ends, Whisper writes it down again from its sound, coping with accents and adding
+   punctuation, with its most accurate model when the computer is quick enough, and
+   that is saved. The faster model and then the quick listener's words are the
+   fallbacks, so a note is never lost. In the notes window a voice bar sits at the
    bottom of every view and works the same way. The same note can come from the mic
    button, typed text, a Telegram text or voice message, Claude through MCP, or the
    HTTP API.
@@ -156,7 +157,7 @@ verification and paid templates), calendar sync and image notes.
 | Question | Decision | Why |
 | --- | --- | --- |
 | Wake phrase (app) | Vosk offline: a grammar recogniser that only knows the command word listens all the time, and a full recogniser checks what it settles on against the same audio; from the exact end of the command word (the last 20 seconds of audio are kept) a full recogniser follows the note, and a second grammar listens for the stop and cancel words | Private and free, cheap enough to run all day; a grammar alone hears its word in anything, so the check stops false starts; and the word timings put the start and end of a note exactly where they were said. |
-| Writing notes down (app) | Whisper (faster-whisper): `small.en` writes the note so far every second or so while it's said, for the bar; `large-v3-turbo` (by default, or `small.en`) writes the whole note once it ends. Both are downloaded once, the small one first, not shipped | Far more accurate than the always-on recogniser, above all with accents, and offline; running only while a note is taken keeps listening cheap, and keeping the models out of the installer keeps updates small. |
+| Writing notes down (app) | Whisper (faster-whisper): `small.en` writes the note so far every second or so while it's said, for the bar; `large-v3-turbo` writes the whole note once it ends on a computer with 8 or more threads (`auto`, the default; `small.en` otherwise). They're downloaded once, the small one first, not shipped | Far more accurate than the always-on recogniser, above all with accents, and offline; running only while a note is taken keeps listening cheap, and keeping the models out of the installer keeps updates small. |
 | Wake phrase (browser) | Browser Web Speech API in continuous mode, fuzzy-matching "notes on" and "notes off" | Free, real-time and needs no server audio. Falls back to recording plus server speech-to-text. |
 | The app | The same server runs inside the app (127.0.0.1); pywebview windows (WebView2, or WebKit on a Mac), a pystray tray or menu bar icon; PyInstaller makes the app, Inno Setup a per-user Windows installer, and a zip plus install.sh the Mac's Magpie.app; updates come from GitHub releases | One codebase for both systems; no admin rights; the windows are the web app's own pages. |
 | Mac distribution | An ad-hoc signed Magpie.app for Apple silicon and macOS 14+, installed with a Terminal line (curl doesn't quarantine it), updated by swapping the bundle | No paid Apple developer account; Gatekeeper only stops apps a browser downloaded. |

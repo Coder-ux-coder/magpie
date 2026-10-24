@@ -91,9 +91,10 @@ flowchart LR
   second more has been said (less often in a pause, and only the last 28 seconds of a long
   note); the bar shows its words, with the listener's for the audio it hasn't reached (and,
   in a long note, for what came before its 28 seconds), lined up by the listener's word
-  timings. When the note ends, the chosen model
-  (`large-v3-turbo` by default) writes its sound down once more, and that's saved; if it
-  fails, the quick model does. Sound is low-pass filtered before it's resampled to 16 kHz,
+  timings. When the note ends, the chosen model writes its sound down once more, and
+  that's saved; if it fails, the quick model does. The default, `auto`, is
+  `large-v3-turbo` on a computer with 8 or more processor threads and `small.en` on
+  others (on four, the large model takes over twice as long as the note). Sound is low-pass filtered before it's resampled to 16 kHz,
   and quiet sound brought up; voice activity detection skips silences, where Whisper would
   otherwise make words up, and the command words it may still hear are trimmed. Both
   models are loaded when a note starts and let go after five idle minutes. They aren't in

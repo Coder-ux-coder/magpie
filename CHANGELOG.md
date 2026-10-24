@@ -17,11 +17,13 @@ All notable changes to Magpie are documented here. The format follows
 
 ### Changed
 
-- **The most accurate speech model is now the default**: Whisper's large turbo model, which
-  is much better with accents. Magpie downloads Whisper's small model first (480 MB); it
-  writes the words shown as you speak, and writes notes down too until the large one
-  (1.6 GB) is there. Installs that had the small model move up once; Settings → Voice →
-  *Faster* goes back.
+- **The most accurate speech model, on computers quick enough for it.** The new default,
+  *Automatic*, writes notes down with Whisper's large turbo model, which is much better
+  with accents, on a computer with 8 or more processor threads (most from the last few
+  years, every Mac with Apple silicon), and with the small model on others. Magpie
+  downloads the small model first (480 MB); it writes the words shown as you speak, and
+  writes notes down too until the large one (1.6 GB) is there. Installs that had the small
+  model move to *Automatic* once; Settings → Voice has every choice.
 - When the chosen model can't write a note down (not enough memory, say), the faster one
   does, before Magpie falls back to the listener's words.
 - Quiet microphones are brought up before Whisper hears them, and sound from microphones

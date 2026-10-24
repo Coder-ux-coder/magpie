@@ -117,7 +117,7 @@ def self_test(
         heard: dict[str, Any] = {}
         if wav is not None:
             results.run("note from a recording", lambda: check_recording(model, wav, expect, heard))
-        from magpie.desktop.transcribe import DEFAULT_MODEL, QUICK_MODEL, find_whisper
+        from magpie.desktop.transcribe import BEST_MODEL, QUICK_MODEL, find_whisper
 
         def whisper(name: str) -> Path | None:
             return find_whisper(paths, name) or find_whisper(app_paths(), name)
@@ -130,7 +130,7 @@ def self_test(
         )
         results.run(
             "note written down by Whisper",
-            lambda: check_whisper(whisper(DEFAULT_MODEL), wav, expect, heard),
+            lambda: check_whisper(whisper(BEST_MODEL), wav, expect, heard),
             required=downloaded,
         )
         results.run("tray icon", check_tray, required=frozen())
@@ -376,7 +376,7 @@ def check_whisper(
 ) -> str:
     """Whisper writes down the note the listener took (its own sound), or the whole
     recording when the listener took none."""
-    from magpie.desktop.transcribe import Transcriber
+    from magpie.desktop.transcribe import Transcriber, suited
 
     if folder is None:
         raise RuntimeError("the Whisper model isn't downloaded (the app gets it when it starts)")
@@ -402,7 +402,8 @@ def check_whisper(
     seconds = len(pcm) / 2 / rate
     return (
         f"{text!r} from {source} ({seconds:.1f}s) in {took:.1f}s, after loading for "
-        f"{loaded:.1f}s ({folder.name}, {transcriber.threads} threads)"
+        f"{loaded:.1f}s ({folder.name}, {transcriber.threads} threads; automatic would "
+        f"choose {suited()} here)"
     )
 
 

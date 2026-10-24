@@ -657,7 +657,7 @@ def whisper_files(folder: Path) -> None:
 def test_the_whisper_model_is_downloaded_whole_or_not_at_all(tmp_path, monkeypatch):
     monkeypatch.delenv("MAGPIE_WHISPER_MODEL", raising=False)
     home = paths.AppPaths(tmp_path)
-    assert transcribe.find_whisper(home) is None
+    assert transcribe.find_whisper(home, "small.en") is None
     asked: list = []
 
     def download(repo, folder, patterns):
@@ -672,7 +672,7 @@ def test_the_whisper_model_is_downloaded_whole_or_not_at_all(tmp_path, monkeypat
     assert asked == [("Systran/faster-whisper-small.en", "whisper-small.en.part", transcribe.FILES)]
     assert heard[-1] == 1.0
     assert transcribe.find_whisper(home, "small.en") == folder
-    assert transcribe.find_whisper(home) is None  # the default is the most accurate one
+    assert transcribe.find_whisper(home, "large-v3-turbo") is None
     assert transcribe.fetch_whisper(home, "small.en", download=download) == folder  # once
 
     def broken(repo, folder, patterns):
@@ -755,9 +755,18 @@ def test_the_chosen_whisper_model_is_downloaded_in_the_background(tmp_path, monk
 
     whisper.choose("off")
     assert whisper.state == "off" and whisper.transcriber is None and whisper.quick is None
-    whisper.choose("something else")  # an unknown choice means the default
-    assert whisper.choice == "large-v3-turbo" and whisper.state == "ready"
+    monkeypatch.setattr(transcribe.os, "cpu_count", lambda: 16)
+    whisper.choose("something else")  # an unknown choice means the default: automatic
+    assert whisper.chosen == "auto" and whisper.choice == "large-v3-turbo"
+    assert whisper.state == "ready" and whisper.status()["chosen"] == "auto"
     assert changes[-1] == "ready"
+
+
+def test_automatic_means_the_most_accurate_model_on_a_computer_quick_enough(monkeypatch):
+    assert transcribe.suited(16) == transcribe.suited(8) == "large-v3-turbo"
+    assert transcribe.suited(4) == transcribe.suited(2) == "small.en"
+    monkeypatch.setattr(transcribe.os, "cpu_count", lambda: None)  # it can't tell
+    assert transcribe.suited() == "small.en"
 
 
 def test_the_quick_model_comes_first_and_does_both_jobs_until_the_other_is_here(
@@ -1019,7 +1028,7 @@ def test_whisper_writes_the_note_down_again_before_it_is_saved(app):
     saving = app.ui.bar("saving")
     assert saving[0][0] == {"text": "by milk tomorrow at nine", "status": "Writing it down…"}
     assert saving[-1][0] == {"text": "Buy milk tomorrow at 9."}
-    assert app.whisper.chosen == ["large-v3-turbo"]  # the default model
+    assert app.whisper.chosen == ["auto"]  # the default: what suits this computer
 
 
 def test_the_listeners_words_are_saved_when_whisper_fails_or_hears_nothing(app):
@@ -1158,10 +1167,10 @@ def test_the_bar_says_the_words_get_better_once_whisper_is_downloaded(app):
     assert "notes off" in app._hint()
 
 
-def test_installs_from_before_move_once_to_the_most_accurate_model(app):
+def test_installs_from_before_move_once_to_the_model_that_suits_the_computer(app):
     prefs = app._upgrade_speech({"speech_model": "small.en"})
-    assert prefs["speech_model"] == "large-v3-turbo"
-    assert app.client.changes == [{"speech_model": "large-v3-turbo"}]
+    assert prefs["speech_model"] == "auto"
+    assert app.client.changes == [{"speech_model": "auto"}]
     assert paths.DesktopState(app.paths.state_file).get("speech_v2") is True
     # Only once: choosing the faster model again afterwards sticks.
     assert app._upgrade_speech({"speech_model": "small.en"})["speech_model"] == "small.en"

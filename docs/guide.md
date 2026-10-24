@@ -49,20 +49,20 @@ Everything happens on your computer: **no audio ever leaves it**.
 2. While you speak, **Whisper**, a far more accurate recogniser, writes down what you've
    said so far, again every second or so, and the bar shows its words. The last few words
    come first from the quick recogniser, in lighter letters, until Whisper catches up.
-3. When you finish, Whisper's most accurate model writes the whole note down once more,
-   with punctuation and capitals, and copes with accents far better. That's the text that's
-   saved.
+3. When you finish, Whisper writes the whole note down once more, with punctuation and
+   capitals, coping with accents far better. That's the text that's saved.
 
 Magpie downloads Whisper's models once, in the background, the first time it starts, into
-its folder; updates keep them. The smaller one (480 MB) comes first and does both jobs
-until the most accurate one (1.6 GB) is there; before that, the bar and your notes have the
-quick recogniser's words. You can watch the download, and choose, in **Settings → Voice →
-Writing down what you say**:
+its folder; updates keep them. The smaller one (480 MB) comes first; on a quick computer
+the most accurate one (1.6 GB) follows, and the smaller one does both jobs until it's
+there. Before that, the bar and your notes have the quick recogniser's words. You can watch
+the download, and choose, in **Settings → Voice → Writing down what you say**:
 
 | Choice | What it's like |
 | --- | --- |
-| **Most accurate** (the default) | Whisper's *large turbo* model: the best with accents and noisy rooms. It takes a few seconds a note, longer on an older computer. |
-| **Faster** | Whisper's *small* English model, for older computers: quicker, with a few more mistakes. |
+| **Automatic** (the default) | The most accurate model on a computer with 8 or more processor threads (most from the last few years, and every Mac with Apple silicon), the faster one on others. |
+| **Most accurate** | Whisper's *large turbo* model: the best with accents and noisy rooms. A few seconds a note on a quick computer; on an older one it can take more than twice as long as the note. |
+| **Faster** | Whisper's *small* English model: quicker, with a few more mistakes. |
 | **Off** | Just the quick recogniser's words. Instant, but often wrong. |
 
 If the chosen model ever fails, Magpie writes the note down with the faster one, and if
@@ -181,7 +181,7 @@ called *magpie*).
 | No Magpie icon in the menu bar (Mac) | A full menu bar hides icons behind the camera notch: quit a menu bar app or two. Not there either? Open Magpie from Applications. |
 | Magpie doesn't hear “notes on” | Point at Magpie's icon (or open its menu): it says what's wrong. *Hears only silence*: on Windows, Settings → Privacy & security → Microphone → *Let desktop apps access your microphone*; on a Mac, System Settings → Privacy & Security → Microphone → Magpie. Check the microphone isn't muted. Say “notes on” at the start of a sentence, or use *Start a voice note* in its menu. |
 | A note starts when you didn't say “notes on” | Magpie checks with a second recogniser before it starts a note, so this should be rare. If it still happens, choose a wake phrase that sounds like nothing else you say, such as “hello magpie” (Settings → Voice). |
-| Saved notes have mistakes in them | Check Settings → Voice: *Ready* means Whisper writes notes down. While it's *Downloading*, notes keep the quick words or the faster model's. Choose *Most accurate* (the default), and speak towards the microphone. |
+| Saved notes have mistakes in them | Check Settings → Voice: *Ready* means Whisper writes notes down. While it's *Downloading*, notes keep the quick words or the faster model's. Try *Most accurate* if *Automatic* chose the faster one, and speak towards the microphone. |
 | The download of the speech model fails | Settings → Voice says why. Magpie tries again every 15 minutes. It comes from Hugging Face (huggingface.co), which some networks block. |
 | *Writing it down…* takes long | Whisper is working on a slow computer. Choose *Faster* rather than *Most accurate*. |
 | *Codex isn't installed* or *isn't signed in* | Install Codex and run `codex login` in a new window (see [Codex](#codex-your-chatgpt-sign-in-no-key)), then choose Codex again. |

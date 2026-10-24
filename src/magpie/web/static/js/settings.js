@@ -219,8 +219,12 @@ function voiceSection() {
 function speechControls() {
   const speech = state.status.desktop.speech;
   if (!speech) return null;
-  const options = { ...(speech.models || {}), off: "Off: the listener's own words (quick, but often wrong)" };
-  const chosen = state.prefs.speech_model || "large-v3-turbo";
+  const options = {
+    auto: "Automatic: the most accurate this computer is quick enough for",
+    ...(speech.models || {}),
+    off: "Off: the listener's own words (quick, but often wrong)",
+  };
+  const chosen = state.prefs.speech_model || "auto";
   const select = h("select", { id: "pref-speech", "aria-describedby": "pref-speech-hint" },
     Object.entries(options).map(([value, label]) => h("option", { value, selected: value === chosen }, label)));
   select.addEventListener("change", () => savePrefs({ speech_model: select.value }, select.value === "off"
@@ -233,7 +237,10 @@ function speechStatus(speech) {
   if (!speech) return "";
   const done = `${Math.round((speech.progress || 0) * 100)}%`;
   if (speech.state === "ready") {
-    const ready = "Ready. Whisper writes your words in the bar as you speak, then each note again when you finish it, all on this computer: no audio leaves it.";
+    const which = speech.chosen === "auto"
+      ? (speech.model === "small.en" ? " Automatic chose the faster model, which suits this computer." : " Automatic chose the most accurate model for this computer.")
+      : "";
+    const ready = `Ready. Whisper writes your words in the bar as you speak, then each note again when you finish it, all on this computer: no audio leaves it.${which}`;
     return speech.getting ? `${ready} Getting the model for the words shown as you speak: ${done}.` : ready;
   }
   if (speech.state === "downloading") {

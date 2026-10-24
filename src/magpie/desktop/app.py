@@ -23,7 +23,7 @@ from magpie.desktop.paths import AppPaths, DesktopState, find_model, frozen, lau
 from magpie.desktop.phrases import DEFAULT_WAKE, append_text, tidy
 from magpie.desktop.server import EmbeddedServer, LocalClient, free_port
 from magpie.desktop.speech import RATE, VoiceEngine
-from magpie.desktop.transcribe import DEFAULT_MODEL, QUICK_MODEL, Transcriber, Whisper
+from magpie.desktop.transcribe import AUTO, QUICK_MODEL, Transcriber, Whisper
 from magpie.desktop.update import Updater
 
 log = logging.getLogger("magpie.desktop")
@@ -343,22 +343,22 @@ class DesktopApp:
                 "configure", wake, prefs.get("stop_phrase"), prefs.get("silence_seconds", 8)
             )
         if self.whisper is not None:
-            self.whisper.choose(str(prefs.get("speech_model") or DEFAULT_MODEL))
+            self.whisper.choose(str(prefs.get("speech_model") or AUTO))
         self._update_tray()
 
     def _upgrade_speech(self, prefs: dict[str, Any]) -> dict[str, Any]:
-        """Once: the smaller model was everyone's default before 0.7, and the most
-        accurate one is now (Settings → Voice goes back)."""
+        """Once: the smaller model was everyone's default before 0.7; now it's the most
+        accurate model the computer is quick enough for (Settings → Voice changes it)."""
         if self.state.get("speech_v2") or self.client is None:
             return prefs
         self.state.set(speech_v2=True)
         if prefs.get("speech_model") != QUICK_MODEL:
             return prefs
         try:
-            prefs = self.client.update_prefs({"speech_model": DEFAULT_MODEL})
-            log.info("Notes are now written down with the most accurate speech model")
+            prefs = self.client.update_prefs({"speech_model": AUTO})
+            log.info("Notes are now written down with the speech model that suits this computer")
         except Exception:
-            log.warning("Couldn't move to the most accurate speech model", exc_info=True)
+            log.warning("Couldn't choose the speech model that suits this computer", exc_info=True)
         return prefs
 
     def set_listening(self, on: bool) -> None:

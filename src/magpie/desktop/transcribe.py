@@ -4,8 +4,9 @@ The always-on listener (speech.py) uses a small, fast recogniser: good at spotti
 “notes on”, but it mishears a lot, above all with an accent. So Whisper, which is far more
 accurate and adds punctuation and capitals, does the writing down twice over: while you
 speak, a quick Whisper model writes down the note so far, again and again, for the bar
-(live.py); when the note ends, the chosen model, the most accurate one by default, writes
-the whole of it down once more, and that is the text that gets saved.
+(live.py); when the note ends, the chosen model writes the whole of it down once more,
+and that is the text that gets saved. By default that's the most accurate model when the
+computer is quick enough for it, and the quick one otherwise.
 
 The models are downloaded once, in the background, into the app's own folder, which
 updates keep: the quick one first (it's smaller, and does both jobs until the other is
@@ -67,9 +68,14 @@ MODELS = {
         "Faster, for older computers (480 MB download)",
     ),
 }
-DEFAULT_MODEL = "large-v3-turbo"
+BEST_MODEL = "large-v3-turbo"
 QUICK_MODEL = "small.en"  # writes the words in the bar while you speak
+AUTO = "auto"  # the most accurate model this computer is quick enough for (the default)
 OFF = "off"  # the listener's own words, as they were shown
+# With four processor threads, the most accurate model takes over twice as long as the
+# note itself; from eight (most computers of the last few years, every Apple silicon
+# Mac), it's quick enough to be the one "auto" means.
+FAST_COMPUTER = 8
 FILES = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"]
 IDLE_SECONDS = 300.0  # let go of the model (and its memory) after this long unused
 RETRY_SECONDS = 900.0  # try a failed download again after this long
@@ -92,6 +98,12 @@ def installed() -> bool:
         return False
 
 
+def suited(cpus: int | None = None) -> str:
+    """The model "auto" means on this computer."""
+    cpus = os.cpu_count() if cpus is None else cpus
+    return BEST_MODEL if (cpus or 0) >= FAST_COMPUTER else QUICK_MODEL
+
+
 def model_folder(paths: AppPaths, name: str) -> Path:
     return paths.models_dir / f"whisper-{name}"
 
@@ -100,7 +112,7 @@ def complete(folder: Path) -> bool:
     return (folder / "model.bin").is_file() and (folder / "tokenizer.json").is_file()
 
 
-def find_whisper(paths: AppPaths, name: str = DEFAULT_MODEL) -> Path | None:
+def find_whisper(paths: AppPaths, name: str) -> Path | None:
     """The model's folder when it's all there.
 
     MAGPIE_WHISPER_MODEL (tests and the self-test) names a model folder to use instead; a
@@ -126,7 +138,7 @@ def _download(repo: str, folder: Path, patterns: list[str]) -> None:
 
 def fetch_whisper(
     paths: AppPaths,
-    name: str = DEFAULT_MODEL,
+    name: str,
     progress: Callable[[float], None] | None = None,
     *,
     download: Callable[[str, Path, list[str]], None] = _download,
@@ -374,7 +386,8 @@ class Whisper:
         self._fetch = fetch
         self._make = make
         self.available = installed() if available is None else available
-        self.choice = ""
+        self.chosen = ""  # what the dashboard says: a model, "auto" or "off"
+        self.choice = ""  # the model that means here (or "off")
         self.transcriber: Transcriber | None = None
         self.quick: Transcriber | None = None
         self.meanwhile = False  # the quick model writes notes down until the chosen one is here
@@ -403,6 +416,7 @@ class Whisper:
                     "you speak."
                 )
         return {
+            "chosen": self.chosen,
             "model": self.choice,
             "state": state,
             "getting": self.getting,
@@ -413,9 +427,11 @@ class Whisper:
             "models": {name: model.label for name, model in MODELS.items()},
         }
 
-    def choose(self, name: str) -> None:
-        name = name if name in MODELS or name == OFF else DEFAULT_MODEL
+    def choose(self, chosen: str) -> None:
+        chosen = chosen if chosen in MODELS or chosen in (AUTO, OFF) else AUTO
+        name = suited() if chosen == AUTO else chosen
         with self._lock:
+            self.chosen = chosen
             if name == self.choice and self.state in ("ready", "downloading", "unavailable"):
                 return
             self.choice = name
