@@ -296,6 +296,8 @@ def check_window(server: Any) -> str:
         focus=False,
         text_select=True,
     )
+    if window is None:
+        raise RuntimeError("pywebview didn't make the window")
 
     def drive() -> None:
         try:
@@ -441,7 +443,7 @@ def check_live(folder: Path | None, expect: str | None, heard: dict[str, Any]) -
         pcm, rate, expect = bytes(64000), 16000, None
     transcriber = Transcriber(folder)
     transcriber.load()
-    shown: list[tuple[str, float]] = []
+    shown: list[tuple[str, tuple[float, ...]]] = []
     live = LiveWriter(transcriber, lambda writer, text, *span: shown.append((text, span)))
     goes: list[float] = []
     chunk = int(rate * 0.25) * 2

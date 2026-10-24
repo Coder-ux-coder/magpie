@@ -19,12 +19,13 @@ import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from magpie.desktop.app import DesktopApp
 
 log = logging.getLogger(__name__)
+W = TypeVar("W")
 
 BAR_SIZE = (680, 172)
 ALERTS_WIDTH = 380
@@ -45,6 +46,8 @@ def _hwnd(title: str) -> int:
 
 
 def _user32() -> Any:
+    if sys.platform != "win32":
+        raise RuntimeError("user32 is part of Windows")
     import ctypes
 
     return ctypes.windll.user32
@@ -61,9 +64,18 @@ def on_main(work: Callable[[], Any]) -> None:
 
 
 def _nsapp() -> Any:
+    if sys.platform != "darwin":
+        raise RuntimeError("AppKit is part of macOS")
     import AppKit
 
     return AppKit.NSApplication.sharedApplication()
+
+
+def _made(window: W | None) -> W:
+    """pywebview gives no window only when an `initialized` handler cancels it (none does)."""
+    if window is None:
+        raise RuntimeError("pywebview didn't make the window")
+    return window
 
 
 ALL_SPACES = 1 << 0 | 1 << 8  # NSWindowCollectionBehavior: every desktop, and full screen
@@ -174,48 +186,54 @@ class DesktopUI:
         sx, sy, sw, sh = self._screen
         bar_w, bar_h = BAR_SIZE
         webview.settings["ALLOW_DOWNLOADS"] = True  # exports from the notes window
-        self.main = webview.create_window(
-            "Magpie",
-            f"{base_url}/",
-            width=min(1120, sw - 80),
-            height=min(800, sh - 120),
-            min_size=(420, 560),
-            hidden=not show_main,
-            background_color="#f4f5f9",
-            text_select=True,
+        self.main = _made(
+            webview.create_window(
+                "Magpie",
+                f"{base_url}/",
+                width=min(1120, sw - 80),
+                height=min(800, sh - 120),
+                min_size=(420, 560),
+                hidden=not show_main,
+                background_color="#f4f5f9",
+                text_select=True,
+            )
         )
         self.main.events.closing += self._closing
-        self.bar = webview.create_window(
-            "Magpie voice bar",
-            f"{base_url}/static/desktop/bar.html",
-            width=bar_w,
-            height=bar_h,
-            x=sx + (sw - bar_w) // 2,
-            y=sy + sh - bar_h - BOTTOM_GAP,
-            frameless=True,
-            easy_drag=False,  # moved by its top line, so the text can be selected
-            on_top=True,
-            hidden=True,
-            focus=False,
-            resizable=False,
-            shadow=True,
-            text_select=True,
+        self.bar = _made(
+            webview.create_window(
+                "Magpie voice bar",
+                f"{base_url}/static/desktop/bar.html",
+                width=bar_w,
+                height=bar_h,
+                x=sx + (sw - bar_w) // 2,
+                y=sy + sh - bar_h - BOTTOM_GAP,
+                frameless=True,
+                easy_drag=False,  # moved by its top line, so the text can be selected
+                on_top=True,
+                hidden=True,
+                focus=False,
+                resizable=False,
+                shadow=True,
+                text_select=True,
+            )
         )
-        self.alerts = webview.create_window(
-            "Magpie reminders",
-            f"{base_url}/static/desktop/reminders.html",
-            width=ALERTS_WIDTH,
-            height=40,
-            x=sx + sw - ALERTS_WIDTH - 16,
-            y=sy + sh - 40 - BOTTOM_GAP,
-            frameless=True,
-            easy_drag=False,
-            on_top=True,
-            hidden=True,
-            focus=False,
-            resizable=False,
-            shadow=True,
-            text_select=True,
+        self.alerts = _made(
+            webview.create_window(
+                "Magpie reminders",
+                f"{base_url}/static/desktop/reminders.html",
+                width=ALERTS_WIDTH,
+                height=40,
+                x=sx + sw - ALERTS_WIDTH - 16,
+                y=sy + sh - 40 - BOTTOM_GAP,
+                frameless=True,
+                easy_drag=False,
+                on_top=True,
+                hidden=True,
+                focus=False,
+                resizable=False,
+                shadow=True,
+                text_select=True,
+            )
         )
         self.quitting = False
         self.main_visible = show_main

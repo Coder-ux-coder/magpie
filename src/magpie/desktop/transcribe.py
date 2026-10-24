@@ -132,7 +132,7 @@ def find_whisper(paths: AppPaths, name: str) -> Path | None:
 
 def _download(repo: str, folder: Path, patterns: list[str]) -> None:
     from huggingface_hub import snapshot_download
-    from huggingface_hub.utils import disable_progress_bars
+    from huggingface_hub.utils.tqdm import disable_progress_bars
 
     disable_progress_bars()  # the app has no console for them to write to
     snapshot_download(repo, local_dir=str(folder), allow_patterns=patterns)
@@ -426,7 +426,7 @@ class Whisper:
         paths: AppPaths,
         *,
         on_change: Callable[[], None] | None = None,
-        fetch: Callable[..., Path] = fetch_whisper,
+        fetch: Callable[..., object] = fetch_whisper,
         make: Callable[[Path], Transcriber] = Transcriber,
         available: bool | None = None,
     ) -> None:

@@ -232,11 +232,11 @@ async def test_codex_runs_in_an_empty_folder_with_the_note_on_stdin(program):
     assert not still_there  # cleaned up afterwards
 
 
-def test_choosing_codex_in_the_dashboard_checks_it(tmp_path, program):
+def test_choosing_codex_in_the_dashboard_checks_it(tmp_path, program, router):
     settings = Settings(
         _env_file=None, data_dir=tmp_path / "data", timezone=TZ, codex_path=str(program)
     )
-    magpie = Magpie(settings, http=httpx2.AsyncClient(transport=httpx2.MockTransport(None)))
+    magpie = Magpie(settings, http=httpx2.AsyncClient(transport=httpx2.MockTransport(router)))
     app = create_app(settings, magpie=magpie, background=False)
     with TestClient(app, base_url="http://localhost") as http:
         http.headers["X-Magpie"] = "1"
@@ -249,10 +249,10 @@ def test_choosing_codex_in_the_dashboard_checks_it(tmp_path, program):
         assert note["title"] == "Call James about the budget"
 
 
-def test_choosing_codex_where_it_is_missing_explains_why(tmp_path, monkeypatch):
+def test_choosing_codex_where_it_is_missing_explains_why(tmp_path, monkeypatch, router):
     monkeypatch.setattr(codex, "find_codex", lambda configured="": None)
     settings = Settings(_env_file=None, data_dir=tmp_path / "data", timezone=TZ)
-    magpie = Magpie(settings, http=httpx2.AsyncClient(transport=httpx2.MockTransport(None)))
+    magpie = Magpie(settings, http=httpx2.AsyncClient(transport=httpx2.MockTransport(router)))
     app = create_app(settings, magpie=magpie, background=False)
     with TestClient(app, base_url="http://localhost") as http:
         http.headers["X-Magpie"] = "1"

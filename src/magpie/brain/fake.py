@@ -15,7 +15,14 @@ from magpie.brain.base import BrainError, Context, DigestData
 from magpie.content import LinkContent
 from magpie.content.links import extract_urls
 from magpie.models import Note
-from magpie.schemas import Answer, FoundLink, LinkReview, PlannedReminder, Triage
+from magpie.schemas import (
+    Answer,
+    FoundLink,
+    LinkReview,
+    NoteKindLiteral,
+    PlannedReminder,
+    Triage,
+)
 from magpie.timeutil import get_tz, parse_hhmm
 
 FILLERS = re.compile(r"\b(uh+|um+|erm+|uhm+|hmm+|you know|i mean)\b[,.]?\s*", re.IGNORECASE)
@@ -71,7 +78,7 @@ def _title(text: str) -> str:
     return (title[:1].upper() + title[1:]) if title else "Untitled note"
 
 
-def _guess_kind(text: str, urls: list[str]) -> str:
+def _guess_kind(text: str, urls: list[str]) -> NoteKindLiteral:
     lowered = text.lower()
     if urls or WATCH_WORDS.search(lowered):
         return "link"

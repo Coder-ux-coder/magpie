@@ -105,6 +105,13 @@ def _valid_id(value: Any) -> bool:
     return isinstance(value, int) and 0 < value <= MAX_ID
 
 
+def _new_id(cursor: sqlite3.Cursor) -> int:
+    """The id of the row an INSERT just made."""
+    if cursor.lastrowid is None:
+        raise sqlite3.DatabaseError("The new row has no id.")
+    return cursor.lastrowid
+
+
 def _parse_rows(rows: Iterable[sqlite3.Row], parse: Callable[[sqlite3.Row], T]) -> list[T]:
     """Parse rows, skipping any that are damaged so one bad row can't break a whole list."""
     parsed = []
@@ -137,7 +144,7 @@ class Store:
             " VALUES (?, ?, ?, ?, ?)",
             (now, now, source, raw_text, json.dumps(meta or {}, ensure_ascii=False)),
         )
-        note = self.get_note(int(cursor.lastrowid))
+        note = self.get_note(_new_id(cursor))
         assert note is not None
         return note
 
@@ -293,7 +300,7 @@ class Store:
             )
         except sqlite3.IntegrityError as exc:
             raise ValueError(f"There's already a category called {name!r}.") from exc
-        category = self.get_category(int(cursor.lastrowid))
+        category = self.get_category(_new_id(cursor))
         assert category is not None
         return category
 
@@ -414,7 +421,7 @@ class Store:
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
             (note_id, url, kind, title, int(found_by_search), now, now),
         )
-        link = self.get_link(int(cursor.lastrowid))
+        link = self.get_link(_new_id(cursor))
         assert link is not None
         return link
 
@@ -484,7 +491,7 @@ class Store:
             " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (note_id, iso(due_at), message, origin, reason, rrule, now, now),
         )
-        reminder = self.get_reminder(int(cursor.lastrowid))
+        reminder = self.get_reminder(_new_id(cursor))
         assert reminder is not None
         return reminder
 
@@ -521,7 +528,8 @@ class Store:
             f"SELECT * FROM reminders WHERE note_id IN ({marks}) ORDER BY due_at", list(note_ids)
         )
         for reminder in _parse_rows(rows, self._reminder):
-            result.setdefault(reminder.note_id, []).append(reminder)
+            if reminder.note_id is not None:  # always, given the query
+                result.setdefault(reminder.note_id, []).append(reminder)
         return result
 
     def due_reminders(self, now: datetime) -> list[Reminder]:

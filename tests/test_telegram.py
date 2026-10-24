@@ -6,7 +6,7 @@ import pytest
 
 from magpie.config import Settings
 from magpie.core import Magpie
-from magpie.models import ProcState, ReminderStatus
+from magpie.models import LinkKind, ProcState, ReminderStatus
 from magpie.schemas import LinkReview
 from magpie.telegram import format_review
 from magpie.timeutil import now_utc
@@ -48,6 +48,7 @@ def tg(tmp_path, router, brain):
     core = Magpie(
         settings, brain=brain, http=httpx2.AsyncClient(transport=httpx2.MockTransport(router))
     )
+    assert core.bot is not None
     core.bot.username = "magpie_test_bot"
     return core
 
@@ -212,9 +213,9 @@ def test_review_formatting():
         id=1,
         note_id=1,
         url="https://youtu.be/x",
-        kind="youtube",
+        kind=LinkKind.YOUTUBE,
         title="Talk",
-        state="ready",
+        state=ProcState.READY,
         minutes=12,
         created_at=now_utc(),
         updated_at=now_utc(),
@@ -234,6 +235,9 @@ def test_review_formatting():
     assert "📺 <b>A &lt;great&gt; talk</b>" in text
     assert "worth it · 4/5 · 12 min" in text
     assert "• One" in text
+    # Not reviewed (yet): just the link.
+    unreviewed = link.model_copy(update={"review": None, "url": "https://example.com/?a=1&b=<2>"})
+    assert format_review(unreviewed) == "https://example.com/?a=1&amp;b=&lt;2&gt;"
 
 
 async def test_strangers_get_a_reply_right_after_a_reboot(tg, router, monkeypatch):

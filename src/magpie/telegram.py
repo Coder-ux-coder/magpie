@@ -424,6 +424,8 @@ class TelegramBot:
 
 def format_review(link: Link) -> str:
     review = link.review
+    if review is None:  # not reviewed: nothing to show but the link itself
+        return escape(link.url)
     meta = [VERDICTS.get(review.verdict, review.verdict), f"{review.rating}/5"]
     minutes = link.minutes or review.minutes
     if minutes:

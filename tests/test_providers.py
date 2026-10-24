@@ -68,7 +68,7 @@ def completion(content, finish="stop", **message):
     )
 
 
-def make(router, provider="openai", key="sk-test", base_url=None, model=None):
+def make(router, provider="openai", key: str | None = "sk-test", base_url=None, model=None):
     info = PROVIDERS[provider]
     saved = {"provider": provider, "settings": {provider: {}}}
     entry = saved["settings"][provider]

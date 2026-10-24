@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "magpie-notes"
-version = "0.8.1"
+version = "0.8.2"
 description = "Voice-first notes: say \"notes on\", talk, and the AI of your choice files it, reminds you when it matters, and reviews the videos and articles you save."
 readme = "README.md"
 license = "MIT"
@@ -61,6 +61,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "httpx>=0.27",
     "ruff>=0.6",
+    "pyright>=1.1.408",
 ]
 
 [project.scripts]
@@ -81,6 +82,15 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
 ignore = ["B008"]
+
+[tool.pyright]
+# What editors (Pylance, Cursor) and CI's type check use.
+include = ["src", "tests", "packaging", "scripts"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+# The desktop app's packages are an extra (pip install -e ".[desktop]"): without them a
+# warning, not an error. CI installs everything and fails on warnings too.
+reportMissingImports = "warning"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

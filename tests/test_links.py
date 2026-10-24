@@ -133,7 +133,7 @@ async def test_fetch_pdf(fake_dns, router):
     )
     content = await fetcher.fetch("https://example.com/paper.pdf")
     assert content.kind == "pdf"
-    assert content.pdf.startswith(b"%PDF")
+    assert content.pdf is not None and content.pdf.startswith(b"%PDF")
     assert content.title == "paper.pdf"
 
 

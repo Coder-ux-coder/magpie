@@ -318,9 +318,9 @@ async def _deepgram(
     http: httpx2.AsyncClient, config: SpeechConfig, audio: bytes, kind: str, words: list[str]
 ) -> str:
     model = config.model or "nova-3"
-    params = [("model", model), ("smart_format", "true"), ("language", "en")]
+    params: dict[str, str | list[str]] = {"model": model, "smart_format": "true", "language": "en"}
     if model.startswith(("nova-3", "flux")):  # the models that take key terms
-        params += [("keyterm", word) for word in words]
+        params["keyterm"] = words
     response = await http.post(
         f"{config.base_url}/listen",
         params=params,

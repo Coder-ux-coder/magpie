@@ -77,6 +77,7 @@ def test_due_reminders_and_children(store: Store):
     store.update_reminder(past.id, status=ReminderStatus.SENT)
     assert store.due_reminders(now_utc()) == []
     loaded = store.get_note(note.id)
+    assert loaded is not None
     assert [r.message for r in loaded.reminders] == ["Past", "Future"]
 
 
@@ -89,7 +90,9 @@ def test_cancel_open_reminders_keeps_manual_and_sent(store: Store):
     sent = store.add_reminder(note.id, later, "sent", origin="explicit")
     store.update_reminder(sent.id, status=ReminderStatus.SENT)
     assert store.cancel_open_reminders(note.id, ("explicit", "suggested")) == 2
-    assert sorted(r.message for r in store.get_note(note.id).reminders) == ["manual", "sent"]
+    loaded = store.get_note(note.id)
+    assert loaded is not None
+    assert sorted(r.message for r in loaded.reminders) == ["manual", "sent"]
 
 
 def test_link_review_roundtrip(store: Store):
@@ -108,7 +111,7 @@ def test_link_review_roundtrip(store: Store):
     )
     assert review.rating == 5  # clamped
     updated = store.update_link(link.id, review=review, state=ProcState.READY)
-    assert updated.review.tldr == "Short"
+    assert updated.review is not None and updated.review.tldr == "Short"
     assert store.reviews_since(now_utc() - timedelta(minutes=1))[0].id == link.id
 
 

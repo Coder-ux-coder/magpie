@@ -6,6 +6,27 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-24
+
+### Fixed
+
+- **No more errors in your code editor.** VS Code (Pylance), Cursor and pyright showed
+  about 180 type errors across the app and its tests. They're all fixed rather than
+  hidden. None changed what the app does, but a few places now check what they used to
+  assume: a link sent to Telegram without a review, a window pywebview didn't make, a new
+  database row's id, and the web push key.
+- **No more warnings on every GitHub run.** The workflows use the Node 24 versions of
+  GitHub's actions (checkout, setup-python, setup-node, cache, upload-artifact,
+  download-artifact), as Node 20 is retired. The App workflow's summary shows what a build
+  machine always says (it has no AI key and no microphone) as notes, not warnings.
+
+### Changed
+
+- CI type-checks everything with pyright, with every extra installed, and fails on
+  warnings too, so new errors can't creep back in. The settings are in `pyproject.toml`,
+  where editors find them; without the `desktop` extra its packages are only warnings.
+  `pyright` is in the `dev` extra.
+
 ## [0.8.1] - 2026-10-24
 
 ### Fixed

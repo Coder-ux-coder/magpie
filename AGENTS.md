@@ -42,17 +42,20 @@ magpie desktop --self-test                      # no screen needed; --windows op
 pytest -q
 ruff check src tests scripts
 ruff format --check src tests scripts     # `ruff format src tests scripts` to fix
+pyright                                   # types (pyproject.toml has the settings)
 node --test "tests/js/*.test.mjs"
 for f in src/magpie/web/static/js/*.js src/magpie/web/static/desktop/*.js src/magpie/web/sw.js; do node --check "$f"; done
 ```
 
 The tests are offline and need no keys. CI (`.github/workflows/ci.yml`) runs the same checks
-on Python 3.11 to 3.13. The **App** workflow (`app.yml`) builds `MagpieSetup.exe` on Windows
-and `Magpie-mac.zip` on a Mac, runs each built app's self-test (a real window, and a note
-taken from a recording of the system's own voice, written down by Vosk and by Whisper),
-installs each (`install.sh` on the Mac), checks the installed app, and on main publishes one
-release with both for each new version in `pyproject.toml`. Its logs can't always be read
-from an agent's sandbox: results come back as annotations (`packaging/report.py`).
+on Python 3.11 to 3.13, and pyright with every extra installed, failing on warnings too
+(without the `desktop` extra, its packages are only warnings). The **App** workflow
+(`app.yml`) builds `MagpieSetup.exe` on Windows and `Magpie-mac.zip` on a Mac, runs each
+built app's self-test (a real window, and a note taken from a recording of the system's own
+voice, written down by Vosk and by Whisper), installs each (`install.sh` on the Mac), checks
+the installed app, and on main publishes one release with both for each new version in
+`pyproject.toml`. Its logs can't always be read from an agent's sandbox: results come back
+as annotations (`packaging/report.py`).
 
 ## Repository map
 

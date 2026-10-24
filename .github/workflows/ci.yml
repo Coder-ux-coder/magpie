@@ -17,8 +17,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -35,12 +35,27 @@ jobs:
           python packaging/report.py --junit build/tests.xml  # failed tests, on the summary
           exit $code
 
+  types:
+    name: Types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        # Everything, the desktop app's packages and PyInstaller too, so every import is checked.
+        run: pip install -e ".[dev,mcp,desktop]" pyinstaller pyright==1.1.414
+      - name: Check
+        run: pyright --warnings  # the settings are in pyproject.toml, as editors use them
+
   web:
     name: Web app
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - name: Syntax check

@@ -1,13 +1,13 @@
 from magpie.brain import BrainError, Context, DigestData
 from magpie.digest import markdown_to_plain, render_plain
 from magpie.ics import _fold, reminders_calendar
-from magpie.models import Note, ProcState, Reminder
+from magpie.models import Note, ProcState, Reminder, ReminderStatus
 from magpie.timeutil import local_to_utc, now_utc
 
 from .conftest import TZ
 
 
-def _reminder(rid, due, message, rrule=None, status="scheduled"):
+def _reminder(rid, due, message, rrule=None, status=ReminderStatus.SCHEDULED):
     now = now_utc()
     return Reminder(
         id=rid,

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,6 +36,11 @@ class Settings(BaseSettings):
         env_ignore_empty=True,
         extra="ignore",
     )
+
+    if TYPE_CHECKING:
+        # pydantic-settings takes _env_file (None: no .env file) at run time; type checkers
+        # only see the fields without this.
+        def __init__(self, *, _env_file: Path | str | None = ..., **values: Any) -> None: ...
 
     # Server
     data_dir: Path = Path("data")

@@ -222,13 +222,14 @@ class CodexBrain:
 
     async def _structured(self, task: str, schema: type[T], system: str, content: str) -> T:
         shape = _schema(schema)
+        text: str | None = None
         if self._schemas:
             try:
                 text = await self._exec(task, _prompt(system, content), shape)
             except _SchemaRefused as exc:
                 log.warning("Codex refused the answer's schema (%s); asking in the prompt", exc)
                 self._schemas = False
-        if not self._schemas:
+        if text is None:
             asked = _prompt(system + _json_instruction(schema), content)
             text = await self._exec(task, asked, None)
         try:

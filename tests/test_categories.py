@@ -156,9 +156,9 @@ def test_an_existing_database_gains_categories(tmp_path):
     conn.commit()
     conn.close()
     db = Database(path)
-    row = db.one("SELECT raw_text, category_id FROM notes")
+    [row] = db.query("SELECT raw_text, category_id FROM notes")
     assert row["raw_text"] == "an old note" and row["category_id"] is None
-    assert db.one("PRAGMA user_version")[0] == len(MIGRATIONS)
+    assert db.query("PRAGMA user_version")[0][0] == len(MIGRATIONS)
 
 
 def test_categories_travel_with_an_export(core, tmp_path):
@@ -175,13 +175,13 @@ def test_categories_travel_with_an_export(core, tmp_path):
     fresh.add_category("Home")
     assert import_json(fresh, dump) == {"imported": 1, "skipped": 0}
     moved = fresh.list_notes(view="any")[0]
-    category = fresh.get_category(moved.category_id)
-    assert category.name == "Work" and category.color == "teal"
+    category = fresh.get_category(moved.category_id or 0)
+    assert category is not None and category.name == "Work" and category.color == "teal"
     assert "category" not in moved.meta
 
     # An export from Magpie in Claude (the artifact) gives each note's category as
     # {"name", "colour"}, in its own palette; a bare name works too.
-    def note(text, category):
+    def shared(text, category):
         return {
             "id": 1,
             "created_at": "2026-10-20T09:00:00+00:00",
@@ -195,10 +195,10 @@ def test_categories_travel_with_an_export(core, tmp_path):
         "app": "magpie",
         "version": "magpie-in-claude",
         "notes": [
-            note("call mum on saturday", {"name": " Family ", "colour": "violet"}),
-            note("water the plants", {"name": "work", "colour": "pink"}),  # already here
-            note("plan the garden", "Garden"),
-            note("odd one", {"name": ["not", "a", "name"]}),
+            shared("call mum on saturday", {"name": " Family ", "colour": "violet"}),
+            shared("water the plants", {"name": "work", "colour": "pink"}),  # already here
+            shared("plan the garden", "Garden"),
+            shared("odd one", {"name": ["not", "a", "name"]}),
         ],
     }
     import json
@@ -207,5 +207,6 @@ def test_categories_travel_with_an_export(core, tmp_path):
     colors = {c.name: c.color for c in fresh.list_categories()}
     assert colors == {"Home": "blue", "Work": "teal", "Family": "purple", "Garden": "blue"}
     by_text = {n.raw_text: n for n in fresh.list_notes(view="any")}
-    assert fresh.get_category(by_text["water the plants"].category_id).name == "Work"
+    watered = fresh.get_category(by_text["water the plants"].category_id or 0)
+    assert watered is not None and watered.name == "Work"
     assert by_text["odd one"].category_id is None and "category" not in by_text["odd one"].meta

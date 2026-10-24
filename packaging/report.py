@@ -9,6 +9,7 @@ can be read on the run's summary page without downloading anything (Windows and 
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import re
 import sys
@@ -17,6 +18,8 @@ from pathlib import Path
 
 LOGGED = re.compile(r"starting \(|is ready on|Time zone set|Brought over|Whisper ready")
 TROUBLE = re.compile(r" (WARNING|ERROR|CRITICAL) ")
+# What a build machine always logs, as it has no AI key and no microphone: not trouble.
+EXPECTED = re.compile(r"isn't connected yet|No microphone|PortAudio")
 
 
 def annotate(kind: str, title: str, message: str) -> None:
@@ -28,7 +31,8 @@ def annotate(kind: str, title: str, message: str) -> None:
 def report(path: Path, title: str) -> None:
     results = json.loads(path.read_text(encoding="utf-8"))
     for check in results.get("checks", []):
-        kind = "notice" if check.get("ok") else "error" if check.get("required") else "warning"
+        # A check that isn't required (the microphone, on a machine without one) is a note.
+        kind = "error" if check.get("required") and not check.get("ok") else "notice"
         annotate(kind, f"{title} - {check.get('name')}", str(check.get("detail", "")))
 
 
@@ -44,12 +48,13 @@ def log(path: Path) -> None:
     for line in [line for line in lines if LOGGED.search(line)][:5]:
         annotate("notice", "The app's log", line)
     for line in [line for line in lines if TROUBLE.search(line)][:6]:
-        annotate("warning", "The app's log", line)
+        annotate("notice" if EXPECTED.search(line) else "warning", "The app's log", line)
 
 
 def main() -> None:
     # The workflow reads UTF-8; a Windows console would otherwise refuse “ or →.
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, help="a self-test's results (JSON)")
     parser.add_argument("--title", default="Self-test")

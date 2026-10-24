@@ -408,7 +408,10 @@ class VapidKeys:
             self.vapid = Vapid02()
             self.vapid.generate_keys()
             store.set_kv("vapid_private_pem", self.vapid.private_pem().decode())
-        raw = self.vapid.public_key.public_bytes(
+        public = self.vapid.public_key  # set by from_pem and generate_keys alike
+        if public is None:
+            raise RuntimeError("The web push key has no public part.")
+        raw = public.public_bytes(
             serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
         )
         self.public_key = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()

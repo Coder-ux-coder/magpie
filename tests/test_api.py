@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -486,7 +487,7 @@ def test_claude_key_can_be_added_from_the_dashboard(tmp_path, router, monkeypatc
             )
         return SimpleNamespace(id=model)
 
-    fake = SimpleNamespace(key=None, models=SimpleNamespace(retrieve=retrieve))
+    fake: Any = SimpleNamespace(key=None, models=SimpleNamespace(retrieve=retrieve))
 
     def make_brain(settings, api_key=None, *, config=None, http=None):
         key = config.api_key if config is not None else api_key

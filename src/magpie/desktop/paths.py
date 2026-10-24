@@ -10,7 +10,10 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import httpx2
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +104,7 @@ MODEL_URL = f"https://alphacephei.com/vosk/models/{MODEL_NAME}.zip"
 MODEL_MAX_BYTES = 200 * 1024 * 1024
 
 
-def fetch_model(paths: AppPaths, http: Any = None) -> Path:
+def fetch_model(paths: AppPaths, http: httpx2.Client | None = None) -> Path:
     """Download and unpack the speech model (about 40 MB) for a Python install."""
     import shutil
     import zipfile
@@ -117,7 +120,7 @@ def fetch_model(paths: AppPaths, http: Any = None) -> Path:
     size = 0
     try:
         with (
-            contextlib.nullcontext(http) if http else httpx2.Client(timeout=120) as client,
+            httpx2.Client(timeout=120) if http is None else contextlib.nullcontext(http) as client,
             client.stream("GET", MODEL_URL, follow_redirects=True) as response,
             open(part, "wb") as handle,
         ):

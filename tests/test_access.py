@@ -121,7 +121,12 @@ def test_an_older_installs_made_up_password(tmp_path, router, monkeypatch):
         assert reachable.login is True and magpie.secrets.password == made_up
         for key in env:
             monkeypatch.delenv(key)
-    with TestClient(create_app(reachable, magpie=magpie, background=False)) as client:
+    online = Settings(
+        _env_file=None, data_dir=tmp_path, brain="fake", base_url="https://notes.example.com"
+    )
+    with TestClient(
+        create_app(online, magpie=Magpie(online, http=http), background=False)
+    ) as client:
         assert client.get("/api/status").status_code == 401
         assert client.get("/api/status", headers={"Host": "localhost"}).status_code == 401
 

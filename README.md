@@ -220,7 +220,7 @@ git clone https://github.com/Coder-ux-coder/magpie.git && cd magpie
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev,mcp,desktop]"
 MAGPIE_BRAIN=fake magpie desktop          # the app, with an offline stand-in for the AI
-pytest -q && ruff check src tests scripts
+pytest -q && ruff check src tests scripts && pyright
 ```
 
 The app is one Python process: the Magpie server (FastAPI and SQLite), its web pages,

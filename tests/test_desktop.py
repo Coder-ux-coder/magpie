@@ -16,7 +16,7 @@ import time
 import zipfile
 from array import array
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx2
 import pytest
@@ -34,7 +34,7 @@ from magpie.notify import Notification
 
 RATE = 16000
 FRAME = 160  # the fake audio's samples count 10 ms frames, so a recogniser knows the time
-REAL_MODEL = os.environ.get("MAGPIE_VOSK_MODEL")  # read before the fixtures clear MAGPIE_*
+REAL_MODEL = os.environ.get("MAGPIE_VOSK_MODEL", "")  # read before the fixtures clear MAGPIE_*
 
 
 # ------------------------------------------------------------- a scripted recogniser
@@ -216,6 +216,7 @@ def test_something_that_only_sounds_like_the_command_word_starts_nothing():
     script = say("no it's on", 1.0) + say("the kettle is boiling", 2.4)
     listener, events = listen(script, 8, misheard={"no it's": "notes"})
     assert "recording" not in outcome(events) and listener.state == "standby"
+    assert isinstance(listener.model, FakeModel)
     assert listener.model.free_made == 1  # it was checked once, not again and again
     # Said properly, the same command word starts a note straight away.
     _, events = listen(say("notes on", 1.0) + say("buy milk", 2.0), 7, silence_seconds=2)
@@ -375,7 +376,7 @@ def test_the_note_comes_with_its_own_sound_without_the_command_words():
 def test_phrase_matching():
     words = [{"word": w, "start": i, "end": i + 0.5} for i, w in enumerate(["ok", "notes", "on"])]
     hit = phrases.find_in_words(words, ["notes on"])
-    assert (hit.index, hit.length, hit.start, hit.end) == (1, 2, 1, 2.5)
+    assert hit is not None and (hit.index, hit.length, hit.start, hit.end) == (1, 2, 1, 2.5)
     fuzzy = [{"word": w} for w in ("nodes", "on")]
     assert phrases.find_in_words(fuzzy, ["notes on"], fuzzy=True) is not None
     for wrong in (["notes", "one"], ["notes", "of"]):
@@ -657,6 +658,12 @@ def whisper_files(folder: Path) -> None:
         (folder / name).write_bytes(b"x" * 1000)
 
 
+def made(model: transcribe.Transcriber | None) -> transcribe.Transcriber:
+    """A model the Whisper manager has (it has none while it's off or downloading)."""
+    assert model is not None
+    return model
+
+
 def test_the_whisper_model_is_downloaded_whole_or_not_at_all(tmp_path, monkeypatch):
     monkeypatch.delenv("MAGPIE_WHISPER_MODEL", raising=False)
     home = paths.AppPaths(tmp_path)
@@ -731,7 +738,7 @@ def test_the_chosen_whisper_model_is_downloaded_in_the_background(tmp_path, monk
         available=True,
     )
     whisper.choose("small.en")  # already here
-    assert whisper.state == "ready" and whisper.transcriber.folder.name == "whisper-small.en"
+    assert whisper.state == "ready" and made(whisper.transcriber).folder.name == "whisper-small.en"
     small = whisper.transcriber
     assert whisper.quick is small  # it also writes the words shown as you speak
     assert whisper.status()["live"] is True and whisper.status()["meanwhile"] is False
@@ -743,15 +750,16 @@ def test_the_chosen_whisper_model_is_downloaded_in_the_background(tmp_path, monk
     assert whisper.transcriber is small and whisper.meanwhile  # the faster one meanwhile
     gate.set()
     wait_until(lambda: whisper.state == "ready")
-    assert whisper.transcriber.folder.name == "whisper-large-v3-turbo"
+    best = made(whisper.transcriber)
+    assert best.folder.name == "whisper-large-v3-turbo"
     assert whisper.quick is small and not whisper.meanwhile and whisper.getting == ""
 
     def no_memory(folder, threads):
         raise MemoryError("not enough memory")
 
-    whisper.transcriber._load_model = no_memory
-    whisper.transcriber.warm()  # loading fails in the background, quietly
-    wait_until(lambda: whisper.transcriber.problem)
+    best._load_model = no_memory
+    best.warm()  # loading fails in the background, quietly
+    wait_until(lambda: best.problem)
     status = whisper.status()  # says why, rather than "ready"
     assert status["state"] == "error" and "not enough memory" in status["message"]
     assert "faster one" in status["message"]  # which writes notes down instead
@@ -805,17 +813,17 @@ def test_the_quick_model_comes_first_and_does_both_jobs_until_the_other_is_here(
 
     gates["large-v3-turbo"].set()
     wait_until(lambda: whisper.state == "ready")
-    assert whisper.transcriber.folder.name == "whisper-large-v3-turbo"
-    assert whisper.quick.folder.name == "whisper-small.en"
+    best, quick = made(whisper.transcriber), made(whisper.quick)
+    assert best.folder.name == "whisper-large-v3-turbo" and quick.folder.name == "whisper-small.en"
     assert asked == ["small.en", "large-v3-turbo"]
     wait_until(lambda: not whisper._downloading)
 
     # Both are let go when they've been idle a while (the clock may have started recently).
-    for model in (whisper.transcriber, whisper.quick):
+    for model in (best, quick):
         model._model = object()
         model._used = time.monotonic() - transcribe.IDLE_SECONDS - 1
     whisper.tick()
-    assert not whisper.transcriber.loaded and not whisper.quick.loaded
+    assert not best.loaded and not quick.loaded
 
 
 def test_a_failed_whisper_download_is_tried_again_later(tmp_path, monkeypatch):
@@ -922,7 +930,7 @@ class FakeEngine:
 @pytest.fixture
 def app(tmp_path):
     desktop = DesktopApp(paths.AppPaths(tmp_path))
-    desktop.ui, desktop.client, desktop.engine = FakeUI(), FakeClient(), FakeEngine()
+    desktop.ui, desktop.client, desktop.engine = cast(Any, (FakeUI(), FakeClient(), FakeEngine()))
     desktop.ui_ready("bar")
     desktop.ui_ready("alerts")
     yield desktop
@@ -1008,7 +1016,7 @@ class FakeTranscriber:
 
 
 class FakeWhisper:
-    def __init__(self, transcriber=None, quick=None) -> None:
+    def __init__(self, transcriber: Any = None, quick: Any = None) -> None:
         self.transcriber = transcriber
         self.quick = quick
         self.state = "ready" if transcriber else "off"
@@ -1301,11 +1309,13 @@ def test_live_words_run_on_their_own_and_give_up_quietly_when_whisper_fails():
     broken = LiveModel(fail="out of memory")
     live, shown = writer(broken, step=0.25)
     live.start()
+    thread = live._thread
+    assert thread is not None
     deadline = time.monotonic() + 5
-    while live._thread.is_alive() and time.monotonic() < deadline:  # as you go on speaking
+    while thread.is_alive() and time.monotonic() < deadline:  # as you go on speaking
         live.add(QUARTER, RATE)
         time.sleep(0.02)
-    assert not live._thread.is_alive()
+    assert not thread.is_alive()
     assert len(broken.calls) == GIVE_UP and shown == []
 
 
@@ -1542,7 +1552,7 @@ def test_notes_and_settings_come_over_from_docker_without_the_password(tmp_path,
 
     moved = migrate.migrate(tmp_path / "app" / "data", env_file, tell=told.append)
 
-    assert (moved.notes, moved.settings, moved.stopped) == (3, 2, 2)
+    assert moved is not None and (moved.notes, moved.settings, moved.stopped) == (3, 2, 2)
     text = env_file.read_text()
     assert "ANTHROPIC_API_KEY=sk-ant-test" in text and "MAGPIE_TELEGRAM_BOT_TOKEN" in text
     assert "MAGPIE_TIMEZONE=Europe/Paris" in text
@@ -1613,7 +1623,8 @@ def test_release_descriptions_are_checked():
     release = update.parse_latest(latest())
     assert release and release.version == "0.5.0" and release.size == 9
     assert release.url.endswith("/v0.5.0/MagpieSetup.exe")
-    assert update.parse_latest(latest(), "mac").url.endswith("/v0.5.0/Magpie-mac.zip")
+    mac = update.parse_latest(latest(), "mac")
+    assert mac is not None and mac.url.endswith("/v0.5.0/Magpie-mac.zip")
     assert update.parse_latest({**latest(), "mac": None}, "mac") is None
     assert update.newer(release, "0.4.0") and not update.newer(release, "0.5.0")
     assert update.version_key("0.10.0") > update.version_key("0.9.9")
@@ -1655,11 +1666,13 @@ def test_updates_are_found_downloaded_and_checked(tmp_path):
     assert updater(tmp_path, internet).download(found) == installer  # not fetched again
     assert len(downloads) == 1
     mac = updater(tmp_path, internet, system="mac")
-    assert mac.download(mac.check()).name == "Magpie-0.5.0-mac.zip"
+    found = mac.check()
+    assert found is not None and mac.download(found).name == "Magpie-0.5.0-mac.zip"
 
 
 def test_a_tampered_download_is_thrown_away(tmp_path):
     release = update.parse_latest(latest(data=b"the real one"))
+    assert release is not None
     tampered = updater(tmp_path, lambda r: httpx2.Response(200, content=b"the fake one"))
     with pytest.raises(RuntimeError, match="doesn't match"):
         tampered.download(release)
@@ -1738,8 +1751,9 @@ def test_on_a_mac_the_new_app_takes_the_old_ones_place(tmp_path, monkeypatch):
     assert f"open {installed} --args --background" in (tmp_path / "tools.log").read_text()
 
     # A new app that isn't there leaves the old one where it was.
-    quiet = {"stderr": subprocess.DEVNULL}  # mv says what it couldn't move
-    subprocess.run(["/bin/sh", script, pid, app_path, new], env=env, check=True, **quiet)
+    subprocess.run(  # mv says what it couldn't move
+        ["/bin/sh", script, pid, app_path, new], env=env, check=True, stderr=subprocess.DEVNULL
+    )
     assert (installed / "Contents" / "MacOS" / "Magpie").read_text() == "0.5.0"
 
 

@@ -5,6 +5,7 @@ They use a stand-in for the Anthropic client, so they run offline and for free.
 
 import json
 from types import SimpleNamespace
+from typing import Any, cast
 
 import anthropic
 import httpx2
@@ -87,7 +88,8 @@ class FakeClient:
 
 def brain_with(*responses, model="claude-opus-5-5", **settings):
     client = FakeClient(*responses)
-    return ClaudeBrain(Settings(_env_file=None, model=model, **settings), client=client), client
+    brain = ClaudeBrain(Settings(_env_file=None, model=model, **settings), client=cast(Any, client))
+    return brain, client
 
 
 CTX = Context(

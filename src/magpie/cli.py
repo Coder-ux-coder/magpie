@@ -10,11 +10,16 @@ import os
 import re
 import sqlite3
 import sys
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 from magpie import __version__
 from magpie.config import Settings
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
 
 
 def _setup_logging(level: str) -> None:
@@ -239,21 +244,23 @@ def _env_value(value: str) -> str:
     return value if _PLAIN_VALUE.match(value) else f"'{value}'"
 
 
-def write_env(path, values: dict[str, str | None]) -> None:
+def write_env(path: Path, values: Mapping[str, str | None]) -> None:
     """Set KEY=value lines in an .env file (None removes one), keeping everything else."""
     lines = path.read_text().splitlines() if path.exists() else ["# Magpie settings"]
     pending = dict(values)
     out = []
     for line in lines:
         name = line.lstrip("# ").split("=", 1)[0].strip() if "=" in line else ""
-        if name in pending and pending[name] is None:
+        if name not in pending:
+            out.append(line)
+            continue
+        value = pending[name]
+        if value is None:
             if line.lstrip().startswith("#"):
                 out.append(line)  # a commented example stays
             continue
-        if name in pending:
-            out.append(f"{name}={_env_value(pending.pop(name))}")
-        else:
-            out.append(line)
+        out.append(f"{name}={_env_value(value)}")
+        del pending[name]
     out += [f"{name}={_env_value(value)}" for name, value in pending.items() if value is not None]
     path.write_text("\n".join(out) + "\n")
     with contextlib.suppress(OSError):  # e.g. a Windows folder shared with Docker

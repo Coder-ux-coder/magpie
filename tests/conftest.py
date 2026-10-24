@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Literal
 
 import httpx2
 import pytest
@@ -36,7 +37,7 @@ class Router:
     """A tiny programmable stand-in for the internet (httpx2 MockTransport)."""
 
     def __init__(self) -> None:
-        self.routes: list[tuple[str, str, Callable[[httpx2.Request], httpx2.Response]]] = []
+        self.routes: list[tuple[str, str, Callable[[httpx2.Request], Any]]] = []
         self.requests: list[httpx2.Request] = []
 
     def add(self, method: str, prefix: str, handler) -> None:
@@ -104,7 +105,12 @@ def make_triage(**overrides) -> Triage:
     return Triage.model_validate(data)
 
 
-def reminder(when: str, origin: str = "explicit", repeat: str | None = None, message="Call James"):
+def reminder(
+    when: str,
+    origin: Literal["explicit", "suggested"] = "explicit",
+    repeat: str | None = None,
+    message: str = "Call James",
+) -> PlannedReminder:
     return PlannedReminder(
         when=when, message=message, origin=origin, repeat=repeat, reason="Asked."
     )

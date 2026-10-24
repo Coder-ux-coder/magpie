@@ -34,6 +34,8 @@ def vosk_library() -> list[tuple[str, str]]:
     take for a library by itself."""
     import vosk
 
+    if not vosk.__file__:  # a namespace package: not the Vosk the app needs
+        raise SystemExit("Vosk isn't installed properly: pip install vosk")
     folder = Path(vosk.__file__).resolve().parent
     return [(str(path), "vosk") for path in sorted(folder.glob("libvosk.*"))]
 

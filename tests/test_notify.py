@@ -94,9 +94,9 @@ async def test_telegram_escapes_html(router):
     assert "&lt;script&gt;" in text and "a &amp; b" in text
 
 
-def test_telegram_unpaired_is_not_configured():
+def test_telegram_unpaired_is_not_configured(router):
     assert not TelegramChannel(None, lambda: 1).configured
-    assert not TelegramChannel(TelegramApi(None, "t"), lambda: None).configured
+    assert not TelegramChannel(TelegramApi(client(router), "t"), lambda: None).configured
 
 
 def test_split_long_messages():
@@ -137,19 +137,19 @@ async def test_notifier_report():
     class Good:
         name, label, configured = "good", "Good", True
 
-        async def send(self, n):
+        async def send(self, notification):
             return None
 
     class Bad:
         name, label, configured = "bad", "Bad", True
 
-        async def send(self, n):
+        async def send(self, notification):
             raise RuntimeError("nope")
 
     class Off:
         name, label, configured = "off", "Off", False
 
-        async def send(self, n):  # pragma: no cover - never called
+        async def send(self, notification):  # pragma: no cover - never called
             raise AssertionError
 
     notifier = Notifier([Good(), Bad(), Off()], lambda: Prefs())

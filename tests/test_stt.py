@@ -189,7 +189,8 @@ def test_a_saved_key_only_goes_to_the_address_it_was_entered_for(settings):
         },
     }
     chosen = stt.resolve(settings, saved)
-    assert chosen.service.id == "compatible" and chosen.key == "k1" and chosen.ready
+    assert chosen.service is not None and chosen.service.id == "compatible"
+    assert chosen.key == "k1" and chosen.ready
     moved = json.loads(json.dumps(saved))
     moved["settings"]["compatible"]["base_url"] = "http://elsewhere:9000/v1"
     assert stt.resolve(settings, moved).key is None  # not sent to a new address
