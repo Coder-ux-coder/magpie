@@ -798,9 +798,10 @@ def test_the_quick_model_comes_first_and_does_both_jobs_until_the_other_is_here(
     assert asked == ["small.en", "large-v3-turbo"]
     wait_until(lambda: not whisper._downloading)
 
-    # Both are let go when they've been idle a while.
+    # Both are let go when they've been idle a while (the clock may have started recently).
     for model in (whisper.transcriber, whisper.quick):
-        model._model, model._used = object(), 0.0
+        model._model = object()
+        model._used = time.monotonic() - transcribe.IDLE_SECONDS - 1
     whisper.tick()
     assert not whisper.transcriber.loaded and not whisper.quick.loaded
 
@@ -1263,10 +1264,11 @@ def test_live_words_run_on_their_own_and_give_up_quietly_when_whisper_fails():
     broken = LiveModel(fail="out of memory")
     live, shown = writer(broken, step=0.25)
     live.start()
-    for _ in range(20):
+    deadline = time.monotonic() + 5
+    while live._thread.is_alive() and time.monotonic() < deadline:  # as you go on speaking
         live.add(QUARTER, RATE)
         time.sleep(0.02)
-    wait_until(lambda: not live._thread.is_alive())
+    assert not live._thread.is_alive()
     assert len(broken.calls) == GIVE_UP and shown == []
 
 
