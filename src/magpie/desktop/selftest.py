@@ -37,6 +37,7 @@ PAGES = [
     "/static/desktop/reminders.html",
     "/static/desktop/reminders.js",
     "/static/desktop/desktop.css",
+    "/static/icons/sprite.svg",  # the pop-ups' icons
 ]
 APP_MODULES = [
     "vosk",
@@ -304,13 +305,16 @@ def check_window(server: Any) -> str:
             if not ready.wait(60):
                 outcome["error"] = "the bar page never said it was ready"
                 return
+            # Recording, with the words so far and how loud the microphone is.
             window.run_js(
                 "window.magpieBar.recording({});"
+                "window.magpieBar.level({level: 0.5});"
                 "window.magpieBar.words({base: '', final: 'buy milk', partial: 'tomorrow'});"
                 "fetch('/api/desktop/ui', {method: 'POST', headers: {'Content-Type': "
                 "'application/json', 'X-Magpie': '1'}, body: JSON.stringify({window: 'bar', "
                 "action: 'report', text: document.getElementById('bar').dataset.state + '|' + "
-                "document.getElementById('text').value})});"
+                "document.getElementById('text').value + '|' + "
+                "document.getElementById('bar').style.getPropertyValue('--level')})});"
             )
             if not reported.wait(30):
                 outcome["error"] = "the bar didn't answer the app"
@@ -337,13 +341,13 @@ def check_window(server: Any) -> str:
         server.core.desktop = None
     if "error" in outcome:
         raise RuntimeError(outcome["error"])
-    if outcome.get("shown") != "recording|buy milk":
+    if outcome.get("shown") != "recording|buy milk|0.5":
         raise RuntimeError(f"the bar showed {outcome.get('shown')!r}")
     if outcome.get("dictated") != "Buy milk":
         raise RuntimeError(f"the bar saved {outcome.get('dictated')!r} from a dictation app")
     return (
-        "the bar opened, reached the app, showed the words it was sent, and saved what a "
-        "dictation app typed into it"
+        "the bar opened, reached the app, showed the words and the microphone's level it was "
+        "sent, and saved what a dictation app typed into it"
     )
 
 

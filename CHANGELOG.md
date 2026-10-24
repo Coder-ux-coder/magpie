@@ -6,6 +6,39 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-24
+
+### Changed
+
+- **A new look for the notes window.** Your views are in a sidebar instead of two rows of
+  tabs: *Inbox*, *Scheduled* and *To watch & read*, then your categories (drag a note onto
+  one to move it), the kinds of notes you have, *Digests* and *Ask*, *Done* and *Archive*.
+  In a narrow window or on a phone, the **☰** button shows them.
+- **Calmer note cards that show more at once**: a coloured icon for the kind, the title and
+  time on one line, two lines of the note, then its category, reminder and tags. The buttons
+  (done, pin, archive, delete) appear when you point at a note or move to it with the
+  keyboard, and are always there on touch screens.
+- New colours, type and spacing throughout, in light, dark and high contrast. The composer
+  floats at the bottom of your notes, the *Scheduled* list is a timeline for each day, and
+  empty views say what will appear there.
+- **Settings** lists its sections on the left and marks the one you're reading (a row along
+  the top on a phone).
+- **The voice bar** shows a red dot, how long you've been talking and a meter that moves
+  with your voice, so you can see Magpie hears you. Your words are larger, and the
+  half-heard ones follow straight on. Windows 11 rounds its corners, and the pop-ups'.
+- **Reminder pop-ups** show a bell beside each reminder and pick out when it's due.
+- While a note is being recorded in the notes window, *Notes off* is the one button that
+  saves it (*Save* beside it did the same).
+- The note window's *Copy* button is at the top, beside *Read aloud*, so the buttons along
+  the bottom fit on one line.
+
+### Fixed
+
+- Settings → AI showed “Cannot read properties of undefined” instead of the AI in use when
+  the AI is chosen on the server.
+- Jumping to a section of Settings could scroll the whole Settings window and hide its
+  title.
+
 ## [0.8.2] - 2026-10-24
 
 ### Fixed

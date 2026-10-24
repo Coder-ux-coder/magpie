@@ -29,10 +29,14 @@ let placeholder = null;
 let undoText = "";
 let undoTimer = null;
 let updateHeight = () => {};
-let noteContext = () => ({}); // the tab a note is written in (set by app.js)
-let startedIn = null; // that tab, for a recording, when it started
+let noteContext = () => ({}); // the view a note is written in (set by app.js)
+let startedIn = null; // that view, for a recording, when it started
 
 const PLACEHOLDER = "Type a note, or press the mic…";
+const SHORT_PLACEHOLDER = "Type a note…"; // a phone or the pop-out: the mic is right beside it
+const phone = window.matchMedia?.("(max-width: 40rem)");
+// The bar's own window decides (it may be the pop-out).
+const narrowBar = () => Boolean(el.root.ownerDocument.defaultView?.matchMedia?.("(max-width: 40rem)").matches);
 const wakePhrase = () => state.prefs?.wake_phrase || "notes on";
 const stopPhrase = () => state.prefs?.stop_phrase || "notes off";
 const pipSupported = "documentPictureInPicture" in window;
@@ -200,9 +204,10 @@ function render() {
   el.mic.title = `${micLabel} (Alt+N)`;
 
   // While recording, the words appear here: no placeholder in their way.
-  el.area.placeholder = rec || transcribing ? "" : PLACEHOLDER;
+  el.area.placeholder = rec || transcribing ? "" : narrowBar() ? SHORT_PLACEHOLDER : PLACEHOLDER;
   const hasText = Boolean(el.area.value.trim());
   el.off.hidden = !rec;
+  el.save.hidden = rec; // Notes off saves, as Save would
   el.cancel.hidden = !(rec || hasText); // always there while recording
   el.save.disabled = transcribing;
 
@@ -250,7 +255,7 @@ async function submit(text, source) {
   setArea("");
   showInterim("");
   spoken = false;
-  // A voice note keeps the tab it was started in; a typed one, the tab it's saved from.
+  // A voice note keeps the view it was started in; a typed one, the view it's saved from.
   const context = source === "web-voice" && startedIn ? startedIn : noteContext();
   startedIn = null;
   setNotice("Saving…", 30000);
@@ -833,6 +838,7 @@ function wireBar() {
 export function setupCapture() {
   if (el) return;
   el = find();
+  phone?.addEventListener?.("change", render);
   setupVoice();
   wireBar();
   wirePopover();

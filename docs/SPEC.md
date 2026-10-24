@@ -31,8 +31,9 @@ up and summarised without filing anything by hand.
 1. **Capture.** On Windows and Mac, the Magpie app listens for "notes on" all the time,
    offline and in any program, without the user turning anything on: saying it
    (at the start of what they say) brings up a small floating bar at the bottom
-   of the screen with the words as they are spoken, without taking the keyboard
-   from what the user is doing. "notes off", Save or a few seconds of silence
+   of the screen with the words as they are spoken, how long the note has run and a
+   meter of the microphone's level, without taking the keyboard from what the user
+   is doing. "notes off", Save or a few seconds of silence
    saves the note; "cancel note" or Cancel discards it, with Undo; clicking the
    bar lets the user type into it. Something that only sounds like "notes on"
    must not start a note: a second, fuller recogniser hears the same moment again
@@ -56,9 +57,9 @@ up and summarised without filing anything by hand.
    mistakes, false starts) without changing its meaning. It gives the note a
    title (which the user can edit), a kind (task, idea, link, journal, meeting,
    reference, list or note), one of the user's own colour-coded categories, and
-   tags, and reads any dates and times in it. A note written while a category's
-   tab is open stays in that category, and every note remembers the tab it was
-   written in. When the user moves a note or changes its kind, Magpie keeps the
+   tags, and reads any dates and times in it. A note written while a category is
+   open stays in that category, and every note remembers the view it was written
+   in. When the user moves a note or changes its kind, Magpie keeps the
    correction as a lesson for similar notes.
 3. **Decide.** The AI decides whether and when to ping:
    - **explicit**: the user named a time ("at 5 pm", "tomorrow morning", "in 20
@@ -81,8 +82,9 @@ up and summarised without filing anything by hand.
    points, a verdict on whether it is worth the time, and who it is for. When the
    user only names something by voice ("that Paul Graham essay about doing things
    that don't scale"), Claude finds it with web search first.
-6. **Dashboard.** Browse, search, filter, edit, delete (with Undo) and act on
-   notes; drag them between categories. See upcoming reminders, reviews, and daily
+6. **Dashboard.** Browse (the views and the user's categories in a sidebar, a
+   drawer on narrow screens), search, filter, edit, delete (with Undo) and act on
+   notes; drag them onto categories. See upcoming reminders, reviews, and daily
    and weekly digests, and ask questions across all of your notes.
 7. **Make it yours.** Installing asks nothing: on Windows one download, elsewhere
    one command, and the time zone follows the computer. A welcome screen then sets
@@ -149,8 +151,8 @@ verification and paid templates), calendar sync and image notes.
    from that program.
 7. With no AI set up, notes are still saved and are processed once one is chosen;
    with "no AI", simple rules file them.
-8. A note written while the Work tab is open lands in Work; dragging a note onto
-   Home moves it there (with Undo), and similar notes go to Home afterwards.
+8. A note written while Work is open lands in Work; dragging a note onto Home in the
+   sidebar moves it there (with Undo), and similar notes go to Home afterwards.
 9. A reminder pops up on the computer and arrives as an email whose subject says
    what is due and when.
 10. A new published version reaches an installed app within hours, or at once from

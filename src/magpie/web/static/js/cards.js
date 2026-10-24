@@ -142,7 +142,7 @@ export function noteCard(note, actions) {
       ),
     ),
   );
-  // Drag a card onto a category tab to move it there (the note dialog has the same choice).
+  // Drag a card onto a category in the sidebar to move it there (the note dialog has the same choice).
   card.addEventListener("dragstart", (event) => {
     event.dataTransfer.setData("application/x-magpie-note", String(note.id));
     event.dataTransfer.effectAllowed = "move";

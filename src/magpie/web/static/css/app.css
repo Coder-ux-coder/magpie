@@ -136,9 +136,10 @@
   --text-2: var(--text);
   --border: currentcolor;
   --border-strong: currentcolor;
-  --shadow-1: none;
-  --shadow-2: none;
-  --shadow-3: none;
+  /* No shadows, but still values: some shadows are combined with a stripe or a ring. */
+  --shadow-1: 0 0 #0000;
+  --shadow-2: 0 0 #0000;
+  --shadow-3: 0 0 #0000;
 }
 :root[data-contrast="high"] .card,
 :root[data-contrast="high"] .btn,
@@ -380,7 +381,20 @@ textarea:focus-visible {
   border-color: var(--focus);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 30%, transparent);
 }
-input[type="file"] { font: inherit; }
+input[type="file"] { font: inherit; color: var(--muted); }
+input[type="file"]::file-selector-button {
+  margin-right: 0.75rem;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { background: var(--surface-2); }
 textarea { resize: vertical; line-height: 1.5; }
 label { font-weight: 600; }
 fieldset { border: 0; margin: 0; padding: 0; }
@@ -1551,7 +1565,7 @@ dialog .toasts { position: absolute; }
   .voicebar-top,
   .voicebar-main,
   .voicebar-actions { display: contents; }
-  .voice-dot { grid-area: dot; align-self: center; margin-left: 0.35rem; }
+  .voice-dot { grid-area: dot; align-self: center; justify-self: center; } /* above the mic */
   .voice-status { grid-area: status; align-self: center; }
   #voice-allow,
   #voice-undo { grid-area: extra; justify-self: start; margin: 0.15rem 0 0.4rem 0.35rem; }

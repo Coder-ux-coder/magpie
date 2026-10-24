@@ -114,7 +114,7 @@ src/magpie/
                    Windows runs the installer, a Mac swaps Magpie.app) and the update button
     selftest.py    `--self-test`: what the App workflow checks on the built app
   web/             index.html, sw.js, manifest, static/{css,js,icons,desktop}
-    static/js/     app.js (boot, routing, tabs), capture.js + voice.js (the voice bar),
+    static/js/     app.js (boot, routing, the sidebar), capture.js + voice.js (the voice bar),
                    controls.js (AI, email, pop-ups, categories, learning), welcome.js
                    (first-run screen), settings.js, views.js, cards.js, note-dialog.js, …
     static/desktop/ The app's own pages: bar.html/js (floating voice bar), reminders.html/js
@@ -179,6 +179,11 @@ docs/              guide (for people), configuration (settings), integrations, S
   touch targets of at least 44 px, colours that work in light, dark and high contrast, and
   `prefers-reduced-motion` respected.
 - Pure logic (like `phrases.js`) stays DOM-free so it can be tested with `node --test`.
+- Layout: the views in a sidebar (`renderTabs()` in `app.js`; below 64rem a drawer, `inert`
+  while closed, and the notes `inert` while it's open), the notes in a column
+  (`--content-w`), and the composer fixed at the bottom (`--voicebar-h` keeps notes and
+  toasts clear of it). Card buttons show on hover or focus with a fine pointer, always on
+  touch screens.
 - Bump `CACHE` in `sw.js` when you add files to the app shell.
 - When the Magpie app runs the server (`status.desktop.active`, `desktopApp()` in
   `state.js`), the app does the listening: the page never starts its own microphone, and

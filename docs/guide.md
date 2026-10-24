@@ -20,8 +20,9 @@ this page has the rest.
   the top of the screen on a Mac. The icon turns grey when Magpie isn't listening, and gets
   a red dot while it takes a note.
 - **Say “notes on”** at the start of a sentence, in any program, and a small bar appears at
-  the bottom of the screen with your words as you speak. It doesn't take the keyboard from
-  what you're doing. Say **“notes off”** to save the note (or stop talking for a few
+  the bottom of the screen with your words as you speak, a red dot with how long you've been
+  talking, and a meter that moves with your voice (so you can see Magpie hears you). It
+  doesn't take the keyboard from what you're doing. Say **“notes off”** to save the note (or stop talking for a few
   seconds, or press **Save**), or **“cancel note”** to throw it away; **Undo** brings it
   back. “Notes on” in the middle of a sentence (“I took notes on the meeting”) doesn't count.
 - **When you finish**, the bar says *Writing it down…* for a moment while Magpie writes the
@@ -35,6 +36,11 @@ this page has the rest.
   updates* and *Quit Magpie*.
 - **Reminders pop up** in the bottom-right corner of the screen with *Done*, *Snooze* and
   *Open*, whether Magpie's window is open or not.
+- **Your notes window** lists its views on the left: *Inbox*, *Scheduled*, *To watch & read*,
+  your categories (drag a note onto one to move it there), the kinds of notes you have,
+  *Digests*, *Ask*, *Done* and *Archive*. In a narrow window the **☰** button shows them.
+  Point at a note (or move to it with the keyboard) for its buttons: done, pin, archive and
+  delete.
 - **Closing the notes window** keeps Magpie running and listening. *Quit Magpie* stops it
   until you open it again (from the Start menu or the Desktop on Windows, from Applications
   on a Mac).
@@ -216,6 +222,7 @@ called *magpie*).
 | No Magpie icon by the clock (Windows) | Click the **^** arrow next to the clock; drag the icon onto the taskbar to keep it there. Not there either? Open Magpie from the Start menu. |
 | No Magpie icon in the menu bar (Mac) | A full menu bar hides icons behind the camera notch: quit a menu bar app or two. Not there either? Open Magpie from Applications. |
 | Magpie doesn't hear “notes on” | Point at Magpie's icon (or open its menu): it says what's wrong. *Hears only silence*: on Windows, Settings → Privacy & security → Microphone → *Let desktop apps access your microphone*; on a Mac, System Settings → Privacy & Security → Microphone → Magpie. Check the microphone isn't muted. Say “notes on” at the start of a sentence, or use *Start a voice note* in its menu. |
+| The meter in the bar doesn't move while you talk | Magpie hears nothing from that microphone. Choose the one you use as the input: on Windows, Settings → System → Sound → *Input*; on a Mac, System Settings → Sound → *Input*. Check it isn't muted, then try again. |
 | A note starts when you didn't say “notes on” | Magpie checks with a second recogniser before it starts a note, so this should be rare. If it still happens, choose a wake phrase that sounds like nothing else you say, such as “hello magpie” (Settings → Voice). |
 | Saved notes have mistakes in them | Check Settings → Voice: *Ready* means Whisper writes notes down. While it's *Downloading*, notes keep the quick words or the faster model's. Try *Most accurate* if *Automatic* chose the faster one, and speak towards the microphone. |
 | The download of the speech model fails | Settings → Voice says why. Magpie tries again every 15 minutes. It comes from Hugging Face (huggingface.co), which some networks block. |

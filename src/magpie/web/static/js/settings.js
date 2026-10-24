@@ -109,7 +109,7 @@ function aiSection() {
 
 function categoriesSection() {
   return section("categories", "Categories",
-    h("p", { class: "muted" }, "Your own categories, in your colours. The AI files notes into them, notes you write in a category's tab stay there, and you can drag notes onto a tab."),
+    h("p", { class: "muted" }, "Your own categories, in your colours. The AI files notes into them, notes you write while a category is open stay in it, and you can drag notes onto a category in the sidebar."),
     categoriesEditor(),
   );
 }

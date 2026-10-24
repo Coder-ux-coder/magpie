@@ -124,8 +124,8 @@ flowchart LR
   Prefs changes (the command word) reach the listener at once.
 - **The system** (`system.py`): one copy at a time (a lock file; a second start asks the
   first to show itself), starting with the computer (the `Run` registry key on Windows, a
-  LaunchAgent on a Mac), the window or app in front (kept with the note, like the tab a note
-  was written in).
+  LaunchAgent on a Mac), the window or app in front (kept with the note, like the view a
+  note was written in).
 - **First start** (`migrate.py`): if this computer ran Magpie in Docker, its database is
   copied with SQLite's backup, its settings minus any password become `magpie.env`, and the
   old containers are stopped and kept from restarting.
@@ -167,13 +167,13 @@ sequenceDiagram
 
 1. **Capture.** Every entry point ends in `Pipeline.submit()` or `Store.create_note()` plus
    `Pipeline.process()`. The note is stored immediately with `state = pending`, so nothing
-   is lost if the AI is slow, down or not configured. A note written in a category's tab
-   gets that category at once (`meta.category_by = "you"`), and `meta.captured_in` records
-   the tab.
+   is lost if the AI is slow, down or not configured. A note written while a category is
+   open gets that category at once (`meta.category_by = "you"`), and `meta.captured_in`
+   records the view.
 2. **Triage.** The brain's `triage()` (`ClaudeBrain`, `OpenAICompatibleBrain` or
    `BasicBrain`) sends one request with a JSON schema generated from `schemas.Triage`. The
    current local time, the user's “about me”, morning time, proactivity, instructions,
-   categories, the tab the note was written in and the lessons learned from earlier
+   categories, the view the note was written in and the lessons learned from earlier
    corrections go in the user message; the system prompt never changes, so it is
    prompt-cached. The AI's category is used only when the user hasn't chosen one.
 3. **Reminders.** The AI returns wall-clock times (`2026-10-19T17:00`). `reminders.py`

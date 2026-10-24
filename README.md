@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/voice-bar.png" width="560" alt="The Magpie voice bar floating at the bottom of the screen while recording: the words “Remind me to call James at five about the budget” appear as they are spoken, with Cancel and Save buttons">
+  <img src="docs/images/voice-bar.png" width="560" alt="The Magpie voice bar floating over the screen while recording: a red dot with the time and a meter of the microphone's level, the words “Remind me to call James at five about the budget” appearing as they are spoken, and Cancel and Save buttons">
 </p>
 
 ## Install
@@ -187,7 +187,7 @@ Good to know:
   from your corrections.
 
 <p align="center">
-  <img src="docs/images/dashboard.png" width="80%" alt="Magpie's notes window: colour-coded category tabs, filed notes, and the voice bar at the bottom">
+  <img src="docs/images/dashboard.png" width="80%" alt="Magpie's notes window: the views and colour-coded categories in a sidebar, filed notes, and a note being dictated in the voice bar at the bottom">
 </p>
 
 More in the **[guide](docs/guide.md)**: everyday use, how Magpie hears you, choosing the AI,

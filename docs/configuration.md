@@ -20,7 +20,7 @@ the file says. A value that can't be read is named in Magpie's log.
 | AI | Claude Haiku 5.5 | Which AI files your notes, its model, and its key or address. *No AI* files notes with simple rules. |
 | Email | off | Your address and an app password; Magpie checks the login before saving and sends a test. Every reminder arrives as an email such as “⏰ Call James · due today 10:00 AM”. |
 | Pop-ups | on | Every reminder in the corner of the screen, with Done, Snooze and Open. |
-| Categories | none | Your own, each with a colour, in the order you choose (drag, or the arrows). The AI files notes into them; a note written in a category's tab stays there; drag a note onto a tab to move it. |
+| Categories | none | Your own, each with a colour, in the order you choose (drag, or the arrows). The AI files notes into them; a note written while a category is open stays there; drag a note onto a category in the sidebar to move it. |
 | Learn from my changes | on | When you move a note to another category or change its kind, Magpie remembers and files similar notes your way (the last 40 changes; you can forget any of them). |
 | Proactivity | Balanced | *Quiet*: only reminders you ask for. *Balanced*: also before clear deadlines and appointments. *Proactive*: suggests reminders for anything actionable. |
 | About you | | Free text the AI reads with every note: working hours, names, family. Up to 2,000 characters. |

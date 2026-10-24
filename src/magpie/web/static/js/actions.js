@@ -24,7 +24,7 @@ export function patchNote(note, changes, message, undoChanges) {
   return guarded(async () => {
     const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: changes });
     emit("note-updated", updated);
-    if ("category_id" in changes) emit("categories-changed"); // the tabs' counts
+    if ("category_id" in changes) emit("categories-changed"); // the sidebar's counts
     if (message) {
       toast(message, undoChanges ? { action: "Undo", onAction: () => patchNote(updated, undoChanges) } : {});
     }
@@ -54,7 +54,7 @@ export const noteActions = {
       { status: note.status },
     );
   },
-  // Dropped on a category's tab (or chosen in the note window); Undo puts it back.
+  // Dropped on a category in the sidebar (or chosen in the note window); Undo puts it back.
   moveTo(note, category) {
     const id = category?.id || 0;
     if ((note.category_id || 0) === id) {

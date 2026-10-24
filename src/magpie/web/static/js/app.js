@@ -387,7 +387,7 @@ function viewInfo(view) {
 
 const NOTE_TYPE = "application/x-magpie-note";
 
-// A tab you can drop a dragged note on: a category, Done or Archive.
+// A view in the sidebar you can drop a dragged note on: a category, Done or Archive.
 function acceptNotes(target, drop) {
   target.classList.add("drop-target");
   target.addEventListener("dragover", (event) => {
@@ -427,7 +427,7 @@ function refreshCategories() {
   return categoriesRequest;
 }
 
-// Where a new note was written, so it remembers the tab (and stays in its category).
+// Where a new note was written, so it remembers the view (and stays in its category).
 function noteContext() {
   if (state.q) return { captured_in: "Search" };
   if (currentView.startsWith("category/")) {
