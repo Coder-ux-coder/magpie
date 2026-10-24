@@ -4,11 +4,13 @@ The listener's own words come at once but are often wrong, above all with an acc
 while a note is taken, Whisper's quick model writes down the note so far, again and again
 as it grows: each time from the start, so a word it got wrong is put right once more of
 the sentence is heard. The bar shows Whisper's words, followed by the listener's words for
-whatever was said after Whisper's last go (the app puts the two together).
+whatever was said after Whisper's last go (the app puts the two together). Whisper hears
+up to 30 seconds at a time, so for a longer note it writes down the last 28 seconds, and
+the bar has the listener's words for what came before.
 
-Each go takes a moment (Whisper listens to up to 30 seconds at a time), and one follows
-another as soon as a second more has been said. When nothing changes (a pause), the goes
-come less often, until the listener hears words again.
+Each go takes a moment, and one follows another as soon as a second more has been said.
+When nothing changes (a pause), the goes come less often, until the listener hears words
+again.
 """
 
 from __future__ import annotations
@@ -22,15 +24,16 @@ log = logging.getLogger(__name__)
 
 STEP_SECONDS = 1.0  # another go once this much more has been said
 LONGEST_STEP = 4.0  # in a pause, the goes come less often, down to one every 4 seconds
-WINDOW_SECONDS = 28.0  # Whisper hears 30 seconds at once: a longer note shows its end
+WINDOW_SECONDS = 28.0  # Whisper hears 30 seconds at once: a longer note has its end written
 GIVE_UP = 3  # failed goes in a row before the listener's words are left to do the job
 
-Show = Callable[["LiveWriter", str, float], None]
+Show = Callable[["LiveWriter", str, float, float], None]
 
 
 class LiveWriter:
-    """Fed the note's sound as it comes (``add``); calls ``show(writer, text, until)``
-    with Whisper's words for the note's sound up to ``until`` seconds into it.
+    """Fed the note's sound as it comes (``add``); calls ``show(writer, text, since,
+    until)`` with Whisper's words for the note's sound from ``since`` to ``until`` seconds
+    into it.
 
     ``start()`` runs it on its own thread; ``write()`` is one go (the thread's work, and
     what tests call).
@@ -116,20 +119,18 @@ class LiveWriter:
                 return
             rate, generation = self.rate, self._generation
             sound = bytes(self._sound[-int(self.window * rate) * 2 :])
-            windowed = len(sound) < len(self._sound)
             self._written = self._skipped + len(self._sound)
+            since = (self._written - len(sound)) / (rate * 2)
             until = self._written / (rate * 2)
         text = self.transcriber.transcribe(
             sound, rate, wake=self.wake, stop=self.stop_phrase, quick=True
         )
-        if windowed and text:
-            text = f"… {text}"
         with self._lock:
             if self.stopped or generation != self._generation:
                 return  # the note ended, or was typed over, meanwhile
             self._wait = min(LONGEST_STEP, self._wait * 2) if text == self.text else self.step
             self.text = text
-        self.show(self, text, until)
+        self.show(self, text, since, until)
 
     def _run(self) -> None:
         failures = 0

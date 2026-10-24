@@ -1129,9 +1129,23 @@ def test_whispers_words_from_a_note_that_has_ended_are_not_shown(app):
     live = app._live
     app._on_voice("state", {"state": "standby", "by_voice": False})
     assert app._live is None and live.stopped
-    app._live_words(live, "Too late.", 2.0)
+    app._live_words(live, "Too late.", 0.0, 2.0)
     settle(app)
     assert all(words["final"] != "Too late." for words in shown_words(app))
+
+
+def test_a_long_note_keeps_the_listeners_words_for_what_whisper_no_longer_hears(app):
+    app.whisper = FakeWhisper(FakeTranscriber("Call James."), quick=FakeTranscriber())
+    app._on_voice("state", {"state": "recording", "by_voice": True})
+    timed = [("first", 0.5), ("part", 1.0), ("and", 30.5), ("then", 31.0), ("more", 33.0)]
+    app._on_voice("words", {"final": "first part and then", "partial": "more", "timed": timed})
+    app._live_words(app._live, "And then.", 3.0, 32.0)  # the last 28 seconds
+    settle(app, lambda: last_words(app).get("final") == "first part And then.")
+    assert last_words(app)["partial"] == "more"
+    voice_note(app, "first part and then more")
+    settle(app, lambda: app.client.notes)
+    # Kept in the bar while it's written down: nothing of the note goes missing.
+    assert app.ui.bar("saving")[0][0]["text"] == "first part And then."
 
 
 def test_the_bar_says_the_words_get_better_once_whisper_is_downloaded(app):
@@ -1177,7 +1191,7 @@ class LiveModel:
 
 def writer(model, **options) -> tuple[LiveWriter, list]:
     shown: list[tuple[str, float]] = []
-    live = LiveWriter(model, lambda w, text, until: shown.append((text, until)), **options)
+    live = LiveWriter(model, lambda w, text, since, until: shown.append((text, until)), **options)
     return live, shown
 
 
@@ -1212,13 +1226,15 @@ def test_whisper_writes_the_note_so_far_again_as_it_grows():
     assert live._wait == LONGEST_STEP
 
 
-def test_a_long_note_shows_the_end_of_what_was_said():
-    model = LiveModel("and that's the end")
-    live, shown = writer(model, window=5.0)
+def test_whisper_writes_down_the_end_of_a_long_note():
+    model = LiveModel("And that's the end.")
+    spans: list = []
+    live = LiveWriter(model, lambda w, text, since, until: spans.append((text, since, until)))
+    live.window = 5.0
     live.add(bytes(RATE * 2 * 8), RATE)  # eight seconds
     live.write()
     assert model.calls == [(5.0, True)]
-    assert shown == [("… and that's the end", 8.0)]
+    assert spans == [("And that's the end.", 3.0, 8.0)]  # the last five seconds
 
 
 def test_words_typed_over_are_not_written_down_again():

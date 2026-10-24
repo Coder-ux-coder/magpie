@@ -421,7 +421,7 @@ def check_live(folder: Path | None, expect: str | None, heard: dict[str, Any]) -
     transcriber = Transcriber(folder)
     transcriber.load()
     shown: list[tuple[str, float]] = []
-    live = LiveWriter(transcriber, lambda writer, text, until: shown.append((text, until)))
+    live = LiveWriter(transcriber, lambda writer, text, *span: shown.append((text, span)))
     goes: list[float] = []
     chunk = int(rate * 0.25) * 2
     for offset in range(0, len(pcm), chunk):

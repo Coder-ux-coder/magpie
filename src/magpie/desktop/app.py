@@ -179,7 +179,8 @@ class DesktopApp:
         self._said_in = ""  # the window in front when the note was started
         self._live: LiveWriter | None = None  # Whisper's words while you speak
         self._live_text = ""
-        self._live_until = 0.0  # seconds into the note that Whisper's words go up to
+        self._live_span = (0.0, 0.0)  # seconds into the note that Whisper's words are from
+        self._live_shown = ""  # those words, after the listener's for any time before
         self._heard: dict[str, Any] = {}  # the listener's latest words
         self._words_lock = threading.Lock()
         self._discarded = ""
@@ -532,7 +533,7 @@ class DesktopApp:
         with self._words_lock:
             if self._live is not None:
                 self._live.stop()
-            self._live, self._live_text, self._live_until, self._heard = None, "", 0.0, {}
+            self._live, self._live_text, self._live_shown, self._heard = None, "", "", {}
             if quick is not None:
                 self._live = LiveWriter(
                     quick, self._live_words, wake=self.wake_phrase, stop=self.stop_phrase
@@ -544,22 +545,24 @@ class DesktopApp:
         if live is not None:
             live.stop()
 
-    def _live_words(self, live: LiveWriter, text: str, until: float) -> None:
+    def _live_words(self, live: LiveWriter, text: str, since: float, until: float) -> None:
         with self._words_lock:
             if live is not self._live:  # from a note that has ended
                 return
-            self._live_text, self._live_until = text, until
+            self._live_text, self._live_span = text, (since, until)
             self._show_words()
 
     def _show_words(self) -> None:
-        """Whisper's words, then the listener's for what was said after Whisper's last go
-        (holding the words lock)."""
+        """Whisper's words, then the listener's for what was said after Whisper's last go,
+        and before it for a long note (holding the words lock)."""
         heard = self._heard
         final, partial = str(heard.get("final", "")), str(heard.get("partial", ""))
         if self._live is not None and self._live_text:
-            final = self._live_text
-            later = [word for word, start in heard.get("timed", ()) if start >= self._live_until]
-            partial = tidy(" ".join(later))
+            since, until = self._live_span
+            timed = heard.get("timed", ())
+            before = tidy(" ".join(word for word, start in timed if start < since))
+            final = self._live_shown = append_text(before, self._live_text)
+            partial = tidy(" ".join(word for word, start in timed if start >= until))
         self._bar("words", {"base": self._typed, "final": final, "partial": partial})
 
     # ----------------------------------------------------------------- the bar
@@ -628,7 +631,7 @@ class DesktopApp:
     def bar_edited(self, text: str) -> None:
         self._typed = text
         with self._words_lock:
-            self._live_text, self._live_until = "", 0.0
+            self._live_text = self._live_shown = ""
             if self._live is not None:
                 self._live.reset()
         self.voice("rebase")
@@ -666,8 +669,8 @@ class DesktopApp:
         if not models or not data.get("audio"):
             self._save(heard, "desktop-voice")
             return
-        live = self._live_text  # Whisper's words as you spoke, closer than the listener's
-        shown = append_text(self._typed, live) if live and not live.startswith("…") else heard
+        live = self._live_shown  # Whisper's words as you spoke, closer than the listener's
+        shown = append_text(self._typed, live) if live else heard
         self._bar("saving", {"text": shown, "status": "Writing it down…"}, show=True)
         self._work.submit(
             self._write_down, models, self._typed, data, self._bar_token, self._said_in

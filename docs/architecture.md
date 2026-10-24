@@ -89,8 +89,9 @@ flowchart LR
   punctuation, twice over. While the note is said, a `LiveWriter` has the quick model
   (`small.en`, one guess per word) write down the note so far, from its start, once a
   second more has been said (less often in a pause, and only the last 28 seconds of a long
-  note); the bar shows its words followed by the listener's for the audio it hasn't
-  reached, lined up by the listener's word timings. When the note ends, the chosen model
+  note); the bar shows its words, with the listener's for the audio it hasn't reached (and,
+  in a long note, for what came before its 28 seconds), lined up by the listener's word
+  timings. When the note ends, the chosen model
   (`large-v3-turbo` by default) writes its sound down once more, and that's saved; if it
   fails, the quick model does. Sound is low-pass filtered before it's resampled to 16 kHz,
   and quiet sound brought up; voice activity detection skips silences, where Whisper would
