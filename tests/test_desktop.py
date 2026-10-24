@@ -29,6 +29,7 @@ from magpie.desktop.speech import (
     Listener,
     MicrophoneError,
     VoiceEngine,
+    sound_level,
 )
 from magpie.notify import Notification
 
@@ -947,6 +948,48 @@ def settle(app, until=lambda: True, timeout=5.0):
             return
         time.sleep(0.02)
     raise AssertionError("timed out")
+
+
+def square(amplitude: int, seconds: float = 0.25) -> bytes:
+    """A square wave this loud (out of 32767), as 16-bit sound."""
+    samples = array(
+        "h", [amplitude if (i // 20) % 2 else -amplitude for i in range(int(RATE * seconds))]
+    )
+    return samples.tobytes()
+
+
+def test_how_loud_sound_is_on_a_meters_scale():
+    assert sound_level(b"") == 0.0 and sound_level(bytes(8000)) == 0.0  # silence
+    assert sound_level(square(32767)) == 1.0  # as loud as it gets
+    speech = sound_level(square(3000))  # about -21 dB: someone talking near the microphone
+    assert 0.55 < speech < 0.75
+    assert 0 < sound_level(square(60)) < 0.15  # a quiet room
+    assert sound_level(square(3000) + b"\x01") == speech  # half a sample at the end is ignored
+
+
+def test_the_bar_shows_how_loud_the_microphone_is_while_recording(app, monkeypatch):
+    """A few times a second, so you can see Magpie hears you; never between notes."""
+    now = [1000.0]
+    monkeypatch.setattr("magpie.desktop.app.time.monotonic", lambda: now[0])
+    app._on_voice("sound", {"pcm": square(3000), "rate": RATE})  # not recording: nothing
+    app._on_voice("state", {"state": "recording", "by_voice": True})
+    for _ in range(4):  # a second of sound, in quarter seconds
+        app._on_voice("sound", {"pcm": square(3000), "rate": RATE})
+        now[0] += 0.25
+    app._on_voice("sound", {"pcm": square(3000), "rate": RATE})
+    app._on_voice("sound", {"pcm": bytes(4000), "rate": RATE})  # too soon after: skipped
+    now[0] += 0.25
+    app._on_voice("sound", {"pcm": bytes(4000), "rate": RATE})
+    settle(app)
+    levels = [payload[0]["level"] for payload in app.ui.bar("level")]
+    assert len(levels) == 6 and all(0.55 < level < 0.75 for level in levels[:5])
+    assert levels[-1] == 0.0
+    voice_note(app, "buy milk")  # the note ends: no more levels
+    app._on_voice("sound", {"pcm": square(3000), "rate": RATE})
+    now[0] += 1
+    app._on_voice("sound", {"pcm": square(3000), "rate": RATE})
+    settle(app)
+    assert len(app.ui.bar("level")) == 6
 
 
 def test_a_voice_note_shows_in_the_bar_and_is_saved(app):

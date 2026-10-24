@@ -15,6 +15,8 @@ let editTimer = 0;
 let dictation = null;
 const SETTLE_MS = 1500; // the stop phrase must stay at the end this long: more may come
 const NOTHING_MS = 60000; // nothing typed in a minute: the bar closes
+let clock = 0; // the time shown while recording
+let startedAt = 0;
 
 function call(action, details = {}) {
   return fetch("/api/desktop/ui", {
@@ -24,8 +26,22 @@ function call(action, details = {}) {
   }).then((response) => response.json()).catch(() => null);
 }
 
+function tick() {
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  $("timer").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function startClock() {
+  startedAt = Date.now();
+  tick();
+  clearInterval(clock);
+  clock = setInterval(tick, 500);
+}
+
 function set(next, status, { hint = "", reply = "", keys = "" } = {}) {
   if (next !== "dictate") stopDictation();
+  if (next !== "recording") clearInterval(clock);
+  bar.style.setProperty("--level", "0");
   state = next;
   bar.dataset.state = next;
   bar.dataset.tone = "";
@@ -44,6 +60,15 @@ function set(next, status, { hint = "", reply = "", keys = "" } = {}) {
   text.readOnly = next === "saving" || next === "saved";
   text.hidden = next === "saved" || next === "empty";
   $("partial").hidden = !recording || !$("partial").textContent;
+  fit();
+}
+
+// The text box is as tall as its words (the half-heard ones follow straight after), and
+// while you speak the newest words stay in view.
+function fit({ end = false } = {}) {
+  text.style.height = "auto";
+  text.style.height = `${text.scrollHeight}px`;
+  if (end) text.scrollTop = text.scrollHeight;
 }
 
 function words(base, final) {
@@ -59,12 +84,19 @@ window.magpieBar = {
     text.value = "";
     $("partial").textContent = "";
     set("recording", "Recording", { hint: hint || "say “notes off” to save, “cancel note” to discard", keys: "Enter saves · Esc cancels" });
+    startClock();
+  },
+  // How loud the microphone is (0 to 1), a few times a second while recording.
+  level({ level = 0 } = {}) {
+    if (state !== "recording") return;
+    bar.style.setProperty("--level", String(Math.max(0, Math.min(1, Number(level) || 0))));
   },
   words({ base = "", final = "", partial = "" } = {}) {
     if (state !== "recording") return;
     if (!edited || document.activeElement !== text) text.value = words(base, final);
     $("partial").textContent = partial ? `${partial}…` : "";
     $("partial").hidden = !partial;
+    fit({ end: !edited });
   },
   saving({ text: note = "", status = "" } = {}) {
     text.value = note;
@@ -158,6 +190,7 @@ $("undo").addEventListener("click", () => call("undo"));
 $("open").addEventListener("click", () => call("open_notes"));
 
 text.addEventListener("input", () => {
+  fit();
   if (state === "dictate") return dictated();
   if (state !== "recording") return;
   edited = true;

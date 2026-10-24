@@ -81,6 +81,16 @@ export function aiControls({ onSaved } = {}) {
   const render = () => {
     clear(box);
     const current = ai.providers.find((p) => p.id === chosen) || ai.providers[0];
+    if (!current) {
+      // Chosen on the server, and nothing to choose from here (the offline stand-in).
+      box.append(
+        h("p", { class: "ai-status", role: "status" },
+          h("span", { class: `status-dot${ai.available ? " on" : ""}`, "aria-hidden": "true" }),
+          ai.available ? `Filing notes with ${ai.label}${ai.model ? ` · ${ai.model}` : ""}` : `${ai.label} isn't connected yet.`),
+        h("p", { class: "muted small" }, "Chosen on the server (MAGPIE_BRAIN). Change it there."),
+      );
+      return;
+    }
     const usingIt = current.id === ai.provider;
     const doing = ai.provider === "basic" ? "Filing notes with simple rules (no AI)" : `Filing notes with ${ai.label} · ${ai.model || "its own default model"}`;
     box.append(h("p", { class: "ai-status", role: "status" },

@@ -13,6 +13,7 @@ main thread, and Magpie is in the Dock only while its notes window is open.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sys
@@ -35,6 +36,7 @@ GWL_EXSTYLE = -20
 SW_HIDE, SW_SHOWNOACTIVATE = 0, 4
 HWND_TOPMOST = -1
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x1, 0x2, 0x10, 0x40
+DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND = 33, 2
 
 
 def _hwnd(title: str) -> int:
@@ -61,6 +63,22 @@ def on_main(work: Callable[[], Any]) -> None:
         AppHelper.callAfter(work)
     else:
         work()
+
+
+def _round_corners(hwnd: int) -> None:
+    """Windows 11 rounds a borderless window's corners when asked; Windows 10 ignores it."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    preference = ctypes.c_int(DWMWCP_ROUND)
+    with contextlib.suppress(Exception):  # only how it looks
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(preference),
+            ctypes.sizeof(preference),
+        )
 
 
 def _nsapp() -> Any:
@@ -92,6 +110,7 @@ class Floating:
     def __init__(self, window: Any, scale: float) -> None:
         self.window = window
         self.scale = scale or 1.0
+        self._rounded = 0  # the window whose corners were rounded
 
     def _handle(self) -> int:
         return _hwnd(self.window.title)
@@ -115,6 +134,9 @@ class Floating:
         if not hwnd:
             self.window.show()
             return
+        if self._rounded != hwnd:
+            _round_corners(hwnd)
+            self._rounded = hwnd
         user32 = _user32()
         user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
         flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW

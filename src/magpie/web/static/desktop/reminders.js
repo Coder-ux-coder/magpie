@@ -42,25 +42,41 @@ function report() {
   call("resize", { height: Math.ceil(list.getBoundingClientRect().height) });
 }
 
+// An icon from Magpie's own set, for decoration.
+function symbol(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `/static/icons/sprite.svg#${name}`);
+  svg.append(use);
+  return svg;
+}
+
 window.magpieAlerts = {
   add({ key, title = "Reminder", body = "", due = "", kind = "reminder", snooze = "1 hour", reminder = true } = {}) {
     window.magpieAlerts.remove(key);
+    const close = button("✕", "dismiss", key);
+    close.setAttribute("aria-label", "Close");
+    close.className = "quiet close";
     const head = el("div", { className: "head" },
-      el("span", { textContent: kind === "digest" ? "Your digest" : kind !== "reminder" ? "Magpie" : due ? `Reminder · due ${due}` : "Reminder" }),
-      button("✕", "dismiss", key));
-    head.lastChild.setAttribute("aria-label", "Close");
-    head.lastChild.className = "quiet";
+      el("span", { textContent: kind === "digest" ? "Your digest" : kind !== "reminder" ? "Magpie" : "Reminder" }),
+      kind === "reminder" && due ? el("span", { className: "due", textContent: `due ${due}` }) : null,
+      close);
     const problem = el("p", { className: "error" });
     problem.setAttribute("role", "alert");
-    const card = el("article", { className: "alert" },
-      head,
-      el("h1", { textContent: title, dir: "auto" }),
-      body ? el("p", { textContent: body, dir: "auto" }) : null,
-      el("div", { className: "row" },
-        reminder ? button("Done", "done", key, true) : null,
-        reminder ? button(`Snooze ${snooze}`, "snooze", key) : null,
-        button("Open", "open", key)),
-      problem);
+    const badge = el("span", { className: "badge" }, symbol(kind === "digest" ? "sun" : kind === "reminder" ? "bell" : "sparkles"));
+    const card = el("article", { className: `alert ${kind}` },
+      badge,
+      el("div", { className: "body" },
+        head,
+        el("h1", { textContent: title, dir: "auto" }),
+        body ? el("p", { textContent: body, dir: "auto" }) : null,
+        el("div", { className: "row" },
+          reminder ? button("Done", "done", key, true) : null,
+          reminder ? button(`Snooze ${snooze}`, "snooze", key) : null,
+          button("Open", "open", key)),
+        problem));
     card.dataset.key = key;
     list.prepend(card);
     report();

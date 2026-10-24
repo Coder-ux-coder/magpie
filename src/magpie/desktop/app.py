@@ -22,7 +22,7 @@ from magpie.desktop.live import LiveWriter
 from magpie.desktop.paths import AppPaths, DesktopState, find_model, frozen, launch_command
 from magpie.desktop.phrases import DEFAULT_STOP, DEFAULT_WAKE, append_text, tidy
 from magpie.desktop.server import EmbeddedServer, LocalClient, free_port
-from magpie.desktop.speech import RATE, VoiceEngine
+from magpie.desktop.speech import RATE, VoiceEngine, sound_level
 from magpie.desktop.transcribe import AUTO, OFF, QUICK_MODEL, SpeechService, Whisper
 from magpie.desktop.update import Updater
 
@@ -31,6 +31,7 @@ log = logging.getLogger("magpie.desktop")
 SAVED_SECONDS = 5.0  # how long "Saved" stays up once the AI has replied
 UNDO_SECONDS = 8.0
 REPLY_WAIT = 8.0  # the bar doesn't wait longer than this for the AI's reply
+LEVEL_SECONDS = 0.2  # how often the bar's meter is told how loud the microphone is
 
 
 def setup_logging(paths: AppPaths, *, verbose: bool = False) -> None:
@@ -192,6 +193,7 @@ class DesktopApp:
         self._bar_gen = itertools.count()
         self._bar_token = 0
         self._bar_state = ""  # what the bar shows: recording, dictate, saving, …
+        self._level_at = 0.0  # when the bar's meter last heard how loud it is
         self._ready: dict[str, bool] = {"bar": False, "alerts": False}
         self._pending: dict[str, list[tuple[str, Any]]] = {"bar": [], "alerts": []}
         self._alerts: dict[str, dict[str, Any]] = {}
@@ -505,6 +507,7 @@ class DesktopApp:
             live = self._live
             if live is not None:
                 live.add(data["pcm"], int(data.get("rate") or RATE))
+            self._show_level(data["pcm"])
         elif kind == "words" and self.speech_mode != "dictation":
             with self._words_lock:
                 self._heard = data
@@ -532,6 +535,18 @@ class DesktopApp:
                 self._bar("discarded", {"text": text}, hide_after=UNDO_SECONDS)
             else:
                 self._hide_bar()
+
+    def _show_level(self, pcm: bytes) -> None:
+        """How loud the microphone is, for the bar's meter, a few times a second: so you
+        can see that Magpie hears you."""
+        now = time.monotonic()
+        if self._bar_state != "recording" or now - self._level_at < LEVEL_SECONDS:
+            return
+        with self._lock:
+            if not self._ready["bar"]:  # not worth keeping for later
+                return
+        self._level_at = now
+        self._ui_call("bar", "level", {"level": sound_level(pcm)})
 
     def _hint(self) -> str:
         whisper = self.whisper

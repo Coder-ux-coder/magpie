@@ -34,52 +34,66 @@
     </form>
   </main>
 
-  <!-- App -->
+  <!-- App: the views in a sidebar (a drawer on narrow screens), the notes beside it. -->
   <div id="app" class="app" hidden>
-    <header class="topbar">
-      <h1 class="sr-only">Magpie notes</h1>
-      <a class="brand" href="#/inbox" aria-label="Magpie home">
-        <img src="/static/icons/logo.svg" alt="" width="32" height="32">
-        <span>Magpie</span>
-      </a>
-      <form id="search-form" class="search" role="search">
-        <label for="search" class="sr-only">Search notes</label>
-        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#search"></use></svg>
-        <input id="search" type="search" placeholder="Search notes" autocomplete="off" enterkeyhint="search">
-        <kbd class="hint" aria-hidden="true">/</kbd>
-      </form>
-      <button id="btn-shortcuts" class="icon-btn hide-mobile" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
-        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#keyboard"></use></svg>
-      </button>
-      <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings" title="Settings">
-        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#settings"></use></svg>
-      </button>
-    </header>
-
-    <section id="banners" class="banners" aria-label="Notices"></section>
-
-    <nav class="views" aria-label="Note views">
-      <ul id="view-tabs" role="list"></ul>
+    <nav id="sidebar" class="sidebar" aria-label="Note views">
+      <div class="sidebar-head">
+        <a class="brand" href="#/inbox" aria-label="Magpie home">
+          <img src="/static/icons/logo.svg" alt="" width="30" height="30">
+          <span>Magpie</span>
+        </a>
+        <button id="btn-close-nav" class="icon-btn nav-close" type="button" aria-label="Close the menu">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#close"></use></svg>
+        </button>
+      </div>
+      <div id="view-tabs" class="nav-groups"></div>
+      <footer class="sidebar-foot small">
+        <button type="button" class="nav-item" id="footer-shortcuts">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#keyboard"></use></svg>
+          <span>Keyboard shortcuts</span>
+        </button>
+        <p class="muted">Magpie <span id="version"></span> · <a href="https://github.com/Coder-ux-coder/magpie" target="_blank" rel="noopener">Open source</a></p>
+      </footer>
     </nav>
+    <div id="nav-backdrop" class="nav-backdrop" hidden></div>
 
-    <main id="main" class="main" tabindex="-1" aria-live="off">
-      <h2 id="view-title" class="view-title"></h2>
-      <div id="view"></div>
-    </main>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-inner">
+          <h1 class="sr-only">Magpie notes</h1>
+          <button id="btn-menu" class="icon-btn menu-btn" type="button" aria-label="Show the views" aria-controls="sidebar" aria-expanded="false">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#menu"></use></svg>
+          </button>
+          <form id="search-form" class="search" role="search">
+            <label for="search" class="sr-only">Search notes</label>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#search"></use></svg>
+            <input id="search" type="search" placeholder="Search notes" autocomplete="off" enterkeyhint="search">
+            <kbd class="hint" aria-hidden="true">/</kbd>
+          </form>
+          <button id="btn-shortcuts" class="icon-btn hide-mobile" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#keyboard"></use></svg>
+          </button>
+          <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings" title="Settings (,)">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#settings"></use></svg>
+          </button>
+        </div>
+      </header>
 
-    <footer class="footer muted small">
-      <span>Magpie <span id="version"></span></span>
-      <span aria-hidden="true">·</span>
-      <a href="https://github.com/Coder-ux-coder/magpie" target="_blank" rel="noopener">Open source</a>
-      <span aria-hidden="true">·</span>
-      <button type="button" class="linklike" id="footer-shortcuts">Keyboard shortcuts</button>
-    </footer>
+      <main id="main" class="main" tabindex="-1" aria-live="off">
+        <section id="banners" class="banners" aria-label="Notices"></section>
+        <div class="view-head">
+          <h2 id="view-title" class="view-title"></h2>
+        </div>
+        <div id="view"></div>
+      </main>
+    </div>
 
     <!-- Voice bar: docked at the bottom of every view; it can pop out into a floating window. -->
     <section id="voicebar" class="voicebar" aria-labelledby="voicebar-heading" data-state="idle">
       <h2 id="voicebar-heading" class="sr-only">New note</h2>
       <form id="compose" class="voicebar-inner" novalidate>
         <div class="voicebar-top">
+          <span class="voice-dot" aria-hidden="true"></span>
           <p id="voice-status" class="voice-status" role="status" aria-live="polite">Press the mic or type a note.</p>
           <button id="voice-allow" class="btn small primary" type="button" hidden>Allow microphone</button>
           <button id="voice-undo" class="btn small" type="button" hidden>Undo</button>
@@ -106,7 +120,7 @@
           </button>
           <div class="voicebar-field">
             <label for="compose-text" class="sr-only">Note</label>
-            <textarea id="compose-text" rows="1" dir="auto" maxlength="50000" placeholder="Type a note, or press the mic and talk…" enterkeyhint="send"></textarea>
+            <textarea id="compose-text" rows="1" dir="auto" maxlength="50000" placeholder="Type a note, or press the mic…" enterkeyhint="send"></textarea>
             <p id="voice-interim" class="voice-interim" dir="auto" aria-hidden="true" hidden></p>
           </div>
           <div class="voicebar-actions">

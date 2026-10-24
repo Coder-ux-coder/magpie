@@ -6,7 +6,7 @@ import { KINDS, noteCard } from "./cards.js";
 import { renderMarkdown } from "./markdown.js";
 import { speak } from "./speech.js";
 import { aiName, categoryOf, desktopApp, emit, local, on, snoozeLabel, speechLang, state, tz } from "./state.js";
-import { clear, clock, dayLabel, h, icon, toast, when } from "./ui.js";
+import { clear, clock, dayLabel, h, icon, iconButton, toast, when } from "./ui.js";
 
 const PAGE = 40;
 let list = { notes: [], hasMore: false, key: "", container: null };
@@ -35,13 +35,19 @@ function belongs(note, route, q) {
   }
 }
 
+function emptyBox(iconName, title, text, ...extra) {
+  return h("div", { class: "empty" },
+    h("span", { class: "empty-icon", "aria-hidden": "true" }, icon(iconName)),
+    h("h3", {}, title),
+    text ? h("p", {}, text) : null,
+    ...extra);
+}
+
 function emptyState(route, q) {
-  if (q) return h("div", { class: "empty" }, h("h3", {}, "No matches"), h("p", {}, `No notes mention “${q}”.`));
+  if (q) return emptyBox("search", "No matches", `No notes mention “${q}”.`);
   const wake = state.prefs?.wake_phrase || "notes on";
   if (route.view === "inbox") {
-    return h("div", { class: "empty" },
-      h("h3", {}, "Your inbox is clear"),
-      h("p", {}, "Capture anything. Magpie files it and decides when to remind you."),
+    return emptyBox("inbox", "Your inbox is clear", "Capture anything. Magpie files it and decides when to remind you.",
       h("ul", {},
         h("li", {}, desktopApp()
           ? `Say “${wake}” anywhere on this computer, or press the mic.`
@@ -53,19 +59,19 @@ function emptyState(route, q) {
     );
   }
   const messages = {
-    scheduled: "Nothing scheduled. Say when, like “remind me to call James at 5 pm”.",
-    reviews: `Share a YouTube video or an article and ${aiName()} will review it for you.`,
-    done: "Finished notes show up here.",
-    archived: "Archived notes show up here.",
+    scheduled: ["clock", "Nothing scheduled", "Say when, like “remind me to call James at 5 pm”, and it shows up here."],
+    reviews: ["play", "Nothing to watch or read", `Share a YouTube video or an article and ${aiName()} will review it for you.`],
+    done: ["check", "Nothing done yet", "Notes you mark as done show up here."],
+    archived: ["archive", "The archive is empty", "Notes you archive show up here."],
   };
   if (route.view === "category") {
     const name = categoryOf(route.category)?.name || "this category";
-    return h("div", { class: "empty" },
-      h("h3", {}, `Nothing in ${name} yet`),
-      h("p", {}, `Notes you write while this tab is open go into ${name}. You can also drag a note onto its tab, or pick ${name} in a note's details.`));
+    return emptyBox("note", `Nothing in ${name} yet`,
+      `Notes you write while ${name} is open go into it. You can also drag a note onto ${name} in the sidebar, or pick it in a note's details.`);
   }
-  const kind = route.kind ? KINDS[route.kind]?.label.toLowerCase() : null;
-  return h("div", { class: "empty" }, h("p", {}, messages[route.view] || `No ${kind || ""} notes yet.`));
+  if (messages[route.view]) return emptyBox(...messages[route.view]);
+  const kind = KINDS[route.kind] || KINDS.note;
+  return emptyBox(kind.icon, `No ${kind.label.toLowerCase()} notes yet`, null);
 }
 
 export async function renderNotes(container, route, q, isCurrent = () => true) {
@@ -186,26 +192,24 @@ function reminderCard(reminder) {
   const due = new Date(reminder.due_at);
   const sent = reminder.status === "sent";
   const sameTitle = Boolean(reminder.note_id) && reminder.note_title === reminder.message;
-  return h("li", {},
-    h("div", { class: "card reminder-row" },
-      h("span", { class: "time" }, sent ? when(due, tz()) : clock(due, tz())),
-      h("div", { class: "what" },
-        h("p", { dir: "auto" },
-          h("strong", {}, sameTitle ? h("a", { href: `#/note/${reminder.note_id}` }, reminder.message) : reminder.message),
-          reminder.rrule ? h("span", { class: "muted small" }, " · repeats") : null,
-        ),
-        reminder.note_id && !sameTitle
-          ? h("p", { class: "small" }, h("a", { href: `#/note/${reminder.note_id}` }, reminder.note_title || `Note #${reminder.note_id}`))
-          : null,
-        reminder.reason ? h("p", { class: "muted small", dir: "auto" }, reminder.reason) : null,
-        reminder.last_error ? h("p", { class: "small error" }, reminder.last_error) : null,
+  return h("li", { class: `reminder-row${sent ? " sent" : ""}` },
+    h("span", { class: "time" }, sent ? when(due, tz()) : clock(due, tz())),
+    h("div", { class: "what" },
+      h("p", { class: "message", dir: "auto" },
+        sameTitle ? h("a", { href: `#/note/${reminder.note_id}` }, reminder.message) : reminder.message,
+        reminder.rrule ? h("span", { class: "repeats", title: "Repeats" }, icon("refresh"), h("span", { class: "sr-only" }, " (repeats)")) : null,
       ),
-      h("div", { class: "actions" },
-        h("button", { type: "button", class: "btn small", onclick: () => reminderActions.done(reminder) }, icon("check"), "Done"),
-        h("button", { type: "button", class: "btn small", onclick: () => reminderActions.snooze(reminder), "aria-label": `Snooze for ${snoozeLabel()}` }, `+${snoozeLabel()}`),
-        h("button", { type: "button", class: "btn small", onclick: () => reminderActions.tomorrow(reminder) }, "Tomorrow"),
-        sent ? null : h("button", { type: "button", class: "btn small danger", onclick: () => reminderActions.cancel(reminder), "aria-label": `Cancel reminder: ${reminder.message}` }, "Cancel"),
-      ),
+      reminder.note_id && !sameTitle
+        ? h("p", { class: "small" }, h("a", { href: `#/note/${reminder.note_id}` }, reminder.note_title || `Note #${reminder.note_id}`))
+        : null,
+      reminder.reason ? h("p", { class: "muted small", dir: "auto" }, reminder.reason) : null,
+      reminder.last_error ? h("p", { class: "small error" }, reminder.last_error) : null,
+    ),
+    h("div", { class: "actions" },
+      h("button", { type: "button", class: "btn small", onclick: () => reminderActions.done(reminder) }, icon("check"), "Done"),
+      h("button", { type: "button", class: "btn small", onclick: () => reminderActions.snooze(reminder), "aria-label": `Snooze for ${snoozeLabel()}` }, `+${snoozeLabel()}`),
+      h("button", { type: "button", class: "btn small", onclick: () => reminderActions.tomorrow(reminder) }, "Tomorrow"),
+      sent ? null : iconButton("close", `Cancel reminder: ${reminder.message}`, () => reminderActions.cancel(reminder), { class: "icon-btn small danger", title: "Cancel this reminder" }),
     ),
   );
 }
@@ -222,7 +226,7 @@ export async function renderScheduled(container, isCurrent = () => true) {
     container.append(
       h("section", { class: "day-group", "aria-labelledby": "needs-response" },
         h("h3", { id: "needs-response" }, "Sent, waiting for you"),
-        h("ul", { class: "list", role: "list" }, recent.map(reminderCard)),
+        h("ul", { class: "timeline", role: "list" }, recent.map(reminderCard)),
       ),
     );
   }
@@ -242,7 +246,7 @@ export async function renderScheduled(container, isCurrent = () => true) {
     container.append(
       h("section", { class: "day-group", "aria-labelledby": id },
         h("h3", { id }, label),
-        h("ul", { class: "list", role: "list" }, reminders.map(reminderCard)),
+        h("ul", { class: "timeline", role: "list" }, reminders.map(reminderCard)),
       ),
     );
   }
@@ -274,7 +278,7 @@ export async function renderDigests(container, isCurrent = () => true) {
   const daily = h("button", { type: "button", class: "btn primary", onclick: () => run("daily", daily) }, icon("sun"), "Daily digest now");
   const weekly = h("button", { type: "button", class: "btn", onclick: () => run("weekly", weekly) }, icon("sparkles"), "Weekly review now");
   container.append(
-    h("div", { class: "card" },
+    h("div", { class: "card view-intro" },
       h("p", { class: "muted" }, "Magpie writes a daily digest (scheduled reminders, notes to revisit, new reviews) and a weekly review of themes and open loops. Set their times in Settings → Reminders."),
       h("div", { class: "row" }, daily, weekly),
       h("label", { class: "switch" }, send, h("span", { class: "switch-track", "aria-hidden": "true" }), "Also send to my notification channels"),
@@ -288,7 +292,7 @@ export async function renderDigests(container, isCurrent = () => true) {
     const date = new Date(digest.created_at);
     const title = `${digest.kind === "weekly" ? "Weekly review" : "Daily digest"} · ${dayLabel(date, tz())}, ${clock(date, tz())}`;
     return h("li", {},
-      h("article", { class: "card" },
+      h("article", { class: "card digest-card" },
         h("div", { class: "row spread" },
           h("h3", {}, title),
           h("button", { type: "button", class: "btn small", onclick: () => speak(digest.content, { lang: speechLang() }) }, icon("speaker"), "Read aloud"),
@@ -360,10 +364,10 @@ export function renderAsk(container) {
     ask(question);
   });
   container.append(
-    h("div", { class: "card" },
+    h("div", { class: "card view-intro" },
       h("p", { class: "muted" }, `${aiName()} answers from your notes and links to the ones it used.`),
       form,
-      h("div", { class: "chips", style: "margin-top: .75rem" },
+      h("div", { class: "chips" },
         SUGGESTIONS.map((s) => h("button", { type: "button", class: "chip", onclick: () => ask(s) }, s)),
       ),
     ),

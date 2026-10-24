@@ -10,11 +10,17 @@
 <body>
   <main id="bar" class="bar" data-state="idle">
     <div class="status pywebview-drag-region">
-      <span class="dot" aria-hidden="true"></span>
+      <!-- While recording: a dot, the time so far and how loud the microphone is. -->
+      <span class="pill" aria-hidden="true">
+        <span class="dot"></span>
+        <span id="timer" class="timer">0:00</span>
+        <span class="meter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      </span>
+      <span class="mark" aria-hidden="true"></span>
       <p id="status" class="status-text" role="status" aria-live="polite">Magpie</p>
     </div>
     <div class="words">
-      <textarea id="text" rows="2" dir="auto" spellcheck="true" aria-label="Your note" placeholder="Speak, or type your note"></textarea>
+      <textarea id="text" rows="1" dir="auto" spellcheck="true" aria-label="Your note" placeholder="Speak, or type your note"></textarea>
       <p id="partial" class="partial" aria-hidden="true" hidden></p>
       <p id="reply" class="reply" hidden></p>
     </div>
@@ -22,7 +28,7 @@
       <span id="keys" class="spacer">Enter saves · Esc cancels</span>
       <button id="undo" type="button" hidden>Undo</button>
       <button id="open" type="button" class="quiet" hidden>Open Magpie</button>
-      <button id="cancel" type="button">Cancel</button>
+      <button id="cancel" type="button" class="quiet">Cancel</button>
       <button id="save" type="button" class="primary">Save</button>
       <button id="close" type="button" class="quiet" hidden>Close</button>
     </div>

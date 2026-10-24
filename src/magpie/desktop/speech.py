@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import queue
 import sys
 import threading
@@ -533,6 +534,22 @@ def loudest(pcm: bytes) -> int:
     samples = array("h")
     samples.frombytes(pcm[: len(pcm) // 2 * 2])
     return max((abs(x) for x in (max(samples, default=0), min(samples, default=0))), default=0)
+
+
+METER_DB = 60.0  # the quietest sound the bar's meter shows, below the loudest
+
+
+def sound_level(pcm: bytes) -> float:
+    """How loud the sound is, from 0 (silence) to 1 (as loud as it gets), on the
+    decibel scale a meter uses: for the bar's level meter."""
+    samples = array("h")
+    samples.frombytes(pcm[: len(pcm) // 2 * 2])
+    if not samples:
+        return 0.0
+    rms = math.sqrt(sum(x * x for x in samples) / len(samples))
+    if rms < 1:
+        return 0.0
+    return round(max(0.0, min(1.0, 1 + 20 * math.log10(rms / 32768) / METER_DB)), 2)
 
 
 # ------------------------------------------------------------------------ engine

@@ -6,7 +6,7 @@ import { captureBusy, composeArea, focusCompose, setNoteContext, setupCapture, s
 import { closeNote, openNote } from "./note-dialog.js";
 import { openSettings, refreshStatus } from "./settings.js";
 import { aiName, applyLocal, categoryOf, desktopApp, deviceTimeZone, emit, local, on, saveLocal, state } from "./state.js";
-import { clear, copyText, debounce, h, icon, iconButton, toast } from "./ui.js";
+import { append, clear, copyText, debounce, h, icon, iconButton, toast } from "./ui.js";
 import { detachList, renderAsk, renderDigests, renderNotes, renderScheduled, visibleNotes } from "./views.js";
 
 const $ = (id) => document.getElementById(id);
@@ -236,6 +236,7 @@ async function startApp() {
   setupCapture();
   setupSearch();
   setupKeyboard();
+  setupNav();
   $("btn-settings").addEventListener("click", () => openSettings());
   $("btn-shortcuts").addEventListener("click", showShortcuts);
   $("footer-shortcuts").addEventListener("click", showShortcuts);
@@ -436,49 +437,102 @@ function noteContext() {
   return { captured_in: viewInfo(currentView).label };
 }
 
-function tab(hash, content, { count, className = "", drop = null } = {}) {
+function navItem(hash, content, { count, className = "", drop = null } = {}) {
   const active = !state.q && hash === currentView;
-  const link = h("a", { class: `tab ${className}`.trim(), href: `#/${hash}`, "aria-current": active ? "page" : null },
+  const link = h("a", { class: `nav-item ${className}`.trim(), href: `#/${hash}`, "aria-current": active ? "page" : null },
     content,
     count ? h("span", { class: "count" }, h("span", { class: "sr-only" }, ", "), String(count)) : null);
   if (drop) acceptNotes(link, drop);
   return h("li", {}, link);
 }
 
+function viewItem(hash) {
+  const view = VIEWS.find((v) => v.hash === hash);
+  return navItem(view.hash, [icon(view.icon), h("span", { class: "label" }, view.label)], {
+    count: view.count ? counts[view.count] : null,
+    drop: dropOn(view),
+  });
+}
+
+function navList(items) {
+  return h("ul", { class: "nav-list", role: "list" }, items);
+}
+
+function navGroup(id, label, items, action = null) {
+  return h("section", { class: "nav-group", "aria-labelledby": id },
+    h("div", { class: "nav-heading" }, h("h2", { id }, label), action),
+    navList(items));
+}
+
+// The sidebar: the main views, your own categories (in your order and colours, and
+// notes can be dropped on them), the kinds there are notes of, then the rest.
 function renderTabs() {
-  const list = $("view-tabs");
-  clear(list);
+  const box = $("view-tabs");
   const categories = state.categories || [];
-  for (const view of VIEWS) {
-    const count = view.count ? counts[view.count] : null;
-    if (view.hash.startsWith("kind/") && !count && view.hash !== currentView) continue;
-    list.append(tab(view.hash, [icon(view.icon), view.label], { count, drop: dropOn(view) }));
-    if (view.hash !== "inbox") continue;
-    // Your own categories come straight after the inbox, in your order and colours.
-    for (const category of categories) {
-      list.append(tab(`category/${category.id}`, [h("span", { class: "swatch-dot", "aria-hidden": "true" }), h("span", { dir: "auto" }, category.name)], {
-        count: category.count,
-        className: `category swatch-${category.color}`,
-        drop: (note) => noteActions.moveTo(note, category),
-      }));
+  const kinds = VIEWS.filter((v) => v.hash.startsWith("kind/") && (counts[v.count] || v.hash === currentView));
+  const addCategory = () => openSettings("categories");
+  append(clear(box), [
+    navList(["inbox", "scheduled", "reviews"].map(viewItem)),
+    navGroup("nav-categories", "Categories",
+      categories.length
+        ? categories.map((category) => navItem(`category/${category.id}`,
+            [h("span", { class: "swatch-dot", "aria-hidden": "true" }), h("span", { class: "label", dir: "auto" }, category.name)], {
+              count: category.count,
+              className: `category swatch-${category.color}`,
+              drop: (note) => noteActions.moveTo(note, category),
+            }))
+        : [h("li", {}, h("button", { type: "button", class: "nav-item add-category", onclick: addCategory }, icon("plus"), h("span", { class: "label" }, "Add a category")))],
+      categories.length ? iconButton("plus", "Add a category", addCategory, { class: "icon-btn small", title: "Add a category" }) : null),
+    kinds.length ? navGroup("nav-kinds", "Kinds", kinds.map((v) => viewItem(v.hash))) : null,
+    navList(["digests", "ask"].map(viewItem)),
+    navList(["done", "archived"].map(viewItem)),
+  ]);
+}
+
+// ------------------------------------------------------- the menu (narrow screens)
+
+// Below this width the sidebar is a drawer, opened with the menu button.
+const narrow = window.matchMedia("(max-width: 63.99rem)");
+
+function navOpen() {
+  return $("app").classList.contains("nav-open");
+}
+
+function setNav(open, { focus = true } = {}) {
+  const drawer = narrow.matches;
+  const opened = drawer && open;
+  $("app").classList.toggle("nav-open", opened);
+  $("nav-backdrop").hidden = !opened;
+  $("btn-menu").setAttribute("aria-expanded", String(opened));
+  // A closed drawer is off screen, and an open one covers the notes: neither may
+  // take the keyboard while it can't be seen.
+  $("sidebar").inert = drawer && !open;
+  document.querySelector(".workspace").inert = opened;
+  $("voicebar").inert = opened;
+  if (!focus) return;
+  if (opened) ($("sidebar").querySelector('[aria-current="page"]') || $("sidebar").querySelector("a, button"))?.focus();
+  else if (drawer) $("btn-menu").focus();
+}
+
+function setupNav() {
+  $("btn-menu").addEventListener("click", () => setNav(!navOpen()));
+  $("btn-close-nav").addEventListener("click", () => setNav(false));
+  $("nav-backdrop").addEventListener("click", () => setNav(false));
+  $("sidebar").addEventListener("click", (event) => {
+    // Picking a view closes the drawer; the notes take the keyboard from there.
+    if (!navOpen() || !event.target.closest("a.nav-item")) return;
+    setNav(false, { focus: false });
+    $("main").focus({ preventScroll: true });
+  });
+  $("sidebar").addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && navOpen()) {
+      event.preventDefault();
+      event.stopPropagation();
+      setNav(false);
     }
-    list.append(h("li", {}, h("button", {
-      type: "button",
-      class: "tab add-category",
-      title: "Add a category",
-      "aria-label": categories.length ? "Add a category" : null,
-      onclick: () => openSettings("categories"),
-    }, icon("plus"), categories.length ? null : "Add a category")));
-  }
-  // Scroll the tab strip sideways only: scrollIntoView() would also scroll the page.
-  const active = list.querySelector('[aria-current="page"]');
-  const strip = list.closest(".views");
-  if (active && strip && strip.scrollWidth > strip.clientWidth) {
-    const a = active.getBoundingClientRect();
-    const s = strip.getBoundingClientRect();
-    if (a.left < s.left) strip.scrollLeft -= s.left - a.left;
-    else if (a.right > s.right) strip.scrollLeft += a.right - s.right;
-  }
+  });
+  narrow.addEventListener("change", () => setNav(false, { focus: false }));
+  setNav(false, { focus: false });
 }
 
 let renderToken = 0;
@@ -487,6 +541,7 @@ async function renderView() {
   const current = () => token === renderToken;
   const container = $("view");
   const title = $("view-title");
+  title.className = "view-title";
   renderTabs();
   if (!container.firstElementChild || container.querySelector(".empty .btn")) {
     clear(container).append(h("p", { class: "muted", role: "status" }, "Loading…"));
@@ -527,6 +582,7 @@ async function renderView() {
         return;
       }
       title.textContent = category.name;
+      title.classList.add("category-title", `swatch-${category.color}`);
     } else {
       title.textContent = TITLES[view] || "Inbox";
       await renderNotes(container, { view }, "", current);
@@ -696,6 +752,10 @@ function setupKeyboard() {
     if (event.altKey && event.code === "KeyN") {
       event.preventDefault();
       toggleMic();
+      return;
+    }
+    if (event.key === "Escape" && navOpen()) {
+      setNav(false);
       return;
     }
     if (event.key === "Escape" && !document.querySelector("dialog[open]")) {

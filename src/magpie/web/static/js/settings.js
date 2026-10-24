@@ -516,6 +516,25 @@ function accountSection() {
   );
 }
 
+// The list of sections marks the one being read.
+function trackSection(body) {
+  const links = [...body.querySelectorAll(".settings-link")];
+  let frame = 0;
+  const update = () => {
+    frame = 0;
+    const top = body.getBoundingClientRect().top + 90; // below the list, on narrow screens
+    let current = links[0]?.dataset.section;
+    for (const section of body.querySelectorAll(".settings-section")) {
+      if (section.getBoundingClientRect().top <= top) current = section.id.replace("settings-", "");
+    }
+    // At the very end, the last sections may be too short to reach the top.
+    if (body.scrollTop > 0 && body.scrollTop + body.clientHeight >= body.scrollHeight - 2) current = links.at(-1)?.dataset.section;
+    for (const link of links) link.setAttribute("aria-current", String(link.dataset.section === current));
+  };
+  body.addEventListener("scroll", () => { frame ||= requestAnimationFrame(update); }, { passive: true });
+  update();
+}
+
 export async function openSettings(focusSection) {
   const el = dialog();
   const wasOpen = el.open;
@@ -528,7 +547,7 @@ export async function openSettings(focusSection) {
   ];
   const bodyEl = h("div", { class: "sheet-body" },
     h("nav", { class: "settings-nav", "aria-label": "Settings sections" },
-      sections.map(([id, label]) => h("a", { class: "tab", href: `#settings-${id}`, onclick: (event) => {
+      sections.map(([id, label]) => h("a", { class: "settings-link", href: `#settings-${id}`, dataset: { section: id }, onclick: (event) => {
         event.preventDefault();
         el.querySelector(`#settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
       } }, label)),
@@ -551,6 +570,7 @@ export async function openSettings(focusSection) {
     ),
   );
   if (!wasOpen) el.showModal();
+  trackSection(bodyEl);
   integrationsSection()
     .then((node) => el.querySelector("#integrations-slot")?.replaceWith(node))
     .catch((error) => toast(error.message, { error: true }));

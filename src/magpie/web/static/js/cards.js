@@ -37,6 +37,12 @@ export function kindBadge(kind) {
   return h("span", { class: "kind", dataset: { kind } }, icon(info.icon), info.label);
 }
 
+// The kind as a small coloured icon at the start of a card (its name for screen readers).
+export function kindIcon(kind) {
+  const info = KINDS[kind] || KINDS.note;
+  return h("span", { class: "kind-icon", dataset: { kind }, title: info.label }, icon(info.icon), h("span", { class: "sr-only" }, `${info.label}: `));
+}
+
 export function noteTitle(note) {
   if (note.title) return note.title;
   const words = (note.text || note.raw_text || "").split(/\s+/).filter(Boolean);
@@ -70,8 +76,7 @@ export function stars(rating) {
 export function noteChips(note) {
   const chips = [];
   const category = categoryOf(note.category_id);
-  if (category) chips.push(h("span", { class: `chip category swatch-${category.color}` }, category.name));
-  if (note.pinned) chips.push(h("span", { class: "chip pinned" }, icon("pin"), "Pinned"));
+  if (category) chips.push(h("span", { class: `chip category swatch-${category.color}`, dir: "auto" }, category.name));
   if (note.state === "processing" || (note.state === "pending" && !note.error)) {
     chips.push(h("span", { class: "chip pending" }, h("span", { class: "spinner", "aria-hidden": "true" }), `${aiName()} is filing this…`));
   } else if (note.state === "pending" && note.error) {
@@ -100,7 +105,7 @@ export function noteChips(note) {
       chips.push(h("span", { class: "chip failed", title: link.error || "" }, icon("link"), "Couldn't review link"));
     }
   }
-  for (const tag of note.tags || []) chips.push(h("span", { class: "chip" }, `#${tag}`));
+  for (const tag of note.tags || []) chips.push(h("span", { class: "chip tag", dir: "auto" }, `#${tag}`));
   return chips;
 }
 
@@ -111,6 +116,7 @@ export function noteCard(note, actions) {
   const done = note.status === "done";
   const archived = note.status === "archived";
   const category = categoryOf(note.category_id);
+  const chips = noteChips(note);
   const card = h(
     "article",
     {
@@ -119,18 +125,21 @@ export function noteCard(note, actions) {
       "aria-labelledby": titleId,
       draggable: "true",
     },
-    h("div", { class: "head" },
-      kindBadge(note.kind),
-      h("span", { class: "note-time" }, h("time", { datetime: note.created_at, title: new Date(note.created_at).toLocaleString() }, ago(note.created_at))),
-    ),
-    h("h3", { class: "note-title", id: titleId, dir: "auto" }, h("a", { href: `#/note/${note.id}` }, title)),
-    snippetText && snippetText !== title ? h("p", { class: "snippet", dir: "auto" }, snippetText) : null,
-    h("div", { class: "chips" }, noteChips(note)),
-    h("div", { class: "card-actions" },
-      iconButton(done ? "undo" : "check", done ? "Mark as not done" : "Mark as done", () => actions.toggleDone(note), { "aria-pressed": String(done) }),
-      iconButton("pin", note.pinned ? "Unpin" : "Pin to top", () => actions.togglePin(note), { "aria-pressed": String(note.pinned) }),
-      iconButton("archive", archived ? "Move back to inbox" : "Archive", () => actions.toggleArchive(note)),
-      iconButton("trash", "Delete", () => actions.remove(note)),
+    kindIcon(note.kind),
+    h("div", { class: "note-body" },
+      h("div", { class: "note-head" },
+        h("h3", { class: "note-title", id: titleId, dir: "auto" }, h("a", { href: `#/note/${note.id}` }, title)),
+        note.pinned ? h("span", { class: "pin-mark", title: "Pinned" }, icon("pin"), h("span", { class: "sr-only" }, "Pinned")) : null,
+        h("span", { class: "note-time" }, h("time", { datetime: note.created_at, title: new Date(note.created_at).toLocaleString() }, ago(note.created_at))),
+      ),
+      snippetText && snippetText !== title ? h("p", { class: "snippet", dir: "auto" }, snippetText) : null,
+      chips.length ? h("div", { class: "chips" }, chips) : null,
+      h("div", { class: "card-actions" },
+        iconButton(done ? "undo" : "check", done ? "Mark as not done" : "Mark as done", () => actions.toggleDone(note), { "aria-pressed": String(done) }),
+        iconButton("pin", note.pinned ? "Unpin" : "Pin to top", () => actions.togglePin(note), { "aria-pressed": String(note.pinned) }),
+        iconButton("archive", archived ? "Move back to inbox" : "Archive", () => actions.toggleArchive(note)),
+        iconButton("trash", "Delete", () => actions.remove(note), { class: "icon-btn danger" }),
+      ),
     ),
   );
   // Drag a card onto a category tab to move it there (the note dialog has the same choice).

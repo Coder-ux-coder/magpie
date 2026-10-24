@@ -32,7 +32,7 @@ let updateHeight = () => {};
 let noteContext = () => ({}); // the tab a note is written in (set by app.js)
 let startedIn = null; // that tab, for a recording, when it started
 
-const PLACEHOLDER = "Type a note, or press the mic and talk…";
+const PLACEHOLDER = "Type a note, or press the mic…";
 const wakePhrase = () => state.prefs?.wake_phrase || "notes on";
 const stopPhrase = () => state.prefs?.stop_phrase || "notes off";
 const pipSupported = "documentPictureInPicture" in window;

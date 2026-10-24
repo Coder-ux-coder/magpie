@@ -91,7 +91,8 @@ function render(note, { keepScroll = false, force = false } = {}) {
     h("div", { class: "sheet-inner" },
       h("div", { class: "sheet-head" },
         titleBlock(note, title),
-        iconButton("speaker", "Read this note aloud", () => speak(`${title}. ${note.text || note.raw_text}`, { lang: speechLang() })),
+        iconButton("copy", "Copy the note", () => copyText(note.text || note.raw_text, "Note copied."), { title: "Copy the note" }),
+        iconButton("speaker", "Read this note aloud", () => speak(`${title}. ${note.text || note.raw_text}`, { lang: speechLang() }), { title: "Read it aloud" }),
         iconButton("close", "Close", close),
       ),
       h("div", { class: "sheet-body" }, body(note)),
@@ -411,7 +412,6 @@ function footer(note) {
     h("button", { type: "button", class: "btn", onclick: () => noteActions.togglePin(note), "aria-pressed": String(note.pinned) }, icon("pin"), note.pinned ? "Unpin" : "Pin"),
     h("button", { type: "button", class: "btn", onclick: () => noteActions.toggleArchive(note) }, icon("archive"), archived ? "Unarchive" : "Archive"),
     h("button", { type: "button", class: "btn", onclick: () => noteActions.reprocess(note) }, icon("sparkles"), `Ask ${aiName()} again`),
-    h("button", { type: "button", class: "btn", onclick: () => copyText(note.text || note.raw_text, "Note copied.") }, icon("copy"), "Copy"),
     h("button", {
       type: "button",
       class: "btn danger",
