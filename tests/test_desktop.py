@@ -1320,20 +1320,20 @@ def test_a_speech_service_writes_the_note_down_and_whisper_steps_in_when_it_fail
     assert app.client.sent[0].startswith(b"RIFF")  # the note's sound, as a WAV file
     assert app.whisper.transcriber.heard == []  # Whisper wasn't needed
 
+    def said(words: str) -> bool:  # what the bar said while saving
+        return any(words in p[0].get("status", "") for p in app.ui.bar("saving"))
+
     app.client.heard = RuntimeError("Groq refused the key.")
     voice_note(app, "call james at five")
-    settle(app, lambda: len(app.client.notes) == 2)
+    settle(app, lambda: len(app.client.notes) == 2 and said("Groq refused the key."))
     assert app.client.notes[-1] == ("Call James at 5.", "desktop-voice")
     assert app.whisper.transcriber.words == ["James", "Kinnaird Road"]
-    said = [p[0].get("status", "") for p in app.ui.bar("saving")]
-    assert any("Groq refused the key." in s and "Whisper wrote it down" in s for s in said)
+    assert said("so Whisper wrote it down")
 
     app.whisper = FakeWhisper()  # no Whisper either: the listener's words, and it says so
     voice_note(app, "water the plants")
-    settle(app, lambda: len(app.client.notes) == 3)
+    settle(app, lambda: len(app.client.notes) == 3 and said("keeps the words Magpie heard"))
     assert app.client.notes[-1] == ("water the plants", "desktop-voice")
-    said = [p[0].get("status", "") for p in app.ui.bar("saving")]
-    assert any("keeps the words Magpie heard" in s for s in said)
 
 
 def test_a_dictation_app_of_your_own_types_the_note_into_the_bar(app):

@@ -29,7 +29,11 @@ jobs:
           ruff check src tests scripts
           ruff format --check src tests scripts
       - name: Test
-        run: pytest -q
+        run: |
+          code=0
+          pytest -q --junitxml=build/tests.xml || code=$?
+          python packaging/report.py --junit build/tests.xml  # failed tests, on the summary
+          exit $code
 
   web:
     name: Web app
