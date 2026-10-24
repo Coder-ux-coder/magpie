@@ -10,6 +10,9 @@ All notable changes to Magpie are documented here. The format follows
 
 ### Fixed
 
+- **Messages shown while a window was open on top were hidden behind it**: a wrong key on
+  the welcome screen or in Settings, “Saved” in a note, and others. They now appear in
+  front, and screen readers announce them; when the window closes they stay up.
 - When a speech service of your own fails, the bar's message reads properly ("Groq refused
   the key. Whisper wrote it down instead."), and service names start sentences with a
   capital letter.

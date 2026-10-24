@@ -56,7 +56,27 @@ export function $(selector, root = document) {
 
 // ------------------------------------------------------------------ toasts
 
-const toasts = () => document.getElementById("toasts");
+// While a dialog is open, the rest of the page is behind it, and silent to screen
+// readers: messages go inside the dialog then, and back onto the page when it closes.
+function inDialog(selector, attrs) {
+  // The dialog on top has the keyboard (opening one moves it in); else the newest.
+  const dialog =
+    document.activeElement?.closest?.("dialog[open]") || [...document.querySelectorAll("dialog[open]")].at(-1);
+  if (!dialog) return null;
+  let box = dialog.querySelector(`:scope > ${selector}`);
+  if (!box) {
+    box = h("div", attrs);
+    dialog.append(box);
+    if (selector === ".toasts") {
+      // Into the dialog underneath (a confirmation over the welcome screen), or the page.
+      dialog.addEventListener("close", () => toasts().append(...box.children));
+    }
+  }
+  return box;
+}
+
+const toasts = () =>
+  inDialog(".toasts", { class: "toasts", role: "status", "aria-live": "polite" }) || document.getElementById("toasts");
 
 export function toast(message, { action, onAction, error = false, timeout = 5000 } = {}) {
   const box = toasts();
@@ -81,7 +101,9 @@ export function toast(message, { action, onAction, error = false, timeout = 5000
 }
 
 export function announce(message) {
-  const region = document.getElementById("alerts");
+  const region =
+    inDialog(".sr-only[role=alert]", { class: "sr-only", role: "alert", "aria-live": "assertive" }) ||
+    document.getElementById("alerts");
   region.textContent = "";
   setTimeout(() => { region.textContent = message; }, 50);
 }
