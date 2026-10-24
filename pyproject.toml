@@ -48,7 +48,7 @@ mcp = ["mcp>=2.3,<3"]
 # The desktop app (magpie desktop): offline listening, writing notes down accurately
 # (Whisper), its windows and the tray icon.
 desktop = [
-    "vosk>=0.3.45",
+    "vosk>=0.3.44",  # 0.3.45 has no build for a Mac, so a Mac gets 0.3.44
     "faster-whisper>=1.1",
     "sounddevice>=0.5",
     "pywebview>=6.2",
