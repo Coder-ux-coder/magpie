@@ -43,17 +43,3 @@ jobs:
         run: for f in src/magpie/web/static/js/*.js src/magpie/web/static/desktop/*.js src/magpie/web/sw.js; do node --check "$f"; done
       - name: Test
         run: node --test "tests/js/*.test.mjs"
-
-  docker:
-    name: Docker image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: docker build -t magpie:ci .
-      - name: Smoke test
-        run: |
-          docker run -d --name magpie -p 8000:8000 -e MAGPIE_PASSWORD=ci -e MAGPIE_BRAIN=fake magpie:ci
-          for i in $(seq 1 30); do curl -fsS localhost:8000/healthz && exit 0; sleep 1; done
-          docker logs magpie
-          exit 1

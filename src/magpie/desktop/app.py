@@ -97,6 +97,7 @@ class Bridge:
             "wake": app.wake_phrase,
             "version": __version__,
             "speech": app.whisper.status() if app.whisper is not None else None,
+            "update": app.updater.status() if app.updater is not None else None,
         }
 
     def command(self, action: str) -> None:
@@ -111,6 +112,10 @@ class Bridge:
             app.open_notes()
         elif action in ("listen", "pause"):
             app.set_listening(action == "listen")
+        elif action == "check_update":
+            app.check_for_updates()
+        elif action == "install_update" and app.updater is not None:
+            app.updater.install_now()
 
     def notify(self, payload: dict[str, Any]) -> None:
         self._app.show_alert(payload)
@@ -243,7 +248,11 @@ class DesktopApp:
         if model is None:
             threading.Thread(target=self._fetch_model, name="magpie-model", daemon=True).start()
         self.updater = Updater(
-            __version__, self.paths.updates_dir, idle=self._idle, quit_app=self.quit
+            __version__,
+            self.paths.updates_dir,
+            idle=self._idle,
+            quit_app=self.quit,
+            on_change=self._update_changed,
         )
         self.updater.start()
         threading.Thread(target=self._clock_loop, name="magpie-clock", daemon=True).start()
@@ -401,6 +410,20 @@ class DesktopApp:
         if not self.listening:
             self.set_listening(True)
         self.voice("start")
+
+    def check_for_updates(self) -> None:
+        """The update button (and the tray's menu): look now, and say what was found."""
+        if self.updater is not None:
+            self.updater.check_now()
+
+    def _update_changed(self) -> None:
+        updater = self.updater
+        if updater is None or not updater.asked or self.tray is None:
+            return
+        if updater.state == "ready" and updater.installing_now:
+            return  # it restarts in a moment anyway
+        if updater.state in ("current", "ready", "error", "unsupported"):
+            self.tray.notify(updater.message)
 
     def _idle(self) -> bool:
         return self.voice_state != "recording" and not (self.ui and self.ui.bar_visible)

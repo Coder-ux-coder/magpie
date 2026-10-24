@@ -1,4 +1,3 @@
-# Windows needs CRLF in batch files; shell scripts must stay LF.
-*.cmd -text
+# Shell scripts must stay LF, also when checked out on Windows.
 *.sh text eol=lf
 *.ico binary

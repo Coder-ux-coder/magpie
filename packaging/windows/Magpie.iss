@@ -1,4 +1,4 @@
-; Inno Setup script for MagpieSetup.exe (the "Windows app" workflow builds it):
+; Inno Setup script for MagpieSetup.exe (the "App" workflow builds it):
 ;   iscc /DAppVersion=0.4.0 packaging\windows\Magpie.iss
 ; It installs dist\Magpie (made by magpie.spec) for the current user, without asking
 ; anything: no administrator rights, no pages to click through. Magpie starts as soon
@@ -20,7 +20,7 @@ AppSupportURL=https://github.com/Coder-ux-coder/magpie/issues
 SourceDir=..\..
 OutputDir=dist
 OutputBaseFilename=MagpieSetup
-SetupIconFile=magpie.ico
+SetupIconFile=packaging\windows\magpie.ico
 UninstallDisplayIcon={app}\Magpie.exe
 UninstallDisplayName=Magpie
 DefaultDirName={localappdata}\Programs\Magpie

@@ -28,7 +28,7 @@ up and summarised without filing anything by hand.
 
 ### Core loop
 
-1. **Capture.** On Windows, the Magpie app listens for "notes on" all the time,
+1. **Capture.** On Windows and Mac, the Magpie app listens for "notes on" all the time,
    offline and in any program, without the user turning anything on: saying it
    (at the start of what they say) brings up a small floating bar at the bottom
    of the screen with the words as they are spoken, without taking the keyboard
@@ -37,11 +37,10 @@ up and summarised without filing anything by hand.
    bar lets the user type into it. When the note ends, the app writes it down
    again from its sound with an accurate offline recogniser (Whisper), which copes
    with accents and adds punctuation, and saves that; the quick listener's words are
-   the fallback, so a note is never lost. In the notes window (and any browser) a voice
-   bar sits at the bottom of every view and works the same way; in a browser it
-   can pop out into a small always-on-top window. The same note can come from the
-   mic button, typed text, a link shared from the phone's share sheet, a Telegram
-   text or voice message, a Siri Shortcut, or the HTTP API.
+   the fallback, so a note is never lost. In the notes window a voice bar sits at the
+   bottom of every view and works the same way. The same note can come from the mic
+   button, typed text, a Telegram text or voice message, Claude through MCP, or the
+   HTTP API.
 2. **Understand.** The AI cleans the transcript (filler words, recognition
    mistakes, false starts) without changing its meaning. It gives the note a
    title (which the user can edit), a kind (task, idea, link, journal, meeting,
@@ -81,11 +80,10 @@ up and summarised without filing anything by hand.
    Users can give the AI standing instructions ("tag shop notes #shop", "remind me
    30 minutes before meetings"), choose the snooze length, and adjust everything
    else in Settings.
-8. **Stay current.** Installed copies update themselves and keep every note and
-   setting: the app installs a new release when no note is being taken, after
-   checking it against the release's checksum; Docker installs update within the
-   hour and go back to the previous version if a new one fails to start. Open
-   windows load the new version when nobody is using them. Moving from Docker to
+8. **Stay current.** The app updates itself and keeps every note and setting: it
+   installs a new release when no note is being taken, after checking it against the
+   release's checksum, on Windows and on a Mac; an update button (Settings → Updates,
+   and the app's menu) checks or installs right away. Moving from Magpie in Docker to
    the app brings the notes and settings along by itself.
 9. **Without an API key.** A version of Magpie runs as a Claude artifact, where
    the user's own Claude account files the notes; its notes can be exported into a
@@ -94,8 +92,8 @@ up and summarised without filing anything by hand.
 
 ### Constraints
 
-- **Easy to run.** One process, one SQLite file, Docker or Python 3.11+. No
-  external service is required: the AI can be Claude, any OpenAI-compatible
+- **Easy to run.** One installer (Windows) or one Terminal line (Mac); one process and
+  one SQLite file (Python 3.11+ underneath). No external service is required: the AI can be Claude, any OpenAI-compatible
   service (OpenAI, Gemini, OpenRouter, Groq, a local Ollama) or simple rules, and
   Telegram, speech-to-text and email are optional.
 - **No password, secure by default.** The dashboard only answers on the user's
@@ -133,9 +131,9 @@ verification and paid templates), calendar sync and image notes.
    reminder, or with one suggested shortly before the trip in proactive mode.
 5. The daily digest at 08:00 lists today's reminders, notes waiting for the
    digest and fresh reviews.
-6. Installing MagpieSetup.exe, with nothing to answer and no password, gives a
-   running app by the clock that starts with Windows, and a welcome screen to
-   choose the AI. Saying "notes on, call James, notes off" in another program shows
+6. Installing MagpieSetup.exe (or running install.sh on a Mac), with nothing to answer
+   and no password, gives a running app by the clock (or in the menu bar) that starts
+   with the computer, and a welcome screen to choose the AI. Saying "notes on, call James, notes off" in another program shows
    the floating bar with the words and saves the note, without taking the keyboard
    from that program.
 7. With no AI set up, notes are still saved and are processed once one is chosen;
@@ -144,10 +142,9 @@ verification and paid templates), calendar sync and image notes.
    Home moves it there (with Undo), and similar notes go to Home afterwards.
 9. A reminder pops up on the computer and arrives as an email whose subject says
    what is due and when.
-10. A new published version reaches an installed copy (within hours for the app,
-    about an hour in Docker) without losing notes; a Docker version that fails to
-    start is rolled back, and the app never installs a download that doesn't match
-    its release.
+10. A new published version reaches an installed app within hours, or at once from
+    the update button, without losing notes; the app never installs a download that
+    doesn't match its release, and a Mac puts the old app back if the swap fails.
 11. Installing the app on a computer that ran Magpie in Docker brings over its
     notes and settings and stops the Docker copy, so no reminder arrives twice.
 
@@ -158,15 +155,16 @@ verification and paid templates), calendar sync and image notes.
 | Wake phrase (app) | Vosk offline: a grammar recogniser that only knows the command word listens all the time; from the exact end of the command word (a few seconds of audio are kept) a full recogniser writes the note, and a second grammar listens for the stop and cancel words | Private and free, cheap enough to run all day, and the word timings put the start and end of a note exactly where they were said. |
 | Writing notes down (app) | Whisper (faster-whisper, `small.en` by default, `large-v3-turbo` for strong accents) on the note's own sound once it ends; the model is downloaded once, not shipped | Far more accurate than the always-on recogniser, and offline; running it only when a note ends keeps listening cheap, and keeping it out of the installer keeps updates small. |
 | Wake phrase (browser) | Browser Web Speech API in continuous mode, fuzzy-matching "notes on" and "notes off" | Free, real-time and needs no server audio. Falls back to recording plus server speech-to-text. |
-| The app | The same server runs inside the app (127.0.0.1); pywebview (WebView2) windows, a pystray tray icon; PyInstaller and Inno Setup make a per-user installer; updates come from GitHub releases | One codebase for the app, Docker and servers; no admin rights; the windows are the web app's own pages. |
-| Phone capture | Telegram voice notes, an iOS Shortcut ("Hey Siri, notes on") and the PWA | Background listening is not possible in a mobile browser, so these use the OS's own voice entry points. |
+| The app | The same server runs inside the app (127.0.0.1); pywebview windows (WebView2, or WebKit on a Mac), a pystray tray or menu bar icon; PyInstaller makes the app, Inno Setup a per-user Windows installer, and a zip plus install.sh the Mac's Magpie.app; updates come from GitHub releases | One codebase for both systems; no admin rights; the windows are the web app's own pages. |
+| Mac distribution | An ad-hoc signed Magpie.app for Apple silicon, installed with a Terminal line (curl doesn't quarantine it), updated by swapping the bundle | No paid Apple developer account; Gatekeeper only stops apps a browser downloaded. |
+| Phone capture | Telegram text and voice notes, and email for reminders | The app only answers on its own computer; Telegram and email reach the phone without opening it to the network. |
 | Speech-to-text on the server | Any OpenAI-compatible `/audio/transcriptions` endpoint | One integration covers OpenAI, Groq and self-hosted Whisper servers. Claude does not take audio input. |
 | Model | `claude-haiku-5-5` with structured outputs and per-task effort; Sonnet 5.5 and Opus 5.5 selectable | Fast and low-cost for short notes; Settings → AI or `MAGPIE_MODEL` switches it. |
 | Other AIs | One OpenAI-compatible client: JSON schema, then JSON mode, then the schema in the prompt, plus one repair round | Covers OpenAI, Gemini, OpenRouter, Groq, Ollama and others with one integration, whatever each supports. |
 | Claude accounts | A Claude artifact version of Magpie | A self-hosted app can't use a Claude subscription (Anthropic doesn't allow apps to offer claude.ai sign-in or its limits); inside Claude, the user's own account files the notes. |
 | ChatGPT accounts | Codex, run as a program (`codex exec`) where it's installed and signed in: read-only, without its tools, the note on stdin, the answer's shape as a JSON schema | No key in Magpie and no sign-in handled by Magpie; Codex's own plan and limits apply. |
 | No password | Listening on 127.0.0.1 only, plus a Host-header check | Simplest for one person on one computer; safe against DNS rebinding. Only a server reachable by other devices sets one. |
-| Updates | The app: latest.json from the GitHub release, size and SHA-256 checked, a silent install when idle. Docker: a small updater container (hourly pull, health check, roll back) | Installs keep up without the user doing anything; notes live outside the program. |
+| Updates | latest.json from the GitHub release names each system's download, size and SHA-256; it's installed when idle, or at once from the update button | Installs keep up without the user doing anything; notes live outside the program. |
 | Reminder times | Claude returns local wall-clock times; the server converts them with the user's IANA time zone | Avoids offset and DST mistakes in model output. |
 | Storage | SQLite with FTS5 | Zero setup, fast full-text search, one file to back up. |
 | Frontend | Vanilla JS PWA, no build step | Anyone can run, read and modify it. |

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import sys
 import threading
 import time
 import wave
@@ -43,6 +44,11 @@ log = logging.getLogger(__name__)
 
 RATE = 16000
 CHUNK_SECONDS = 0.25
+# Where to let Magpie use the microphone, when it hears only silence.
+MIC_SETTINGS = {
+    "win32": "Windows lets desktop apps use it (Settings → Privacy → Microphone)",
+    "darwin": "Magpie may use it (System Settings → Privacy & Security → Microphone)",
+}.get(sys.platform, "Magpie may use it")
 NOTHING_SAID_SECONDS = 10.0  # after a false wake, give up this soon even with no timeout set
 SETTLE_SECONDS = 0.5  # a stop word in a partial result must stand this long
 
@@ -642,8 +648,7 @@ class VoiceEngine:
                     self._set(
                         "muted",
                         "Magpie hears only silence. Check that the microphone isn't muted, "
-                        "and that Windows lets desktop apps use it (Settings → Privacy → "
-                        "Microphone).",
+                        f"and that {MIC_SETTINGS}.",
                     )
             else:
                 silent_since = None

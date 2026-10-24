@@ -1,9 +1,9 @@
-name: Windows app
+name: App
 
-# Builds the Magpie app for Windows (MagpieSetup.exe) and checks it on a real Windows
-# machine: the built app, then the installer and the installed app. On main, each new
-# version (the one in pyproject.toml) is published as a GitHub release; installed apps
-# update themselves from its latest.json.
+# Builds the Magpie app for Windows (MagpieSetup.exe) and for Macs with Apple silicon
+# (Magpie-mac.zip), and checks each on a real machine: the built app, then the installed
+# app. On main, each new version (the one in pyproject.toml) is published as a GitHub
+# release; installed apps update themselves from its latest.json.
 on:
   push:
     branches: [main]
@@ -14,12 +14,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-app-${{ github.ref }}
+  group: app-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build and check
+  windows:
+    name: Windows
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:
@@ -63,17 +63,7 @@ jobs:
         run: |
           pytest -q tests/test_desktop.py --junitxml=build/tests.xml
           $code = $LASTEXITCODE
-          # Each failed test as an annotation, readable on the run's summary page.
-          if ($code -ne 0 -and (Test-Path build/tests.xml)) {
-            [xml]$results = Get-Content build/tests.xml -Raw
-            foreach ($case in $results.SelectNodes("//testcase[failure or error]")) {
-              $problem = $case.SelectSingleNode("failure|error")
-              $text = "$($problem.GetAttribute('message')) $($problem.InnerText)"
-              $text = (($text -replace "%", "%25") -replace "`r|`n", " ").Trim()
-              $text = $text.Substring(0, [Math]::Min(1500, $text.Length))
-              Write-Host "::error title=Test $($case.GetAttribute('name'))::$text"
-            }
-          }
+          python packaging/report.py --junit build/tests.xml  # failed tests, on the summary
           exit $code
       - name: Build the app
         run: pyinstaller --noconfirm --clean packaging/windows/magpie.spec
@@ -99,7 +89,7 @@ jobs:
           }
           $code = Run-And-Wait "dist/Magpie/Magpie.exe" $options 10
           if (Test-Path build/selftest.json) { Get-Content build/selftest.json }
-          ./packaging/windows/report.ps1 -Report build/selftest.json -Title "Built app"
+          python packaging/report.py --report build/selftest.json --title "Built Windows app"
           if ($code -ne 0) { throw "The self-test failed ($code)." }
       - name: Build the installer
         run: |
@@ -146,12 +136,14 @@ jobs:
             Start-Sleep -Seconds 1
           }
           $desktop | ConvertTo-Json
-          Write-Host "::notice title=Installed app is running::$($desktop | ConvertTo-Json -Compress)"
+          Write-Host "::notice title=Installed Windows app is running::$($desktop | ConvertTo-Json -Compress)"
           if (-not $desktop.active) { throw "The dashboard doesn't see the app." }
           if ($desktop.speech.state -ne "ready") { throw "Whisper isn't ready in the installed app: $($desktop.speech | ConvertTo-Json -Compress)" }
+          if (-not $desktop.update.supported) { throw "The installed app can't update itself: $($desktop.update | ConvertTo-Json -Compress)" }
           $note = Invoke-RestMethod "$base/api/notes" -Method Post -Headers $headers -ContentType "application/json" -Body '{"text": "Call James at five", "source": "api"}'
           if (-not $note.note.id) { throw "The installed app didn't save a note." }
           Invoke-RestMethod "$base/api/desktop/command" -Method Post -Headers $headers -ContentType "application/json" -Body '{"action": "write"}' | Out-Null
+          Invoke-RestMethod "$base/api/desktop/command" -Method Post -Headers $headers -ContentType "application/json" -Body '{"action": "check_update"}' | Out-Null
           Invoke-RestMethod "$base/api/notify/test" -Method Post -Headers $headers -ContentType "application/json" -Body '{"channel": "desktop"}' | ConvertTo-Json
           $start = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name Magpie -ErrorAction SilentlyContinue
           if (-not $start) { throw "Magpie didn't set itself to start with Windows." }
@@ -159,7 +151,7 @@ jobs:
 
           $code = Run-And-Wait $exe @("--self-test", "--report", "build/selftest-installed.json") 10
           if (Test-Path build/selftest-installed.json) { Get-Content build/selftest-installed.json }
-          ./packaging/windows/report.ps1 -Report build/selftest-installed.json -Title "Installed app"
+          python packaging/report.py --report build/selftest-installed.json --title "Installed Windows app"
           if ($code -ne 0) { throw "The installed app's self-test failed ($code)." }
 
           Stop-Process -Name Magpie -Force
@@ -176,29 +168,154 @@ jobs:
         run: |
           $log = "$env:LOCALAPPDATA\Magpie\logs\magpie.log"
           if (Test-Path $log) { Copy-Item $log build/magpie.log; Get-Content $log }
-          ./packaging/windows/report.ps1 -Log $log
-      - name: Describe the release
+          python packaging/report.py --log $log
+      - name: Describe the download
         run: |
           $file = Get-Item dist/MagpieSetup.exe
           $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
           $url = "https://github.com/${{ github.repository }}/releases/download/v$env:MAGPIE_VERSION/MagpieSetup.exe"
-          @{ version = $env:MAGPIE_VERSION; windows = @{ url = $url; sha256 = $hash; size = $file.Length } } |
-            ConvertTo-Json | Set-Content dist/latest.json -Encoding utf8NoBOM
-          Get-Content dist/latest.json
+          @{ url = $url; sha256 = $hash; size = $file.Length } |
+            ConvertTo-Json | Set-Content dist/windows.json -Encoding utf8NoBOM
+          Get-Content dist/windows.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: magpie-windows
           path: |
             dist/MagpieSetup.exe
-            dist/latest.json
+            dist/windows.json
             build/selftest*.json
             build/magpie.log
           if-no-files-found: warn
 
+  mac:
+    name: Mac
+    runs-on: macos-15  # Apple silicon
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,desktop]" pyinstaller
+      - uses: actions/cache@v4
+        with:
+          path: build/models
+          key: vosk-model-small-en-us-0.15
+      - name: Speech model
+        run: |
+          name=vosk-model-small-en-us-0.15
+          if [ ! -f "build/models/$name/am/final.mdl" ]; then
+            mkdir -p build/models
+            curl -fsSL "https://alphacephei.com/vosk/models/$name.zip" -o build/model.zip
+            unzip -q build/model.zip -d build/models
+            rm build/model.zip
+          fi
+          echo "MAGPIE_VOSK_MODEL=$PWD/build/models/$name" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: build/whisper
+          key: whisper-small.en
+      - name: Whisper model
+        run: |
+          python -c "from pathlib import Path; from magpie.desktop.paths import AppPaths; from magpie.desktop.transcribe import fetch_whisper; print(fetch_whisper(AppPaths(Path('build/whisper'))))"
+          echo "MAGPIE_WHISPER_MODEL=$PWD/build/whisper/models/whisper-small.en" >> "$GITHUB_ENV"
+      - name: Test
+        run: |
+          code=0
+          pytest -q tests/test_desktop.py --junitxml=build/tests.xml || code=$?
+          python packaging/report.py --junit build/tests.xml  # failed tests, on the summary
+          exit $code
+      - name: Build the app
+        run: pyinstaller --noconfirm --clean packaging/macos/magpie.spec
+      - name: Check the app
+        timeout-minutes: 15
+        run: |
+          sh packaging/macos/speak.sh build/note.wav
+          code=0
+          dist/Magpie.app/Contents/MacOS/Magpie --self-test --windows --wav build/note.wav \
+            --expect milk --report build/selftest.json || code=$?
+          cat build/selftest.json || true
+          python packaging/report.py --report build/selftest.json --title "Built Mac app"
+          exit $code
+      - name: Package the app
+        run: |
+          ditto -c -k --keepParent dist/Magpie.app dist/Magpie-mac.zip
+          ls -l dist/Magpie-mac.zip
+      - name: Install it and check the installed app
+        timeout-minutes: 15
+        run: |
+          # As anyone would: install.sh puts it in Applications and opens it.
+          MAGPIE_INSTALL_FROM=dist/Magpie-mac.zip sh install.sh | tee build/install.txt
+          base=$(tail -n 1 build/install.txt)
+          app=$(grep -o '/.*Magpie.app' build/install.txt | head -n 1)
+          for i in $(seq 1 30); do
+            desktop=$(curl -fsS "$base/api/desktop" || true)
+            case "$desktop" in *'"state":"starting"'*|"") sleep 1 ;; *) break ;; esac
+          done
+          echo "$desktop"
+          echo "::notice title=Installed Mac app is running::$desktop"
+          echo "$desktop" | python -c "
+          import json, sys
+          desktop = json.load(sys.stdin)
+          assert desktop['active'], 'The dashboard does not see the app.'
+          assert desktop['speech']['state'] == 'ready', f'Whisper is not ready: {desktop[\"speech\"]}'
+          assert desktop['update']['supported'], f'It cannot update itself: {desktop[\"update\"]}'
+          "
+          json=(-fsS -H 'X-Magpie: 1' -H 'Content-Type: application/json')
+          curl "${json[@]}" -X POST -d '{"text": "Call James at five", "source": "api"}' "$base/api/notes"
+          curl "${json[@]}" -X POST -d '{"action": "write"}' "$base/api/desktop/command"
+          curl "${json[@]}" -X POST -d '{"action": "check_update"}' "$base/api/desktop/command"
+          curl "${json[@]}" -X POST -d '{"channel": "desktop"}' "$base/api/notify/test"
+          agent="$HOME/Library/LaunchAgents/com.github.coder-ux-coder.magpie.plist"
+          test -f "$agent" || { echo "::error::Magpie didn't set itself to start at login"; exit 1; }
+          plutil -p "$agent"
+          code=0
+          "$app/Contents/MacOS/Magpie" --self-test --report build/selftest-installed.json || code=$?
+          python packaging/report.py --report build/selftest-installed.json --title "Installed Mac app"
+          pkill -x Magpie || true
+          exit $code
+        shell: bash
+      - name: Show the app's log
+        if: always()
+        run: |
+          log="$HOME/Library/Application Support/Magpie/logs/magpie.log"
+          if [ -f "$log" ]; then cp "$log" build/magpie-mac.log; cat "$log"; fi
+          python packaging/report.py --log "$log"
+      - name: Describe the download
+        run: |
+          version=$(python -c "import magpie; print(magpie.__version__)")
+          python - "$version" <<'EOF'
+          import hashlib, json, sys
+          from pathlib import Path
+          archive = Path("dist/Magpie-mac.zip")
+          url = f"https://github.com/${{ github.repository }}/releases/download/v{sys.argv[1]}/Magpie-mac.zip"
+          described = {
+              "url": url,
+              "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+              "size": archive.stat().st_size,
+          }
+          Path("dist/mac.json").write_text(json.dumps(described, indent=2))
+          print(described)
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: magpie-mac
+          path: |
+            dist/Magpie-mac.zip
+            dist/mac.json
+            build/selftest*.json
+            build/magpie-mac.log
+          if-no-files-found: warn
+
   release:
     name: Publish the release
-    needs: build
+    needs: [windows, mac]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -207,7 +324,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: magpie-windows
           path: release
       - name: Publish (once for each version)
         env:
@@ -218,12 +334,32 @@ jobs:
             echo "Magpie $version is already released; bump the version to release again."
             exit 0
           fi
+          find release -type f | sort
+          setup=$(find release -name MagpieSetup.exe | head -n 1)
+          mac=$(find release -name Magpie-mac.zip | head -n 1)
+          # latest.json: what installed apps read to update themselves.
+          python3 - "$version" "$(find release -name windows.json | head -n 1)" "$(find release -name mac.json | head -n 1)" <<'EOF'
+          import json, sys
+          from pathlib import Path
+          version, windows, mac = sys.argv[1:]
+          latest = {
+              "version": version,
+              "windows": json.loads(Path(windows).read_text()),
+              "mac": json.loads(Path(mac).read_text()),
+          }
+          Path("latest.json").write_text(json.dumps(latest, indent=2))
+          print(json.dumps(latest, indent=2))
+          EOF
           # The release notes: this version's part of CHANGELOG.md.
           awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on' CHANGELOG.md > notes.md
           {
             echo
-            echo "**Windows:** download **MagpieSetup.exe** below and double-click it. Magpie installs"
-            echo "itself, starts with Windows and keeps itself up to date."
+            echo "**Windows:** download **MagpieSetup.exe** below and double-click it."
+            echo
+            echo "**Mac (Apple silicon):** paste this into Terminal:"
+            echo '`curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh`'
+            echo
+            echo "Magpie installs itself, starts with your computer and keeps itself up to date."
           } >> notes.md
-          gh release create "v$version" release/dist/MagpieSetup.exe release/dist/latest.json \
+          gh release create "v$version" "$setup" "$mac" latest.json \
             --title "Magpie $version" --notes-file notes.md --target "$GITHUB_SHA"

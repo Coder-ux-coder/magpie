@@ -6,16 +6,18 @@
 
 <p align="center">
   <strong>Say “notes on”, talk, and Magpie does the rest.</strong><br>
-  A voice notes app for Windows. It listens for “notes on” in any program, writes down what<br>
-  you say, and the AI you choose files the note and reminds you when it matters.
+  A voice notes app for Windows and Mac. It listens for “notes on” in any program, writes<br>
+  down what you say, and the AI you choose files the note and reminds you when it matters.
 </p>
 
 <p align="center">
-  <a href="https://github.com/Coder-ux-coder/magpie/releases/latest/download/MagpieSetup.exe"><strong>Download Magpie for Windows</strong></a>
+  <a href="https://github.com/Coder-ux-coder/magpie/releases/latest/download/MagpieSetup.exe"><strong>Download for Windows</strong></a>
+  ·
+  <a href="#mac"><strong>Install on a Mac</strong></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Coder-ux-coder/magpie/actions/workflows/windows-app.yml"><img src="https://github.com/Coder-ux-coder/magpie/actions/workflows/windows-app.yml/badge.svg" alt="Windows app"></a>
+  <a href="https://github.com/Coder-ux-coder/magpie/actions/workflows/app.yml"><img src="https://github.com/Coder-ux-coder/magpie/actions/workflows/app.yml/badge.svg" alt="App"></a>
   <a href="https://github.com/Coder-ux-coder/magpie/actions/workflows/ci.yml"><img src="https://github.com/Coder-ux-coder/magpie/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
 </p>
@@ -26,23 +28,37 @@
 
 ## Install
 
-1. **Download [MagpieSetup.exe](https://github.com/Coder-ux-coder/magpie/releases/latest/download/MagpieSetup.exe)**
-   and double-click it. There's nothing to answer and no administrator password. (If
-   Windows says *Windows protected your PC*, click **More info**, then **Run anyway**: Magpie
-   isn't signed by a company.)
-2. **Choose your AI** on the welcome screen: Claude, Codex (your ChatGPT sign-in, no key),
-   ChatGPT, Gemini, OpenRouter, a free AI on your own computer (Ollama), or none.
-3. **Say “notes on”**, your note, then **“notes off”**. That's it.
+### Windows
 
-Magpie starts with Windows, waits by the clock and updates itself. There's no account, no
-password and nothing else to install; your notes stay on your computer. On its first start
-it downloads Whisper, its accurate speech model (480 MB), in the background.
-
-Prefer a terminal? Paste this into PowerShell, which does the same:
+**Download [MagpieSetup.exe](https://github.com/Coder-ux-coder/magpie/releases/latest/download/MagpieSetup.exe)**
+and double-click it. There's nothing to answer and no administrator password. (If Windows
+says *Windows protected your PC*, click **More info**, then **Run anyway**: Magpie isn't
+signed by a company.) Or paste this into PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/Coder-ux-coder/magpie/main/install.ps1 | iex
 ```
+
+### Mac
+
+For Macs with Apple silicon (M1 or newer). Open **Terminal** and paste:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Coder-ux-coder/magpie/main/install.sh | sh
+```
+
+It puts Magpie in Applications and opens it. Allow the microphone when your Mac asks.
+
+### Then
+
+1. **Choose your AI** on the welcome screen: Claude, Codex (your ChatGPT sign-in, no key),
+   ChatGPT, Gemini, OpenRouter, a free AI on your own computer (Ollama), or none.
+2. **Say “notes on”**, your note, then **“notes off”**. That's it.
+
+Magpie starts with your computer and waits by the clock (Windows) or in the menu bar
+(Mac). It keeps itself up to date, and **Settings → Updates** has an update button. On its
+first start it downloads Whisper, its accurate speech model (480 MB), in the background.
+There's no account and no password, and your notes stay on your computer.
 
 ## No API key?
 
@@ -64,51 +80,65 @@ and permissions capabilities”*. Its notes export to a file the app imports (Se
 
 ## Set Magpie up for someone (for AI agents)
 
-Magpie runs on the person's own Windows computer, so run these in PowerShell there. No
-administrator rights are needed, and nothing asks questions.
+Magpie runs on the person's own computer, so run these there. No administrator rights are
+needed, and nothing asks questions.
 
-1. **Install or update Magpie, and start it:**
+1. **Install or update Magpie, and start it.** On Windows, in PowerShell:
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Coder-ux-coder/magpie/main/install.ps1 | iex"
    ```
 
-   It downloads the latest release, checks it against the release's SHA-256, installs it
-   for the current user, and waits until Magpie answers. Its last line is Magpie's address,
-   such as `http://127.0.0.1:8000` (also in `%LOCALAPPDATA%\Magpie\running.json`). The
-   welcome screen then opens for the person.
+   On a Mac with Apple silicon, in Terminal:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/Coder-ux-coder/magpie/main/install.sh | sh
+   ```
+
+   Each downloads the latest release, checks it against the release's SHA-256, installs it
+   for the current user, and waits until Magpie answers. The last line is Magpie's address,
+   such as `http://127.0.0.1:8000` (also in `running.json` in Magpie's folder, below). The
+   welcome screen then opens for the person; on a Mac, they allow the microphone.
 
 2. **Optionally choose the AI for them** (otherwise the welcome screen asks). The key is
    checked before it's saved, and never shown again:
 
    ```powershell
-   $magpie = "http://127.0.0.1:8000"   # the address install.ps1 printed
+   $magpie = "http://127.0.0.1:8000"   # the address the installer printed
    Invoke-RestMethod "$magpie/api/ai" -Method Put -Headers @{ "X-Magpie" = "1" } `
      -ContentType "application/json" -Body '{"provider": "claude", "key": "sk-ant-..."}'
+   ```
+
+   ```sh
+   curl -fsS -X PUT http://127.0.0.1:8000/api/ai -H "X-Magpie: 1" \
+     -H "Content-Type: application/json" -d '{"provider": "claude", "key": "sk-ant-..."}'
    ```
 
    Providers: `claude`, `openai`, `gemini`, `openrouter`, `ollama` (free, local; no key),
    `codex` (no key), `compatible` (add `"base_url"`), or `basic` (no AI). Add `"model"` to
    pick a model. For `codex`, install Codex first
-   (`irm https://chatgpt.com/codex/install.ps1 | iex`) and have the person run
+   ([github.com/openai/codex](https://github.com/openai/codex)) and have the person run
    `codex login` in a new window, which signs in through their browser; then send
    `{"provider": "codex"}`.
 
-3. **Check that it listens:** `Invoke-RestMethod "$magpie/api/desktop"` answers
-   `{"active": true, "state": "standby", ...}`. `"no-mic"` means Windows gives it no
-   microphone: Settings → Privacy & security → Microphone → *Let desktop apps access your
-   microphone*. Its `speech` part shows Whisper's download (`"state": "downloading"`,
-   `"progress"`), then `"ready"`; notes are written down accurately from then on.
+3. **Check that it listens:** `GET /api/desktop` answers
+   `{"active": true, "state": "standby", ...}`. `"no-mic"` or `"muted"` means the computer
+   gives Magpie no microphone: on Windows, Settings → Privacy & security → Microphone →
+   *Let desktop apps access your microphone*; on a Mac, System Settings → Privacy &
+   Security → Microphone → Magpie. Its `speech` part shows Whisper's download, then
+   `"ready"`; its `update` part shows updates.
 
 Good to know:
 
 - Requests from the same computer need no password or token; `POST`, `PUT` and `DELETE`
-  need the header `X-Magpie: 1`. The full API is described at `$magpie/api/docs`.
-- Add a note: `Invoke-RestMethod "$magpie/api/notes" -Method Post -Headers @{ "X-Magpie" = "1" } -ContentType "application/json" -Body '{"text": "Remind me to call James at 5pm"}'`
-- Notes and settings live in `%LOCALAPPDATA%\Magpie` (the log is in its `logs` folder);
-  the program is in `%LOCALAPPDATA%\Programs\Magpie`.
-- To remove it: Windows Settings → Apps → Magpie, or
-  `& "$env:LOCALAPPDATA\Programs\Magpie\unins000.exe" /VERYSILENT`. Notes are kept.
+  need the header `X-Magpie: 1`. The full API is described at `/api/docs`.
+- Add a note: `POST /api/notes` with `{"text": "Remind me to call James at 5pm"}`.
+- Magpie's folder (notes, settings, `logs`): `%LOCALAPPDATA%\Magpie` on Windows,
+  `~/Library/Application Support/Magpie` on a Mac.
+- To remove it on Windows: Settings → Apps → Magpie, or
+  `& "$env:LOCALAPPDATA\Programs\Magpie\unins000.exe" /VERYSILENT`. On a Mac: untick *Start
+  Magpie with your Mac* in its menu, quit it, and drag Magpie from Applications to the Bin.
+  Notes are kept in its folder.
 - If the person used Magpie in Docker before, the app brings those notes and settings over
   on its first start and stops the Docker copy.
 
@@ -118,17 +148,17 @@ Good to know:
   bottom of the screen with your words as you speak, without taking the keyboard from what
   you're doing. **“Notes off”** saves the note (so does a pause, or **Save**); **“cancel
   note”** throws it away, with **Undo**. Click the bar to type into it.
+- **Accurate words:** when a note ends, Whisper writes it down again from its sound, with
+  punctuation, and copes with accents. Both speech models run on your computer: no audio
+  leaves it. Settings → Voice has a *Most accurate* model for strong accents.
 - **The AI files it:** it tidies your words, gives the note a title, a kind (task, idea,
   link, …) and one of your own categories, and decides whether and when to remind you:
   “remind me at 5”, “every Monday at 9”, or, for “the bill is due on the 10th”, the evening
   before.
 - **Reminders pop up** in the corner of the screen with Done and Snooze. On your phone, get
   them by **email** or **Telegram** (Settings → Reminders); Telegram can take notes too.
-- **Accurate words:** when a note ends, Whisper writes it down again from its sound, with
-  punctuation, and copes with accents. Both speech models run on your computer: no audio
-  leaves it. Settings → Voice has a *Most accurate* model for strong accents.
-- **The tray icon** (by the clock) opens your notes, starts a note, and turns listening off
-  and on.
+- **Magpie's icon** (by the clock, or in the Mac's menu bar) opens your notes, starts a
+  note, turns listening off and on, and checks for updates.
 - **Your notes:** categories with colours, search, a daily digest, **Ask** (“what did I
   decide about rent?”), and short reviews of the videos and articles you save. Magpie learns
   from your corrections.
@@ -137,13 +167,14 @@ Good to know:
   <img src="docs/images/dashboard.png" width="80%" alt="Magpie's notes window: colour-coded category tabs, filed notes, and the voice bar at the bottom">
 </p>
 
-More in the **[guide](docs/guide.md)**: everyday use, reminders on your phone,
-integrations, and fixes for common problems.
+More in the **[guide](docs/guide.md)**: everyday use, how Magpie hears you, choosing the AI,
+reminders on your phone, and fixes for common problems.
 
-### Mac and Linux
+## From Python
 
-The app is made for Windows. On a Mac or Linux it runs from Python 3.11 or newer (still new
-there; Linux needs GTK or Qt for its windows):
+On an Intel Mac or Linux, run Magpie from Python 3.11 or newer (Linux needs GTK or Qt for
+its windows). It works the same way, but doesn't update itself: run the first line again
+for a new version.
 
 ```bash
 python3 -m pip install "magpie-notes[desktop] @ https://github.com/Coder-ux-coder/magpie/archive/refs/heads/main.zip"
@@ -169,10 +200,12 @@ pytest -q && ruff check src tests scripts
 ```
 
 The app is one Python process: the Magpie server (FastAPI and SQLite), its web pages,
-offline listening (Vosk) and writing down (Whisper), and a tray icon. [AGENTS.md](AGENTS.md) explains the code for
-people and AI agents, [docs/architecture.md](docs/architecture.md) how it fits together, and
-[docs/SPEC.md](docs/SPEC.md) what it's for. The *Windows app* workflow builds
-`MagpieSetup.exe`, tests it on Windows and publishes a release for each new version.
+offline listening (Vosk) and writing down (Whisper), and a tray or menu bar icon.
+[AGENTS.md](AGENTS.md) explains the code for people and AI agents,
+[docs/architecture.md](docs/architecture.md) how it fits together, and
+[docs/SPEC.md](docs/SPEC.md) what it's for. The *App* workflow builds `MagpieSetup.exe` and
+`Magpie-mac.zip`, tests each on a real Windows and Mac, and publishes a release for each new
+version.
 
 ## License
 

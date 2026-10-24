@@ -1062,13 +1062,19 @@ def test_a_damaged_old_database_is_not_brought_over(tmp_path, monkeypatch):
 
 
 def latest(version="0.5.0", data=b"installer", **windows) -> dict:
+    base = f"https://github.com/{paths.REPOSITORY}/releases/download/v{version}"
     return {
         "version": version,
         "windows": {
-            "url": f"https://github.com/{paths.REPOSITORY}/releases/download/v{version}/MagpieSetup.exe",
+            "url": f"{base}/MagpieSetup.exe",
             "sha256": hashlib.sha256(data).hexdigest(),
             "size": len(data),
             **windows,
+        },
+        "mac": {
+            "url": f"{base}/Magpie-mac.zip",
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
         },
     }
 
@@ -1076,6 +1082,9 @@ def latest(version="0.5.0", data=b"installer", **windows) -> dict:
 def test_release_descriptions_are_checked():
     release = update.parse_latest(latest())
     assert release and release.version == "0.5.0" and release.size == 9
+    assert release.url.endswith("/v0.5.0/MagpieSetup.exe")
+    assert update.parse_latest(latest(), "mac").url.endswith("/v0.5.0/Magpie-mac.zip")
+    assert update.parse_latest({**latest(), "mac": None}, "mac") is None
     assert update.newer(release, "0.4.0") and not update.newer(release, "0.5.0")
     assert update.version_key("0.10.0") > update.version_key("0.9.9")
     for bad in (
@@ -1092,23 +1101,31 @@ def test_release_descriptions_are_checked():
         assert update.parse_latest(bad) is None
 
 
-def updater(tmp_path, handler) -> update.Updater:
+def updater(tmp_path, handler, **options) -> update.Updater:
     http = httpx2.Client(transport=httpx2.MockTransport(handler))
-    return update.Updater("0.4.0", tmp_path, idle=lambda: True, quit_app=lambda: None, http=http)
+    options.setdefault("system", "windows")
+    return update.Updater(
+        "0.4.0", tmp_path, idle=lambda: True, quit_app=lambda: None, http=http, **options
+    )
 
 
 def test_updates_are_found_downloaded_and_checked(tmp_path):
-    data = b"the new installer"
+    data, downloads = b"the new installer", []
 
     def internet(request):
         if request.url.path.endswith("latest.json"):
             return httpx2.Response(200, json=latest(data=data))
+        downloads.append(request.url.path)
         return httpx2.Response(200, content=data)
 
     found = updater(tmp_path, internet).check()
     assert found and found.version == "0.5.0"
     installer = updater(tmp_path, internet).download(found)
     assert installer.read_bytes() == data and installer.name == "MagpieSetup-0.5.0.exe"
+    assert updater(tmp_path, internet).download(found) == installer  # not fetched again
+    assert len(downloads) == 1
+    mac = updater(tmp_path, internet, system="mac")
+    assert mac.download(mac.check()).name == "Magpie-0.5.0-mac.zip"
 
 
 def test_a_tampered_download_is_thrown_away(tmp_path):
@@ -1122,22 +1139,162 @@ def test_a_tampered_download_is_thrown_away(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_no_update_when_github_says_nothing_useful(tmp_path):
-    assert updater(tmp_path, lambda r: httpx2.Response(404)).check() is None
-    assert updater(tmp_path, lambda r: httpx2.Response(200, content=b"<html>")).check() is None
+def test_github_saying_nothing_useful_is_a_problem_not_an_update(tmp_path):
+    with pytest.raises(RuntimeError, match="404"):
+        updater(tmp_path, lambda r: httpx2.Response(404)).check()
+    with pytest.raises(RuntimeError, match="doesn't describe"):
+        updater(tmp_path, lambda r: httpx2.Response(200, content=b"<html>")).check()
     same = updater(tmp_path, lambda r: httpx2.Response(200, json=latest(version="0.4.0")))
     assert same.check() is None
 
 
-def test_installing_runs_the_installer_silently_and_quits(tmp_path, monkeypatch):
+def test_installing_on_windows_runs_the_installer_silently_and_quits(tmp_path, monkeypatch):
     started, quit_called = [], []
     monkeypatch.setattr(subprocess, "Popen", lambda args, **kw: started.append(args))
     up = update.Updater(
-        "0.4.0", tmp_path, idle=lambda: True, quit_app=lambda: quit_called.append(1)
-    )
+        "0.4.0", tmp_path, idle=lambda: True, quit_app=lambda: quit_called.append(1),
+        system="windows",
+    )  # fmt: skip
     up.install(tmp_path / "MagpieSetup-0.5.0.exe")
     assert started[0][1:] == ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-"]
     assert quit_called == [1]
+
+
+def fake_app(folder: Path, version: str) -> Path:
+    binary = folder / "Magpie.app" / "Contents" / "MacOS" / "Magpie"
+    binary.parent.mkdir(parents=True)
+    binary.write_text(version)
+    return folder / "Magpie.app"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the swap is a shell script for a Mac")
+def test_on_a_mac_the_new_app_takes_the_old_ones_place(tmp_path, monkeypatch):
+    installed = fake_app(tmp_path / "Applications", "0.4.0")
+    archive = tmp_path / "Magpie-0.5.0-mac.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("Magpie.app/Contents/MacOS/Magpie", "0.5.0")
+
+    def ditto(args, **options):  # ditto -x -k <zip> <folder>, as a Mac would
+        assert args[:3] == ["/usr/bin/ditto", "-x", "-k"]
+        zipfile.ZipFile(args[3]).extractall(args[4])
+
+    swaps, quit_called = [], []
+    monkeypatch.setattr(update, "mac_bundle", lambda: installed)
+    monkeypatch.setattr(subprocess, "run", ditto)
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **kw: swaps.append(args))
+    up = update.Updater(
+        "0.4.0", tmp_path / "updates", idle=lambda: True,
+        quit_app=lambda: quit_called.append(1), system="mac",
+    )  # fmt: skip
+    up.install(archive)
+    assert quit_called == [1]
+    shell, script, pid, app_path, new = swaps[0]
+    assert (shell, int(pid), app_path) == ("/bin/sh", os.getpid(), str(installed))
+
+    # The script itself, with stand-ins for macOS's xattr and open.
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for tool in ("xattr", "open"):
+        (tools / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> "{tmp_path}/tools.log"\n')
+        (tools / tool).chmod(0o755)
+    env = {**os.environ, "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"}
+    monkeypatch.undo()  # the real subprocess again
+    quit_magpie = subprocess.Popen(["true"])  # stands for the Magpie that has quit
+    quit_magpie.wait()
+    pid = str(quit_magpie.pid)
+    subprocess.run(["/bin/sh", script, pid, app_path, new], env=env, check=True, timeout=30)
+    assert (installed / "Contents" / "MacOS" / "Magpie").read_text() == "0.5.0"
+    assert not Path(app_path + ".old").exists() and not Path(new).exists()
+    assert f"open {installed} --args --background" in (tmp_path / "tools.log").read_text()
+
+    # A new app that isn't there leaves the old one where it was.
+    quiet = {"stderr": subprocess.DEVNULL}  # mv says what it couldn't move
+    subprocess.run(["/bin/sh", script, pid, app_path, new], env=env, check=True, **quiet)
+    assert (installed / "Contents" / "MacOS" / "Magpie").read_text() == "0.5.0"
+
+
+def test_the_update_button_checks_now_and_installs_on_request(tmp_path, monkeypatch):
+    data = b"the new installer"
+
+    def internet(request):
+        if request.url.path.endswith("latest.json"):
+            return httpx2.Response(200, json=latest(data=data))
+        return httpx2.Response(200, content=data)
+
+    monkeypatch.setattr(update, "FIRST_CHECK", 3600.0)  # only when asked
+    installed, states = [], []
+    up = updater(tmp_path, internet, on_change=lambda: states.append(up.state))
+    up.idle = lambda: False  # a note is being taken: no automatic install
+    monkeypatch.setattr(up, "why_not", lambda: "")
+    monkeypatch.setattr(up, "install", installed.append)
+    up.start()
+    try:
+        up.check_now()
+        wait_until(lambda: up.state == "ready")
+        status = up.status()
+        assert status["available"] == "0.5.0" and status["supported"] and up.asked
+        assert states[:3] == ["checking", "downloading", "ready"] and not installed
+        up.install_now()
+        wait_until(lambda: installed)
+        assert installed[0].name == "MagpieSetup-0.5.0.exe" and up.state == "installing"
+    finally:
+        up.stop()
+
+
+def test_an_up_to_date_app_says_so(tmp_path, monkeypatch):
+    monkeypatch.setattr(update, "FIRST_CHECK", 3600.0)
+    up = updater(tmp_path, lambda r: httpx2.Response(200, json=latest(version="0.4.0")))
+    monkeypatch.setattr(up, "why_not", lambda: "")
+    up.start()
+    try:
+        up.check_now()
+        wait_until(lambda: up.state == "current")
+        assert up.message == "Magpie 0.4.0 is the latest version." and up.status()["checked"]
+    finally:
+        up.stop()
+    python = updater(tmp_path, lambda r: httpx2.Response(404))
+    python.run()  # a copy that runs from Python can't replace itself
+    assert python.state == "unsupported" and "Python" in python.message
+
+
+def test_the_update_button_reaches_the_updater_and_says_what_it_found(app):
+    class FakeUpdater:
+        asked, state, message = True, "current", "Magpie 0.5.0 is the latest version."
+        installing_now = False
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def check_now(self):
+            self.calls.append("check")
+
+        def install_now(self):
+            self.calls.append("install")
+
+        def status(self):
+            return {"state": self.state}
+
+    class FakeTray:
+        def __init__(self) -> None:
+            self.said: list[str] = []
+
+        def notify(self, message):
+            self.said.append(message)
+
+        def show(self, state, tip):
+            pass
+
+    app.updater, app.tray = FakeUpdater(), FakeTray()
+    bridge = Bridge(app)
+    bridge.command("check_update")
+    bridge.command("install_update")
+    assert app.updater.calls == ["check", "install"]
+    assert bridge.status()["update"] == {"state": "current"}
+    app._update_changed()
+    assert app.tray.said == ["Magpie 0.5.0 is the latest version."]
+    app.updater.asked = False  # a check nobody asked for stays quiet
+    app._update_changed()
+    assert len(app.tray.said) == 1
 
 
 # ------------------------------------------------------------ paths and state

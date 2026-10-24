@@ -357,7 +357,17 @@ def _desktop_status(app: Magpie) -> dict[str, Any]:
 
 
 class DesktopCommand(BaseModel):
-    action: Literal["start", "finish", "cancel", "write", "open", "listen", "pause"]
+    action: Literal[
+        "start",
+        "finish",
+        "cancel",
+        "write",
+        "open",
+        "listen",
+        "pause",
+        "check_update",
+        "install_update",
+    ]
 
 
 class DesktopUiCall(BaseModel):

@@ -1,6 +1,0 @@
-# Used by `docker compose --profile https up -d`. Caddy gets and renews the
-# certificate automatically once MAGPIE_DOMAIN points at this server.
-{$MAGPIE_DOMAIN} {
-	encode gzip
-	reverse_proxy magpie:8000
-}

@@ -1,16 +1,15 @@
 # Architecture
 
 Magpie is a single Python process: a FastAPI web app plus a few background loops, with a
-plain-JavaScript progressive web app as its front end and SQLite for storage. In Docker, a
-second small container (`updates` in `docker-compose.yml`) keeps the image up to date. The
-Windows app is the same process with more inside it: see [The desktop app](#the-desktop-app).
+plain-JavaScript progressive web app as its front end and SQLite for storage. The app (for
+Windows and Mac) is that process with more inside it: see [The desktop app](#the-desktop-app).
 
 ```mermaid
 flowchart LR
     subgraph Capture
         B[Browser PWA<br/>voice bar, typing, share]
         T[Telegram bot<br/>text and voice]
-        S[Siri Shortcut / API / CLI / MCP]
+        S[API / CLI / MCP]
     end
     subgraph Magpie[Magpie process]
         API[FastAPI<br/>api.py]
@@ -47,7 +46,7 @@ flowchart LR
 
 ## The desktop app
 
-`magpie.desktop` (Magpie.exe on Windows, `magpie desktop` elsewhere) runs everything above
+`magpie.desktop` (Magpie.exe, Magpie.app, or `magpie desktop` from Python) runs everything above
 in one process, plus what makes it an app:
 
 ```mermaid
@@ -85,36 +84,44 @@ flowchart LR
   punctuation; voice activity detection skips silences, where Whisper would otherwise make
   words up, and the command words it may still hear are trimmed. Whisper is loaded when a
   note starts and let go after five idle minutes. Its model isn't in the installer:
-  `Whisper` downloads the chosen one (`small.en`, or `large-v3-turbo`) into
-  `%LOCALAPPDATA%\Magpie\models` once, retrying later if that fails, and the one before
+  `Whisper` downloads the chosen one (`small.en`, or `large-v3-turbo`) into the app's
+  `models` folder once, retrying later if that fails, and the one before
   keeps working meanwhile. Whenever Whisper is missing, fails or runs past its time budget,
   the listener's words are saved instead.
-- **Windows** (`ui.py`): pywebview (WebView2) shows the notes window (the web app itself)
-  and two floating windows served by the same server: the voice bar and the reminder pop-ups.
-  They're shown, hidden and placed with the Windows API, never activated, so they don't
-  take the keyboard; a click on the bar hands it over for typing. The pages reach the app
-  through `/api/desktop/ui`, and the app drives them with `run_js`; pywebview's `js_api`
-  isn't used because it needs `eval`, which the CSP refuses.
+- **Windows** (`ui.py`): pywebview (WebView2 on Windows, WebKit on a Mac) shows the notes
+  window (the web app itself) and two floating windows served by the same server: the voice
+  bar and the reminder pop-ups. They're shown, hidden and placed without being activated
+  (the Windows API, or the NSWindow's `orderFrontRegardless`), so they don't take the
+  keyboard; a click on the bar hands it over for typing. The pages reach the app through
+  `/api/desktop/ui`, and the app drives them with `run_js`; pywebview's `js_api` isn't used
+  because it needs `eval`, which the CSP refuses. On a Mac, AppKit is only touched from the
+  main thread (`on_main`), where pywebview and the menu bar icon share the event loop, and
+  Magpie is in the Dock only while its notes window is open.
 - **The server** (`server.py`): `EmbeddedServer` runs uvicorn in a thread on 127.0.0.1 with
   no password. `core.desktop` is the app's `Bridge`: `/api/status` and `/api/desktop` report
   what the app is doing, `/api/desktop/command` lets the dashboard start a note or turn
   listening off, and the `desktop` notification channel hands reminders to the app's pop-ups.
   Prefs changes (the command word) reach the listener at once.
 - **The system** (`system.py`): one copy at a time (a lock file; a second start asks the
-  first to show itself), starting with Windows (the `Run` registry key), the title of the
-  window in front (kept with the note, like the tab a note was written in).
+  first to show itself), starting with the computer (the `Run` registry key on Windows, a
+  LaunchAgent on a Mac), the window or app in front (kept with the note, like the tab a note
+  was written in).
 - **First start** (`migrate.py`): if this computer ran Magpie in Docker, its database is
   copied with SQLite's backup, its settings minus any password become `magpie.env`, and the
   old containers are stopped and kept from restarting.
-- **Updates** (`update.py`): every six hours `latest.json` from the latest release names the
-  version, the installer's URL (only this repository's releases are accepted), its size and
-  SHA-256. A newer installer is downloaded, checked, and run silently once no note is being
-  taken; it replaces the app and starts it again in the tray.
-- **Packaging** (`packaging/windows`): PyInstaller bundles Python, the web app, the
-  listener's speech model and Whisper's libraries; Inno Setup makes a per-user installer
-  with no pages. The
-  [Windows app workflow](../.github/workflows/windows-app.yml) runs `--self-test` on the
-  built and the installed app, and publishes the release.
+- **Updates** (`update.py`): every six hours, or when the update button asks,
+  `latest.json` from the latest release names the version and, for each system, the
+  download's URL (only this repository's releases are accepted), size and SHA-256. A newer
+  download is fetched, checked, and installed once no note is being taken (or at once, from
+  *Update now*): on Windows the installer runs silently; on a Mac a small script waits for
+  Magpie to quit, swaps in the new Magpie.app (putting the old one back if that fails) and
+  opens it. `Bridge.status()["update"]` is what Settings → Updates shows.
+- **Packaging** (`packaging/`): PyInstaller bundles Python, the web app, the listener's
+  speech model and Whisper's libraries (`bundle.py`); on Windows, Inno Setup makes a
+  per-user installer with no pages; on a Mac, the recipe makes Magpie.app (microphone
+  permission text, menu bar app), zipped for the release, which `install.sh` puts in
+  Applications. The [App workflow](../.github/workflows/app.yml) runs `--self-test` on the
+  built and the installed app on a real Windows and Mac, and publishes one release.
 
 ## Life of a note
 
@@ -187,7 +194,7 @@ on its own, so one bad item can't stop the rest.
 | `export.py`, `ics.py` | JSON/Markdown export and import, iCalendar feed |
 | `core.py` | Builds and wires every service; starts and stops background tasks |
 | `cli.py`, `mcp_server.py` | Command line and the MCP server |
-| `desktop/` | The Windows app: listening, writing notes down (Whisper), windows, tray, moving from Docker, updates ([above](#the-desktop-app)) |
+| `desktop/` | The app for Windows and Mac: listening, writing notes down (Whisper), windows, tray or menu bar, moving from Docker, updates ([above](#the-desktop-app)) |
 | `web/` | The PWA: `index.html`, `sw.js`, `static/js/*.js` (the voice bar in `capture.js` and `voice.js`, setup controls in `controls.js`, the first-run screen in `welcome.js`), `static/css/app.css` |
 | `artifact/magpie.html` | Magpie as a Claude artifact: notes in the artifact's per-user store, filed with the viewer's own Claude account |
 
@@ -276,13 +283,14 @@ Other services (`OpenAICompatibleBrain`, `/chat/completions`):
 
 ## Security model
 
-- Single user per installation, with no password: the dashboard only answers requests for
-  local host names (blocking DNS rebinding), the app listens on 127.0.0.1 and Docker
-  publishes the port on 127.0.0.1. A server that other devices reach sets
-  `MAGPIE_PASSWORD` and uses a signed session cookie. State-changing requests always need
-  an `X-Magpie` header (CSRF protection). Integrations use a bearer token.
-- The app only installs updates from this repository's GitHub releases, and only an
-  installer whose size and SHA-256 match `latest.json`.
+- Single user per installation, with no password: the app listens on 127.0.0.1 only, and
+  the dashboard only answers requests for local host names (blocking DNS rebinding).
+  (`magpie serve` on a server that other devices reach sets `MAGPIE_PASSWORD` and uses a
+  signed session cookie.) State-changing requests always need an `X-Magpie` header (CSRF
+  protection). Integrations use a bearer token.
+- The app only installs updates from this repository's GitHub releases, and only a
+  download whose size and SHA-256 match `latest.json`. Codex, when chosen, runs read-only
+  in an empty folder with its shell tools off, the note on stdin.
 - API keys and the email app password are stored on the server and never returned; the
   dashboard only learns whether one is saved.
 - One-tap Done/Snooze links are signed, scoped to one action on one reminder, expire after
@@ -292,4 +300,3 @@ Other services (`OpenAICompatibleBrain`, `/chat/completions`):
 - Strict Content-Security-Policy, no inline scripts, and DOM built without `innerHTML`.
 - Fetched pages are treated as untrusted data in prompts and reviews have no tools that
   can change anything.
-- The Docker image runs as an unprivileged user.

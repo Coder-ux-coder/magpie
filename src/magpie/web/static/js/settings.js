@@ -240,7 +240,44 @@ function speechStatus(speech) {
 on("desktop", (desktop) => {
   const hint = document.getElementById("pref-speech-hint");
   if (hint) hint.textContent = speechStatus(desktop?.speech);
+  const update = desktop?.update;
+  const line = document.getElementById("update-status");
+  if (line && update) line.textContent = updateStatus(update);
+  const now = document.getElementById("update-now");
+  if (now && update) now.hidden = update.state !== "ready";
 });
+
+// The update button: the app updates itself, and this checks or installs right away.
+function updatesSection() {
+  const update = desktopApp() ? state.status.desktop.update : null;
+  if (!update) return null;
+  const run = async (action, message) => {
+    try {
+      await api("/api/desktop/command", { method: "POST", body: { action } });
+      toast(message);
+      await refreshStatus().catch(() => {});
+    } catch (error) {
+      toast(error.message, { error: true });
+    }
+  };
+  return section("updates", "Updates",
+    h("p", { class: "small" }, `This is Magpie ${update.version}. It keeps itself up to date: a new version installs by itself when you're not taking a note.`),
+    h("p", { class: "muted small", id: "update-status", role: "status" }, updateStatus(update)),
+    update.supported
+      ? h("div", { class: "row" },
+          h("button", { type: "button", class: "btn", onclick: () => run("check_update", "Checking for updates…") }, icon("refresh"), "Check for updates"),
+          h("button", { type: "button", class: "btn primary", id: "update-now", hidden: update.state !== "ready", onclick: () => run("install_update", "Updating: Magpie restarts in a moment.") }, icon("download"), "Update now"))
+      : null,
+  );
+}
+
+function updateStatus(update) {
+  const when = update.checked ? new Date(update.checked * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  if (update.state === "downloading") return `Downloading Magpie ${update.available}: ${Math.round((update.progress || 0) * 100)}%`;
+  if (update.state === "current") return `${update.message} Checked at ${when}.`;
+  if (update.message) return update.message;
+  return "Magpie looks for a new version every few hours.";
+}
 
 function notificationsSection() {
   const status = state.status;
@@ -511,7 +548,8 @@ export async function openSettings(focusSection) {
   clear(el);
   const sections = [
     ["ai", "AI"], ["notify", "Reminders"], ["categories", "Categories"], ["voice", "Voice"], ["time", "Time"],
-    ["display", "Display"], ["integrations", "Integrations"], ["data", "Data"], ["account", "Privacy"],
+    ["display", "Display"], ["integrations", "Integrations"], ["data", "Data"],
+    ...(desktopApp() && state.status.desktop.update ? [["updates", "Updates"]] : []), ["account", "Privacy"],
   ];
   const bodyEl = h("div", { class: "sheet-body" },
     h("nav", { class: "settings-nav", "aria-label": "Settings sections" },
@@ -528,6 +566,7 @@ export async function openSettings(focusSection) {
     displaySection(),
     h("div", { id: "integrations-slot" }, h("p", { class: "muted" }, "Loading integrations…")),
     dataSection(),
+    updatesSection(),
     accountSection(),
   );
   el.append(

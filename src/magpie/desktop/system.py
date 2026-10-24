@@ -146,8 +146,17 @@ def read_running(path: Path) -> dict[str, Any]:
 def active_window() -> str:
     """The window in front when the command word was heard, like “Budget.xlsx - Excel”.
 
-    Windows only; elsewhere (and when it can't tell) an empty string.
+    On a Mac the app in front (“Safari”); elsewhere, or when it can't tell, "".
     """
+    if sys.platform == "darwin":
+        try:
+            from AppKit import NSWorkspace
+
+            front = NSWorkspace.sharedWorkspace().frontmostApplication()
+            name = str(front.localizedName() or "") if front is not None else ""
+            return "" if name == "Magpie" else name[:60]
+        except Exception:
+            return ""
     if sys.platform != "win32":
         return ""
     try:
@@ -172,6 +181,11 @@ def beep() -> None:
             import winsound
 
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
+    elif sys.platform == "darwin":
+        with contextlib.suppress(Exception):
+            import subprocess
+
+            subprocess.Popen(["/usr/bin/afplay", "/System/Library/Sounds/Glass.aiff"])
 
 
 def message_box(title: str, text: str) -> None:
@@ -181,5 +195,15 @@ def message_box(title: str, text: str) -> None:
             import ctypes
 
             ctypes.windll.user32.MessageBoxW(None, text, title, 0x40)
+            return
+    if sys.platform == "darwin":
+        with contextlib.suppress(Exception):
+            import subprocess
+
+            def quoted(value: str) -> str:
+                return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+            script = f'display dialog {quoted(text)} with title {quoted(title)} buttons {{"OK"}}'
+            subprocess.run(["/usr/bin/osascript", "-e", script], timeout=600, check=False)
             return
     print(f"{title}: {text}", file=sys.stderr)

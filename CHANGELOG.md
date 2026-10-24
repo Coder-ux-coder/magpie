@@ -6,6 +6,37 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-24
+
+### Added
+
+- **Magpie for Mac** (Apple silicon): paste one line into Terminal
+  (`curl -fsSL https://raw.githubusercontent.com/Coder-ux-coder/magpie/main/install.sh | sh`)
+  and Magpie is in Applications and running. It waits in the menu bar, starts when you sign
+  in, listens for “notes on” in any app, shows the floating bar without taking the
+  keyboard, writes notes down with Whisper, and pops up reminders. It's in the Dock only
+  while its notes window is open. The release has `Magpie-mac.zip` next to
+  `MagpieSetup.exe`.
+- **The Mac app updates itself** like the Windows one: it downloads the new version,
+  checks its size and SHA-256, and once you're not taking a note swaps in the new
+  Magpie.app (putting the old one back if that fails) and opens it again.
+- **An update button**: Settings → Updates shows the version and what's happening, with
+  *Check for updates* and *Update now*. Magpie's menu has *Check for updates* too, and says
+  what it found.
+
+### Changed
+
+- **The repository is just the app.** The Docker setup (Dockerfile, Compose files, Caddy,
+  the image workflow, the setup scripts) and its docs are gone, with the community
+  templates. Magpie in Docker no longer gets new versions: install the app, which brings
+  its notes and settings over. Advanced settings for the app go in `magpie.env` in its
+  folder ([settings](docs/configuration.md)).
+- The *Windows app* workflow is now *App*: it builds, tests and installs the app on a real
+  Windows and a real Mac, and publishes one release with both. Test results show up on
+  the run's summary page (`packaging/report.py`).
+- On a Mac, the microphone help points to System Settings, the app in front is kept with a
+  note, and reminders make a sound.
+
 ## [0.5.0] - 2026-10-23
 
 ### Added

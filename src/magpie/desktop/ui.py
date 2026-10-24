@@ -2,10 +2,13 @@
 the tray icon.
 
 The windows are web pages served by the app's own Magpie server, shown by pywebview
-(WebView2 on Windows). The bar and the pop-ups float above other windows and appear
-without taking the keyboard from whatever you're doing. Their pages reach the app
-through the server's API (/api/desktop/ui), and the app drives them with run_js: no
+(WebView2 on Windows, WebKit on a Mac). The bar and the pop-ups float above other windows
+and appear without taking the keyboard from whatever you're doing. Their pages reach the
+app through the server's API (/api/desktop/ui), and the app drives them with run_js: no
 pywebview js_api, whose generated functions the pages' strict CSP (no eval) refuses.
+
+On a Mac everything that touches AppKit (the menu bar icon, the windows) runs on the
+main thread, and Magpie is in the Dock only while its notes window is open.
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ log = logging.getLogger(__name__)
 
 BAR_SIZE = (680, 172)
 ALERTS_WIDTH = 380
-BOTTOM_GAP = 64  # clear of the taskbar
+BOTTOM_GAP = 104 if sys.platform == "darwin" else 64  # clear of the Dock or the taskbar
 NOACTIVATE = 0x08000000  # WS_EX_NOACTIVATE
 GWL_EXSTYLE = -20
 SW_HIDE, SW_SHOWNOACTIVATE = 0, 4
@@ -47,12 +50,31 @@ def _user32() -> Any:
     return ctypes.windll.user32
 
 
+def on_main(work: Callable[[], Any]) -> None:
+    """AppKit may only be touched from the main thread: there it waits its turn on a Mac."""
+    if sys.platform == "darwin":
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(work)
+    else:
+        work()
+
+
+def _nsapp() -> Any:
+    import AppKit
+
+    return AppKit.NSApplication.sharedApplication()
+
+
+ALL_SPACES = 1 << 0 | 1 << 8  # NSWindowCollectionBehavior: every desktop, and full screen
+
+
 class Floating:
     """Shows, hides and places a floating window without taking the keyboard.
 
-    pywebview's own show() activates the window on Windows, which would pull the
-    keyboard away from whatever you're typing in, so there these windows are only ever
-    shown, hidden and moved with the Windows API (and pywebview's calls elsewhere).
+    pywebview's own show() activates the window, which would pull the keyboard away from
+    whatever you're typing in, so these windows are only ever shown, hidden and moved
+    with the Windows API, or on a Mac with the window's own NSWindow calls.
     """
 
     def __init__(self, window: Any, scale: float) -> None:
@@ -62,7 +84,21 @@ class Floating:
     def _handle(self) -> int:
         return _hwnd(self.window.title)
 
+    def _mac(self, work: Callable[[Any], Any]) -> bool:
+        """Do ``work`` with the NSWindow (on the main thread). False when not on a Mac."""
+        native = getattr(self.window, "native", None)
+        if sys.platform != "darwin" or native is None:
+            return False
+        on_main(lambda: work(native))
+        return True
+
     def show(self) -> None:
+        def front(native: Any) -> None:
+            native.setCollectionBehavior_(ALL_SPACES)
+            native.orderFrontRegardless()  # in front, without making Magpie active
+
+        if self._mac(front):
+            return
         hwnd = self._handle()
         if not hwnd:
             self.window.show()
@@ -73,6 +109,8 @@ class Floating:
         user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
 
     def hide(self) -> None:
+        if self._mac(lambda native: native.orderOut_(None)):
+            return
         hwnd = self._handle()
         if hwnd:
             _user32().ShowWindow(hwnd, SW_HIDE)
@@ -85,7 +123,7 @@ class Floating:
         if not hwnd:
             self.window.resize(width, height)
             self.window.move(x, y)
-            self.window.show()
+            self.show()
             return
         s = self.scale
         _user32().SetWindowPos(
@@ -101,6 +139,15 @@ class Floating:
     def keyboard(self, on: bool) -> None:
         """Whether a click may give the window the keyboard (to type a note)."""
         self.window.focus = on  # pywebview re-applies the style when the window activates
+
+        def mac(native: Any) -> None:
+            native.focus = on  # what pywebview's window asks before it takes the keyboard
+            if on:
+                _nsapp().activateIgnoringOtherApps_(True)
+                native.makeKeyAndOrderFront_(None)
+
+        if self._mac(mac):
+            return
         hwnd = self._handle()
         if not hwnd:
             return
@@ -171,6 +218,7 @@ class DesktopUI:
             text_select=True,
         )
         self.quitting = False
+        self.main_visible = show_main
         self.bar_visible = False
         self._alerts_height = 0
         self._bar = Floating(self.bar, scale)
@@ -181,7 +229,12 @@ class DesktopUI:
     def run(self, on_start: Callable[[], None], storage: Path) -> None:
         """Blocks (on the main thread) until every window is closed."""
         storage.mkdir(parents=True, exist_ok=True)
-        self._webview.start(on_start, private_mode=False, storage_path=str(storage))
+
+        def started() -> None:
+            self._dock(self.main_visible)
+            on_start()
+
+        self._webview.start(started, private_mode=False, storage_path=str(storage))
 
     def quit(self) -> None:
         self.quitting = True
@@ -195,14 +248,32 @@ class DesktopUI:
         # Closing the notes window keeps Magpie running (and listening) in the tray.
         if self.quitting:
             return True
+        self.main_visible = False
         threading.Thread(target=self.main.hide, daemon=True).start()
+        self._dock(False)
         return False
+
+    def _dock(self, visible: bool) -> None:
+        """On a Mac: in the Dock and Cmd-Tab while the notes window is open, else only in
+        the menu bar."""
+        if sys.platform != "darwin":
+            return
+
+        def apply() -> None:
+            app = _nsapp()
+            app.setActivationPolicy_(0 if visible else 1)  # regular, or accessory
+            if visible:
+                app.activateIgnoringOtherApps_(True)
+
+        on_main(apply)
 
     # ------------------------------------------------------------- notes window
 
     def show_main(self, path: str = "/") -> None:
         if path and path != "/":
             self.main.load_url(f"{self.base_url}{path}")
+        self.main_visible = True
+        self._dock(True)
         self.main.show()
         self.main.restore()
 
@@ -324,6 +395,7 @@ class Tray:
                     checked=lambda _: app.autostart,
                 ),
                 pystray.Menu.SEPARATOR,
+                item("Check for updates", lambda: app.check_for_updates()),
                 item("Quit Magpie", lambda: app.quit()),
             )
             icon = pystray.Icon(
@@ -340,14 +412,18 @@ class Tray:
         icon = self._icon
         if icon is None:
             return
-        try:
-            if state != self._state:
-                self._state = state
-                icon.icon = _icon_image(state)
-            icon.title = self.text(tooltip)[:127]  # Windows cuts tooltips at 128 characters
-            icon.update_menu()
-        except Exception:
-            log.debug("Updating the tray icon failed", exc_info=True)
+
+        def update() -> None:
+            try:
+                if state != self._state:
+                    self._state = state
+                    icon.icon = _icon_image(state)
+                icon.title = self.text(tooltip)[:127]  # Windows cuts tooltips at 128 characters
+                icon.update_menu()
+            except Exception:
+                log.debug("Updating the tray icon failed", exc_info=True)
+
+        on_main(update)
 
     def notify(self, message: str) -> None:
         """A notification from the tray icon (Windows shows it by the clock)."""
@@ -360,7 +436,8 @@ class Tray:
             log.debug("The tray notification failed", exc_info=True)
 
     def stop(self) -> None:
-        if self._icon is not None:
+        # On a Mac stopping the icon stops the whole app's event loop, which is ending anyway.
+        if self._icon is not None and sys.platform != "darwin":
             try:
                 self._icon.stop()
             except Exception:
