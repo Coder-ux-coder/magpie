@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
@@ -47,6 +48,8 @@ def log(path: Path) -> None:
 
 
 def main() -> None:
+    # The workflow reads UTF-8; a Windows console would otherwise refuse “ or →.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, help="a self-test's results (JSON)")
     parser.add_argument("--title", default="Self-test")
