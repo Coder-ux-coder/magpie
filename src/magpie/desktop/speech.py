@@ -1,9 +1,12 @@
 """Always-on listening: wait for the command word, then take down a note.
 
 Three offline recognisers do the work. While Magpie waits, a cheap one that only knows
-the command word (“notes on”) listens. When it hears it, a full recogniser writes down
-what follows, starting from the exact moment the command word ended (the last few
-seconds of audio are kept, so “notes on buy milk” said in one breath loses nothing).
+the command word (“notes on”) listens. A recogniser that knows nothing else hears the
+command word in all sorts of things (“no, it's on”), so Magpie only goes by what it
+settles on, and then a full recogniser listens to the same moment again and must hear
+the command word too. Then the full recogniser writes down what follows, starting from
+the exact moment the command word ended (the last few seconds of audio are kept, so
+“notes on buy milk” said in one breath loses nothing).
 Alongside it a second small recogniser listens only for “notes off” and “cancel note”,
 which a full recogniser often mishears; their timings say exactly where the note ends.
 The note's own sound is kept too, so the app can have it written down again by a much
@@ -126,7 +129,9 @@ class Listener:
 
     Events, through ``emit(kind, data)``:
       state      {"state": "standby" | "recording" | "paused", "by_voice": bool}
-      words      {"final": str, "partial": str} while recording (settled, still changing)
+      words      {"final": str, "partial": str, "timed": [(word, start), ...]} while
+                 recording (settled, still changing, and when each word began)
+      sound      {"pcm": bytes, "rate": int} while recording, the note's sound as it comes
       note       {"text": str, "reason": "phrase" | "silence" | "button" | "limit",
                   "audio": bytes, "rate": int}  (the note's sound, without the command words)
       empty      {"reason": ...}  recording ended with nothing said
@@ -143,7 +148,7 @@ class Listener:
         stop: str | None = None,
         silence_seconds: float = 8.0,
         max_seconds: float = 300.0,
-        keep_seconds: float = 8.0,
+        keep_seconds: float = 20.0,  # the command word is acted on once it's settled
     ) -> None:
         self.model = model
         self.emit = emit
@@ -212,6 +217,8 @@ class Listener:
             return
         if rec.accept(pcm):
             words = _words(rec.result(), "result")
+        elif self._wake_grammar:
+            return  # a grammar's guesses while you talk are too eager: wait for its answer
         else:
             words = _words(rec.partial(), "partial_result")
         hit = find_in_words(words, self.wake_phrases, fuzzy=not self._wake_grammar)
@@ -219,7 +226,31 @@ class Listener:
         # "I took notes on the meeting" doesn't start a note.
         if hit is None or hit.index > 1:
             return
-        self._record_from(self._wake_from + int(hit.end * self.rate), by_voice=True)
+        start = self._wake_from + int(hit.start * self.rate)
+        end = self._wake_from + int(hit.end * self.rate)
+        if self._wake_grammar and not self._confirmed(start, end):
+            log.info("Something only sounded like the command word; not starting a note")
+            return
+        self._record_from(end, by_voice=True)
+
+    def _confirmed(self, start: int, end: int) -> bool:
+        """A full recogniser, which isn't limited to the command word, hears it there too."""
+        rec = self.model.free(self.rate)
+        for chunk in self._between(start - int(0.6 * self.rate), end + int(0.3 * self.rate)):
+            rec.accept(chunk)
+        words = [w for w in _words(rec.final(), "result") if w["word"] != UNKNOWN]
+        return find_in_words(words, self.wake_phrases, fuzzy=True) is not None
+
+    def _between(self, start: int, end: int) -> list[bytes]:
+        """The kept audio from sample ``start`` up to ``end``."""
+        out = []
+        for chunk_start, chunk in self._ring:
+            chunk_end = chunk_start + len(chunk) // 2
+            if chunk_end <= start or chunk_start >= end:
+                continue
+            first, last = max(start, chunk_start), min(end, chunk_end)
+            out.append(chunk[(first - chunk_start) * 2 : (last - chunk_start) * 2])
+        return out
 
     def _record_from(self, start: int, *, by_voice: bool) -> None:
         self.state = "recording"
@@ -252,6 +283,7 @@ class Listener:
     def _record(self, pcm: bytes) -> None:
         assert self._dict is not None
         self._sound += pcm
+        self.emit("sound", {"pcm": pcm, "rate": self.rate})
         if self._dict.accept(pcm):
             self._settled += _words(self._dict.result(), "result")
             self._partial = []
@@ -283,7 +315,12 @@ class Listener:
             if any(shown):
                 self._heard_at = self.samples
                 self._heard_any = True
-            self.emit("words", {"final": shown[0], "partial": shown[1]})
+            timed = [
+                (w["word"], float(w["start"]))
+                for w in self._settled + self._partial
+                if w["word"] != UNKNOWN and w["start"] >= self._cut
+            ]
+            self.emit("words", {"final": shown[0], "partial": shown[1], "timed": timed})
 
     def _control(self, pcm: bytes) -> None:
         assert self._ctrl is not None

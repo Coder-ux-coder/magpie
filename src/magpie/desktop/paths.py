@@ -168,6 +168,7 @@ class DesktopState:
         "port": 8000,
         "first_run": True,
         "migrated": False,
+        "speech_v2": False,  # moved once to the most accurate speech model (0.7)
     }
 
     def __init__(self, path: Path) -> None:

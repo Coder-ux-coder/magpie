@@ -52,13 +52,14 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: build/whisper
-          key: whisper-small.en
-      - name: Whisper model
+          key: whisper-small.en-large-v3-turbo
+      - name: Whisper models
         run: |
-          # The app downloads it when it starts; here it's downloaded once (and cached) so
-          # the self-tests can check that Whisper writes a recording down.
-          python -c "from pathlib import Path; from magpie.desktop.paths import AppPaths; from magpie.desktop.transcribe import fetch_whisper; print(fetch_whisper(AppPaths(Path('build/whisper'))))"
-          "MAGPIE_WHISPER_MODEL=$PWD\build\whisper\models\whisper-small.en" >> $env:GITHUB_ENV
+          # The app downloads them when it starts; here they're downloaded once (and cached)
+          # so the self-tests can check that Whisper writes a recording down, as it's said
+          # (the quick model) and once it's over (the default one, next to it).
+          python -c "from pathlib import Path; from magpie.desktop.paths import AppPaths; from magpie.desktop.transcribe import MODELS, fetch_whisper; home = AppPaths(Path('build/whisper')); print([str(fetch_whisper(home, name)) for name in MODELS])"
+          "MAGPIE_WHISPER_MODEL=$PWD\build\whisper\models\whisper-large-v3-turbo" >> $env:GITHUB_ENV
       - name: Test
         run: |
           pytest -q tests/test_desktop.py --junitxml=build/tests.xml
@@ -138,7 +139,7 @@ jobs:
           $desktop | ConvertTo-Json
           Write-Host "::notice title=Installed Windows app is running::$($desktop | ConvertTo-Json -Compress)"
           if (-not $desktop.active) { throw "The dashboard doesn't see the app." }
-          if ($desktop.speech.state -ne "ready") { throw "Whisper isn't ready in the installed app: $($desktop.speech | ConvertTo-Json -Compress)" }
+          if ($desktop.speech.state -ne "ready" -or -not $desktop.speech.live) { throw "Whisper isn't ready in the installed app: $($desktop.speech | ConvertTo-Json -Compress)" }
           if (-not $desktop.update.supported) { throw "The installed app can't update itself: $($desktop.update | ConvertTo-Json -Compress)" }
           $note = Invoke-RestMethod "$base/api/notes" -Method Post -Headers $headers -ContentType "application/json" -Body '{"text": "Call James at five", "source": "api"}'
           if (-not $note.note.id) { throw "The installed app didn't save a note." }
@@ -219,11 +220,11 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: build/whisper
-          key: whisper-small.en
-      - name: Whisper model
+          key: whisper-small.en-large-v3-turbo
+      - name: Whisper models
         run: |
-          python -c "from pathlib import Path; from magpie.desktop.paths import AppPaths; from magpie.desktop.transcribe import fetch_whisper; print(fetch_whisper(AppPaths(Path('build/whisper'))))"
-          echo "MAGPIE_WHISPER_MODEL=$PWD/build/whisper/models/whisper-small.en" >> "$GITHUB_ENV"
+          python -c "from pathlib import Path; from magpie.desktop.paths import AppPaths; from magpie.desktop.transcribe import MODELS, fetch_whisper; home = AppPaths(Path('build/whisper')); print([str(fetch_whisper(home, name)) for name in MODELS])"
+          echo "MAGPIE_WHISPER_MODEL=$PWD/build/whisper/models/whisper-large-v3-turbo" >> "$GITHUB_ENV"
       - name: Test
         run: |
           code=0
@@ -249,11 +250,11 @@ jobs:
       - name: Install it and check the installed app
         timeout-minutes: 15
         run: |
-          # An app opened from Finder doesn't see this job's settings: Whisper's model goes
-          # where the app keeps it, as if it had downloaded it before.
+          # An app opened from Finder doesn't see this job's settings: Whisper's models go
+          # where the app keeps them, as if it had downloaded them before.
           models="$HOME/Library/Application Support/Magpie/models"
           mkdir -p "$models"
-          cp -R "$MAGPIE_WHISPER_MODEL" "$models/whisper-small.en"
+          cp -R build/whisper/models/whisper-small.en build/whisper/models/whisper-large-v3-turbo "$models/"
           # As anyone would: install.sh puts it in Applications and opens it.
           MAGPIE_INSTALL_FROM=dist/Magpie-mac.zip sh install.sh | tee build/install.txt
           base=$(tail -n 1 build/install.txt)
@@ -269,6 +270,7 @@ jobs:
           desktop = json.load(sys.stdin)
           assert desktop['active'], 'The dashboard does not see the app.'
           assert desktop['speech']['state'] == 'ready', f'Whisper is not ready: {desktop[\"speech\"]}'
+          assert desktop['speech']['live'], f'Whisper does not write words as they are said: {desktop[\"speech\"]}'
           assert desktop['update']['supported'], f'It cannot update itself: {desktop[\"update\"]}'
           "
           json=(-fsS -H 'X-Magpie: 1' -H 'Content-Type: application/json')

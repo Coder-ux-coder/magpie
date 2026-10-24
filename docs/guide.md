@@ -41,27 +41,34 @@ this page has the rest.
 
 ## How Magpie hears you
 
-Two speech recognisers work together, both on your computer: **no audio ever leaves it**.
+Everything happens on your computer: **no audio ever leaves it**.
 
-1. A small, quick one listens all the time for “notes on”, and shows your words in the bar
-   as you speak. It's light enough to run all day, but it mishears quite a lot.
-2. When you finish a note, **Whisper**, a much more accurate one, writes the whole note down
-   again from its sound, with punctuation and capitals, and copes with accents far better.
-   That's the text that's saved.
+1. A small, quick recogniser listens all the time for “notes on”. It's light enough to run
+   all day, but it mishears a lot, so before a note starts, a fuller recogniser listens to
+   the same moment again: only when both heard “notes on” does the bar appear.
+2. While you speak, **Whisper**, a far more accurate recogniser, writes down what you've
+   said so far, again every second or so, and the bar shows its words. The last few words
+   come first from the quick recogniser, in lighter letters, until Whisper catches up.
+3. When you finish, Whisper's most accurate model writes the whole note down once more,
+   with punctuation and capitals, and copes with accents far better. That's the text that's
+   saved.
 
-Magpie downloads Whisper once, in the background, the first time it starts (about 480 MB),
-into its folder; updates keep it. Until it's there, notes keep the quick recogniser's words.
-You can watch the download, and choose, in **Settings → Voice → Writing down what you say**:
+Magpie downloads Whisper's models once, in the background, the first time it starts, into
+its folder; updates keep them. The smaller one (480 MB) comes first and does both jobs
+until the most accurate one (1.6 GB) is there; before that, the bar and your notes have the
+quick recogniser's words. You can watch the download, and choose, in **Settings → Voice →
+Writing down what you say**:
 
 | Choice | What it's like |
 | --- | --- |
-| **Accurate** (the default) | Whisper's *small* English model. A few seconds a note on most computers. |
-| **Most accurate** | Whisper's *large turbo* model: best with strong accents and noisy rooms. A 1.6 GB download, and slower; use it on a recent computer. |
-| **Quick** | Just the words shown as you speak. Instant, but with more mistakes. |
+| **Most accurate** (the default) | Whisper's *large turbo* model: the best with accents and noisy rooms. It takes a few seconds a note, longer on an older computer. |
+| **Faster** | Whisper's *small* English model, for older computers: quicker, with a few more mistakes. |
+| **Off** | Just the quick recogniser's words. Instant, but often wrong. |
 
-If Whisper ever takes too long or fails, Magpie saves the quick recogniser's words instead,
-so a note is never lost. Speak naturally; you can pause mid-sentence. The AI tidies up
-whatever is left (“at 4, no, 5 pm” becomes 5 pm).
+If the chosen model ever fails, Magpie writes the note down with the faster one, and if
+that fails too, it saves the quick recogniser's words, so a note is never lost. Speak
+naturally; you can pause mid-sentence. The AI tidies up whatever is left (“at 4, no, 5 pm”
+becomes 5 pm).
 
 ## Choosing the AI
 
@@ -173,9 +180,10 @@ called *magpie*).
 | No Magpie icon by the clock (Windows) | Click the **^** arrow next to the clock; drag the icon onto the taskbar to keep it there. Not there either? Open Magpie from the Start menu. |
 | No Magpie icon in the menu bar (Mac) | A full menu bar hides icons behind the camera notch: quit a menu bar app or two. Not there either? Open Magpie from Applications. |
 | Magpie doesn't hear “notes on” | Point at Magpie's icon (or open its menu): it says what's wrong. *Hears only silence*: on Windows, Settings → Privacy & security → Microphone → *Let desktop apps access your microphone*; on a Mac, System Settings → Privacy & Security → Microphone → Magpie. Check the microphone isn't muted. Say “notes on” at the start of a sentence, or use *Start a voice note* in its menu. |
-| Saved notes have mistakes in them | Check Settings → Voice: *Ready* means Whisper writes notes down. *Downloading* means it isn't there yet (notes keep the quick words meanwhile). With a strong accent, try *Most accurate*. |
+| A note starts when you didn't say “notes on” | Magpie checks with a second recogniser before it starts a note, so this should be rare. If it still happens, choose a wake phrase that sounds like nothing else you say, such as “hello magpie” (Settings → Voice). |
+| Saved notes have mistakes in them | Check Settings → Voice: *Ready* means Whisper writes notes down. While it's *Downloading*, notes keep the quick words or the faster model's. Choose *Most accurate* (the default), and speak towards the microphone. |
 | The download of the speech model fails | Settings → Voice says why. Magpie tries again every 15 minutes. It comes from Hugging Face (huggingface.co), which some networks block. |
-| *Writing it down…* takes long | Whisper is working on a slow computer. Choose *Accurate* rather than *Most accurate*, or *Quick*. |
+| *Writing it down…* takes long | Whisper is working on a slow computer. Choose *Faster* rather than *Most accurate*. |
 | *Codex isn't installed* or *isn't signed in* | Install Codex and run `codex login` in a new window (see [Codex](#codex-your-chatgpt-sign-in-no-key)), then choose Codex again. |
 | *Codex has reached its usage limit* | Your ChatGPT plan's Codex limit: notes wait and are filed when it resets. |
 | An update doesn't arrive | Settings → Updates → *Check for updates* says what's wrong. On a Mac, Magpie has to be in Applications. |

@@ -6,6 +6,34 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-24
+
+### Added
+
+- **Accurate words in the bar as you speak.** Whisper now writes down what you've said so
+  far while you're still talking, again every second or so, so the bar shows its words
+  rather than the quick listener's guesses. The last few words come from the listener, in
+  lighter letters, until Whisper catches up.
+
+### Changed
+
+- **The most accurate speech model is now the default**: Whisper's large turbo model, which
+  is much better with accents. Magpie downloads Whisper's small model first (480 MB); it
+  writes the words shown as you speak, and writes notes down too until the large one
+  (1.6 GB) is there. Installs that had the small model move up once; Settings → Voice →
+  *Faster* goes back.
+- When the chosen model can't write a note down (not enough memory, say), the faster one
+  does, before Magpie falls back to the listener's words.
+- Quiet microphones are brought up before Whisper hears them, and sound from microphones
+  that only work at 44.1 or 48 kHz is filtered properly before it's turned into 16 kHz.
+
+### Fixed
+
+- **Notes no longer start when you didn't say “notes on”.** The always-on recogniser only
+  knows the command word, so it heard it in all sorts of things (“no, it's on”). Magpie now
+  waits until it's sure, then has a full recogniser listen to the same moment again, and
+  only starts a note when that one heard “notes on” too.
+
 ## [0.6.0] - 2026-10-24
 
 ### Added

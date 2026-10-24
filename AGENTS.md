@@ -97,7 +97,8 @@ src/magpie/
                    (the microphone thread); Vosk models behind small protocols
     phrases.py     Spotting “notes on”/“notes off”/“cancel note” in recogniser words
     transcribe.py  Whisper (faster-whisper): writes each note down again from its sound;
-                   the model is downloaded in the background (Whisper.choose/tick)
+                   the models are downloaded in the background (Whisper.choose/tick)
+    live.py        LiveWriter: the quick Whisper model writes the note so far for the bar
     server.py      EmbeddedServer (uvicorn in a thread, 127.0.0.1) and LocalClient
     ui.py          pywebview windows (notes, the floating bar, reminders) and the tray
     paths.py       Where the app keeps things (%LOCALAPPDATA%\Magpie, or Application
@@ -199,11 +200,15 @@ docs/              guide (for people), configuration (settings), integrations, S
   through `LocalClient`, which would deadlock the event loop).
 - Nothing may stop the app: the tray, the microphone, the speech model, Docker and updates
   can all fail; log it, show it (tray tooltip, bar message) and carry on.
-- A voice note is never lost to Whisper: the listener's words are saved whenever Whisper is
-  missing, fails or runs past its time budget. Whisper's model isn't in the installer (it
-  would make every update hundreds of MB); `Whisper` downloads it once into the app's
-  `models` folder. Tests use stand-ins (`FakeTranscriber`, `load=`, `download=`): never
-  download a model in tests. `MAGPIE_WHISPER_MODEL` points the self-test at a model.
+- A voice note is never lost to Whisper: the chosen model, then the quick one, then the
+  listener's words, whenever Whisper is missing, fails or runs past its time budget.
+  Whisper's models aren't in the installer (they'd make every update GBs); `Whisper`
+  downloads them once into the app's `models` folder, the quick one (`small.en`, also the
+  bar's live words) first. Tests use stand-ins (`FakeTranscriber`, `LiveModel`, `load=`,
+  `download=`): never download a model in tests. `MAGPIE_WHISPER_MODEL` points the
+  self-test at a model (and the quick one next to it).
+- Words from the bar's `LiveWriter` must never show once its note has ended or been typed
+  over: `_live_words` checks it's still the current writer, under `_words_lock`.
 - `--self-test` is what the App workflow checks; extend it when you add something the
   installed app needs (a module, a page, a data file in `packaging/bundle.py`).
 

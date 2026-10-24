@@ -219,8 +219,8 @@ function voiceSection() {
 function speechControls() {
   const speech = state.status.desktop.speech;
   if (!speech) return null;
-  const options = { ...(speech.models || {}), off: "Quick (the words shown as you speak; less accurate)" };
-  const chosen = state.prefs.speech_model || "small.en";
+  const options = { ...(speech.models || {}), off: "Off: the listener's own words (quick, but often wrong)" };
+  const chosen = state.prefs.speech_model || "large-v3-turbo";
   const select = h("select", { id: "pref-speech", "aria-describedby": "pref-speech-hint" },
     Object.entries(options).map(([value, label]) => h("option", { value, selected: value === chosen }, label)));
   select.addEventListener("change", () => savePrefs({ speech_model: select.value }, select.value === "off"
@@ -231,9 +231,17 @@ function speechControls() {
 
 function speechStatus(speech) {
   if (!speech) return "";
-  if (speech.state === "ready") return "Ready. Each note is written down again on this computer when you finish it; no audio leaves the computer.";
-  if (speech.state === "downloading") return `Downloading the model: ${Math.round((speech.progress || 0) * 100)}%. Until it's ready, notes keep the words shown as you speak.`;
-  if (speech.state === "off") return "Notes keep the words shown as you speak.";
+  const done = `${Math.round((speech.progress || 0) * 100)}%`;
+  if (speech.state === "ready") {
+    const ready = "Ready. Whisper writes your words in the bar as you speak, then each note again when you finish it, all on this computer: no audio leaves it.";
+    return speech.getting ? `${ready} Getting the model for the words shown as you speak: ${done}.` : ready;
+  }
+  if (speech.state === "downloading") {
+    if (speech.getting && speech.getting !== speech.model) return `Downloading the faster model first: ${done}. Until it's there, notes keep the listener's rough words.`;
+    if (speech.meanwhile) return `Downloading this model: ${done}. Until it's ready, Magpie uses the faster one.`;
+    return `Downloading the model: ${done}. Until it's ready, notes keep the listener's rough words.`;
+  }
+  if (speech.state === "off") return "Notes keep the words the listener heard: quick, but often wrong.";
   return speech.message || "";
 }
 
