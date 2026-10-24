@@ -35,6 +35,7 @@ log = logging.getLogger(__name__)
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_WORDS = 100  # words to know sent with a recording
+MAX_PROMPT = 600  # characters of them in a Whisper-style prompt (which holds 224 tokens)
 POLL_SECONDS = 1.0  # how often a service that works in the background is asked again
 POLL_LIMIT = 180.0  # and for how long
 ERROR_FIELDS = ("error", "detail", "message", "err_msg")  # where services say what's wrong
@@ -180,7 +181,12 @@ class SpeechConfig:
 
     @property
     def name(self) -> str:
-        return self.service.name if self.service is not None else "The speech service"
+        return self.service.name if self.service is not None else "the speech service"
+
+    @property
+    def title(self) -> str:
+        """The name at the start of a sentence."""
+        return self.name[:1].upper() + self.name[1:]
 
 
 def clean_saved_speech(saved: Any) -> dict[str, Any]:
@@ -264,7 +270,7 @@ def _field(config: SpeechConfig, body: Any, name: str) -> str:
 
 
 def _odd(config: SpeechConfig) -> TranscriptionError:
-    return TranscriptionError(f"{config.name} sent an answer Magpie doesn't understand.")
+    return TranscriptionError(f"{config.title} sent an answer Magpie doesn't understand.")
 
 
 def _answer(config: SpeechConfig, response: httpx2.Response) -> Any:
@@ -274,7 +280,7 @@ def _answer(config: SpeechConfig, response: httpx2.Response) -> Any:
     body = _body(response)
     if response.status_code in (401, 403):  # its answer may quote part of the key: not logged
         log.warning("%s refused the key (%s)", config.name, response.status_code)
-        raise TranscriptionError(f"{config.name} refused the key. Check it in Settings → Voice.")
+        raise TranscriptionError(f"{config.title} refused the key. Check it in Settings → Voice.")
     detail = ""
     if isinstance(body, dict):
         found = next((body[k] for k in ERROR_FIELDS if body.get(k)), "")
@@ -283,7 +289,7 @@ def _answer(config: SpeechConfig, response: httpx2.Response) -> Any:
         detail = str(found or "")[:200]
     log.warning("%s answered %s: %s", config.name, response.status_code, str(body)[:300])
     ending = f": {detail}" if detail else "."
-    raise TranscriptionError(f"{config.name} answered {response.status_code}{ending}")
+    raise TranscriptionError(f"{config.title} answered {response.status_code}{ending}")
 
 
 async def _openai(
@@ -293,7 +299,10 @@ async def _openai(
     if config.language:
         data["language"] = config.language
     if words:
-        data["prompt"] = ", ".join(words)
+        prompt = ", ".join(words)
+        data["prompt"] = (
+            prompt if len(prompt) <= MAX_PROMPT else prompt[:MAX_PROMPT].rsplit(",", 1)[0]
+        )
     response = await http.post(
         f"{config.base_url}/audio/transcriptions",
         headers=_headers(config),
@@ -357,9 +366,9 @@ async def _wait_for(
             return body
         if status == failed:
             reason = body.get("error") or body.get("error_code") or "no reason given"
-            raise TranscriptionError(f"{config.name} couldn't write it down: {reason}")
+            raise TranscriptionError(f"{config.title} couldn't write it down: {reason}")
         if time.monotonic() > deadline:
-            raise TranscriptionError(f"{config.name} took too long.")
+            raise TranscriptionError(f"{config.title} took too long.")
         await asyncio.sleep(POLL_SECONDS)
 
 
@@ -476,7 +485,7 @@ class Transcriber:
         try:
             text = await APIS[config.service.api](self.http, config, audio, kind, known[:MAX_WORDS])
         except httpx2.HTTPError as exc:
-            raise TranscriptionError(f"{config.name} couldn't be reached: {exc}") from exc
+            raise TranscriptionError(f"{config.title} couldn't be reached: {exc}") from exc
         return " ".join(str(text or "").split())
 
     async def check(self, config: SpeechConfig) -> str | None:
@@ -490,7 +499,9 @@ class Transcriber:
                 f"{config.base_url}{path}", headers=_headers(config), timeout=15
             )
         except httpx2.HTTPError as exc:
-            return f"{config.name} couldn't be reached to check the key ({exc}). Saved anyway."
+            return f"{config.title} couldn't be reached to check the key ({exc}). Saved anyway."
         if response.status_code == 401:
-            raise TranscriptionError(f"{config.name} refused the key. Check it and paste it again.")
+            raise TranscriptionError(
+                f"{config.title} refused the key. Check it and paste it again."
+            )
         return None

@@ -759,8 +759,11 @@ class DesktopApp:
         note = append_text(typed, text or str(data.get("text", "")))
         shown: dict[str, Any] = {"text": note}
         if failed:  # say so, or the service's problem goes unnoticed
-            instead = "Whisper wrote it down" if written else "it keeps the words Magpie heard"
-            shown["status"] = f"Your speech service didn't work ({failed}), so {instead}."
+            reason = failed.strip().rstrip(".") + "."
+            instead = (
+                "Whisper wrote it down instead." if written else "The note keeps the words heard."
+            )
+            shown["status"] = f"{reason[:1].upper()}{reason[1:]} {instead}"
         if token == self._bar_token:  # the bar still shows this note
             self._bar("saving", shown)
             self._submit(note, "desktop-voice", said_in)

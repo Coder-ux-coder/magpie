@@ -367,6 +367,13 @@ class Transcriber:
         return clean(" ".join(parts), wake, stop)
 
 
+def to_pcm(audio: Any) -> bytes:
+    """Float samples back to 16-bit sound."""
+    import numpy as np
+
+    return (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+
+
 def wav(pcm: bytes, rate: int) -> bytes:
     """16-bit mono sound as a WAV file, as speech services take it."""
     out = io.BytesIO()
@@ -398,6 +405,8 @@ class SpeechService:
     ) -> str:
         if len(pcm) < 0.3 * rate * 2:  # too short to hold a word
             return ""
+        if rate != RATE:  # what services listen at: a third of the size from 48 kHz
+            pcm, rate = to_pcm(to_float(pcm, rate)), RATE
         return clean(self._send(wav(pcm, rate)), wake, stop)
 
 

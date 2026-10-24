@@ -1328,12 +1328,16 @@ def test_a_speech_service_writes_the_note_down_and_whisper_steps_in_when_it_fail
     settle(app, lambda: len(app.client.notes) == 2 and said("Groq refused the key."))
     assert app.client.notes[-1] == ("Call James at 5.", "desktop-voice")
     assert app.whisper.transcriber.words == ["James", "Kinnaird Road"]
-    assert said("so Whisper wrote it down")
+    assert said("Groq refused the key. Whisper wrote it down instead.")
 
     app.whisper = FakeWhisper()  # no Whisper either: the listener's words, and it says so
+    app.client.heard = RuntimeError("your speech service couldn't be reached: no route to host")
     voice_note(app, "water the plants")
-    settle(app, lambda: len(app.client.notes) == 3 and said("keeps the words Magpie heard"))
+    settle(app, lambda: len(app.client.notes) == 3 and said("The note keeps the words heard."))
     assert app.client.notes[-1] == ("water the plants", "desktop-voice")
+    assert said(
+        "Your speech service couldn't be reached: no route to host. The note keeps the words heard."
+    )
 
 
 def test_a_dictation_app_of_your_own_types_the_note_into_the_bar(app):
@@ -1392,6 +1396,11 @@ def test_a_note_for_a_speech_service_is_a_wav_file_and_tiny_ones_are_not_sent():
             RATE * 2,
         )
     assert service.transcribe(bytes(200), RATE) == "" and len(sent) == 1  # too short to send
+    # A microphone at 48 kHz: sent at 16 kHz, which is all a service listens at.
+    pytest.importorskip("numpy")
+    service.transcribe(bytes(48000 * 2 * 2), 48000)
+    with wave.open(io.BytesIO(sent[-1])) as recording:
+        assert (recording.getframerate(), recording.getnframes()) == (RATE, RATE * 2)
 
 
 def test_the_apps_client_reaches_the_speech_service_through_the_server():

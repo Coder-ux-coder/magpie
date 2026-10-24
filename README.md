@@ -123,6 +123,21 @@ needed, and nothing asks questions.
    `codex login` in a new window, which signs in through their browser; then send
    `{"provider": "codex"}`.
 
+   To have voice notes written down by a speech service of their own instead of Whisper,
+   save the service (checked like the AI's key), then choose it:
+
+   ```sh
+   curl -fsS -X PUT http://127.0.0.1:8000/api/speech -H "X-Magpie: 1" \
+     -H "Content-Type: application/json" -d '{"service": "groq", "key": "gsk_..."}'
+   curl -fsS -X PUT http://127.0.0.1:8000/api/prefs -H "X-Magpie: 1" \
+     -H "Content-Type: application/json" -d '{"speech_model": "service"}'
+   ```
+
+   Services: `openai`, `groq`, `deepgram`, `elevenlabs`, `assemblyai`, `gladia`, or
+   `compatible` with `"base_url"`. For their own dictation app (Glaido, Wispr Flow…), send
+   `{"speech_model": "dictation"}` to `/api/prefs` instead; `"vocabulary"` there lists names
+   and words to listen out for.
+
 3. **Check that it listens:** `GET /api/desktop` answers
    `{"active": true, "state": "standby", ...}`. `"no-mic"` or `"muted"` means the computer
    gives Magpie no microphone: on Windows, Settings → Privacy & security → Microphone →

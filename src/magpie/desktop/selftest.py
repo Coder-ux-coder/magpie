@@ -259,7 +259,7 @@ def check_window(server: Any) -> str:
     reaches the app through the server's API, and the app runs scripts in the page."""
     import webview
 
-    ready, reported = threading.Event(), threading.Event()
+    ready, reported, dictated = threading.Event(), threading.Event(), threading.Event()
     outcome: dict[str, Any] = {}
 
     class Bridge:
@@ -281,6 +281,9 @@ def check_window(server: Any) -> str:
             elif action == "report":
                 outcome["shown"] = details.get("text")
                 reported.set()
+            elif action == "save_dictated":
+                outcome["dictated"] = details.get("text")
+                dictated.set()
 
     window = webview.create_window(
         "Magpie self-test",
@@ -309,6 +312,17 @@ def check_window(server: Any) -> str:
             )
             if not reported.wait(30):
                 outcome["error"] = "the bar didn't answer the app"
+                return
+            # A dictation app of the user's own types the note in, ending with the stop
+            # phrase: the bar saves the words before it.
+            window.run_js(
+                "(() => { window.magpieBar.dictate({stop: 'notes off', seconds: 0});"
+                "const box = document.getElementById('text');"
+                "box.value = 'Buy milk, notes off.';"
+                "box.dispatchEvent(new Event('input')); })();"
+            )
+            if not dictated.wait(30):
+                outcome["error"] = "the bar didn't save what a dictation app typed into it"
         except Exception as exc:
             outcome["error"] = f"{type(exc).__name__}: {exc}"
         finally:
@@ -323,7 +337,12 @@ def check_window(server: Any) -> str:
         raise RuntimeError(outcome["error"])
     if outcome.get("shown") != "recording|buy milk":
         raise RuntimeError(f"the bar showed {outcome.get('shown')!r}")
-    return "the bar opened, reached the app and showed the words it was sent"
+    if outcome.get("dictated") != "Buy milk":
+        raise RuntimeError(f"the bar saved {outcome.get('dictated')!r} from a dictation app")
+    return (
+        "the bar opened, reached the app, showed the words it was sent, and saved what a "
+        "dictation app typed into it"
+    )
 
 
 def check_model(model: Path | None) -> str:

@@ -6,6 +6,25 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-24
+
+### Fixed
+
+- When a speech service of your own fails, the bar's message reads properly ("Groq refused
+  the key. Whisper wrote it down instead."), and service names start sentences with a
+  capital letter.
+- A long list of names and words is cut, at a whole word, to what Whisper-style services
+  take, so they don't refuse it.
+- Sound from microphones that run at 44.1 or 48 kHz goes to a speech service at 16 kHz,
+  a third of the size, so long notes stay under the services' 25 MB limit.
+- The speech service picker's remove button and messages read properly for *Another
+  service*.
+
+### Changed
+
+- The App workflow's self-test also checks, in a real window on Windows and on a Mac, that
+  the bar saves what a dictation app types into it.
+
 ## [0.8.0] - 2026-10-24
 
 ### Added

@@ -309,7 +309,7 @@ class Magpie:
         choice = {"service": service, "settings": {**stored["settings"], service: entry}}
         config = resolve_speech(self.settings, choice)
         if not config.base_url:
-            raise ValueError(f"Enter the address of {info.name}.")
+            raise ValueError("Enter the service's address.")
         if not config.ready:
             raise ValueError(f"Paste your {info.name} API key.")
         try:

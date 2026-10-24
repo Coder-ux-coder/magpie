@@ -44,6 +44,16 @@ async def test_openai_and_groq_are_sent_the_note_with_the_words_to_know(core, ro
     assert b"whisper-large-v3" in form(router.requests[-1])
 
 
+async def test_a_long_list_of_words_is_cut_to_whole_words_that_fit_a_prompt(core, router):
+    router.add("POST", "https://api.groq.com/openai/v1/audio/transcriptions", {"text": "Hi."})
+    words = [f"Name{i:03d}" for i in range(100)]  # 100 words of 7 letters: 898 characters
+    await core.stt.transcribe(WAV, "audio/wav", words=words, config=config("groq"))
+    body = form(router.requests[-1]).decode("latin-1")
+    prompt = body.split('name="prompt"\r\n\r\n')[1].split("\r\n")[0]
+    assert len(prompt) <= stt.MAX_PROMPT and prompt.startswith("Name000, Name001")
+    assert prompt.split(", ")[-1] in words  # no word cut in half
+
+
 async def test_a_service_on_your_own_network_needs_no_key(core, router):
     router.add("POST", "http://localhost:8000/v1/audio/transcriptions", {"text": "Buy milk."})
     chosen = config("compatible", key=None, model="Systran/faster-whisper-large-v3")
@@ -137,6 +147,9 @@ async def test_a_failing_service_says_what_went_wrong(core, router, monkeypatch)
     router.add("POST", url, unreachable)
     with pytest.raises(TranscriptionError, match="OpenAI couldn't be reached"):
         await core.stt.transcribe(WAV, "audio/wav", config=config("openai"))
+    router.add("POST", "http://localhost:8000/v1/audio/transcriptions", unreachable)
+    with pytest.raises(TranscriptionError, match="^Your speech service couldn't be reached"):
+        await core.stt.transcribe(WAV, "audio/wav", config=config("compatible", key=None))
 
     router.add("POST", "https://api.deepgram.com/v1/listen", {"results": {}})
     with pytest.raises(TranscriptionError, match="doesn't understand"):

@@ -345,7 +345,8 @@ export function speechServiceControls({ prefix = "pref" } = {}) {
         speech = await api("/api/speech", { method: "PUT", body, timeout: 60000 });
         chosen = speech.service;
         render();
-        toast(speech.warning || `Connected. ${current.name} writes your notes down from now on.`);
+        const who = current.name.charAt(0).toUpperCase() + current.name.slice(1);
+        toast(speech.warning || `Connected. ${who} writes your notes down from now on.`);
         await refreshStatus().catch(() => {});
       } catch (error) {
         done();
@@ -356,7 +357,8 @@ export function speechServiceControls({ prefix = "pref" } = {}) {
   };
 
   const removeKey = async (service) => {
-    const ok = await confirmDialog({ title: `Remove the ${service.name} key?`, message: "Until you add one again, Whisper writes your notes down on this computer.", confirm: "Remove", danger: true });
+    const which = service.id === "compatible" ? "this service's key" : `the ${service.name} key`;
+    const ok = await confirmDialog({ title: `Remove ${which}?`, message: "Until you add one again, Whisper writes your notes down on this computer.", confirm: "Remove", danger: true });
     if (!ok) return;
     try {
       speech = await api(`/api/speech/key?service=${encodeURIComponent(service.id)}`, { method: "DELETE" });
