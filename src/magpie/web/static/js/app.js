@@ -717,13 +717,16 @@ const SHORTCUTS = [
 
 function showShortcuts() {
   const dialog = $("shortcuts-dialog");
+  // The Magpie app's own shortcut works in every program, not just this window.
+  const anywhere = desktopApp() ? state.status.desktop.shortcut?.label : "";
+  const rows = anywhere ? [[anywhere, "Take a voice note in any program: tap to start and again to save, or hold while you talk"], ...SHORTCUTS] : SHORTCUTS;
   clear(dialog);
   dialog.append(
     h("div", { class: "sheet-inner" },
       h("div", { class: "sheet-head" }, h("h2", { id: "shortcuts-title" }, "Keyboard shortcuts"), iconButton("close", "Close", () => dialog.close())),
       h("div", { class: "sheet-body" },
         h("table", { class: "shortcuts-table" },
-          h("tbody", {}, SHORTCUTS.map(([keys, what]) => h("tr", {}, h("th", { scope: "row" }, h("kbd", {}, keys)), h("td", {}, what)))),
+          h("tbody", {}, rows.map(([keys, what]) => h("tr", {}, h("th", { scope: "row" }, h("kbd", {}, keys)), h("td", {}, what)))),
         ),
       ),
     ),

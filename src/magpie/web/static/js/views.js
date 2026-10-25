@@ -6,10 +6,12 @@ import { KINDS, noteCard } from "./cards.js";
 import { renderMarkdown } from "./markdown.js";
 import { speak } from "./speech.js";
 import { aiName, categoryOf, desktopApp, emit, local, on, snoozeLabel, speechLang, state, tz } from "./state.js";
-import { clear, clock, dayLabel, h, icon, iconButton, toast, when } from "./ui.js";
+import { dayGroup } from "./text.js";
+import { clear, clock, dayLabel, dayOffset, h, icon, iconButton, toast, when } from "./ui.js";
 
 const PAGE = 40;
-let list = { notes: [], hasMore: false, key: "", container: null };
+let list = { notes: [], hasMore: false, key: "", container: null, today: [] };
+const GROUPS = { pinned: "Pinned", today: "Today", yesterday: "Yesterday", week: "Last 7 days", earlier: "Earlier" };
 
 // ------------------------------------------------------------------ lists
 
@@ -87,7 +89,8 @@ export async function renderNotes(container, route, q, isCurrent = () => true) {
     if (route.kind) params.set("kind", route.kind);
     if (route.category) params.set("category", String(route.category));
   }
-  const data = await api(`/api/notes?${params}`);
+  const inbox = route.view === "inbox" && !q;
+  const [data, today] = await Promise.all([api(`/api/notes?${params}`), inbox ? dueToday() : []]);
   if (!isCurrent()) return;
   if (Array.isArray(data.categories)) {
     state.categories = data.categories;
@@ -95,8 +98,32 @@ export async function renderNotes(container, route, q, isCurrent = () => true) {
   }
   emit("counts", data.counts);
   params.set("limit", String(PAGE));
-  list = { notes: data.notes, hasMore: data.notes.length >= PAGE, key, container, route, q, params };
+  list = { notes: data.notes, hasMore: data.notes.length >= PAGE, key, container, route, q, params, today };
   draw();
+}
+
+// Newest first with the pinned ones on top, as the server sends them: kept that way
+// when a note changes here (a pin, an undo).
+function sortNotes(notes) {
+  return notes.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at.localeCompare(a.created_at) || b.id - a.id);
+}
+
+function groupOf(note) {
+  if (note.pinned) return "pinned";
+  return dayGroup(-dayOffset(new Date(note.created_at), tz()));
+}
+
+// The notes under headings by day (Pinned, Today, Yesterday, …); search results in
+// the order of how well they match.
+function noteGroups(notes, q) {
+  const cards = (items) => h("ul", { class: "list", role: "list" }, items.map((note) => noteCard(note, noteActions)));
+  if (q) return [cards(notes)];
+  const groups = new Map(Object.keys(GROUPS).map((key) => [key, []]));
+  for (const note of sortNotes(notes)) groups.get(groupOf(note)).push(note);
+  return [...groups].filter(([, items]) => items.length).map(([key, items]) =>
+    h("section", { class: "note-group", "aria-labelledby": `group-${key}` },
+      h("h3", { class: "group-title", id: `group-${key}` }, GROUPS[key]),
+      cards(items)));
 }
 
 function draw() {
@@ -104,11 +131,12 @@ function draw() {
   if (!container) return;
   const focusedId = document.activeElement?.closest?.(".note-card")?.dataset.id;
   clear(container);
+  if (list.today?.length) container.append(todayCard(list.today));
   if (!notes.length) {
     container.append(emptyState(route, q));
     return;
   }
-  container.append(h("ul", { class: "list", role: "list" }, notes.map((note) => noteCard(note, noteActions))));
+  container.append(...noteGroups(notes, q));
   if (list.hasMore) {
     container.append(h("button", { type: "button", class: "btn load-more", onclick: loadMore }, "Show more"));
   }
@@ -157,7 +185,12 @@ function replaceCard(note) {
     }
     return;
   }
+  const moved = !list.q && groupOf(list.notes[index]) !== groupOf(note); // pinned, or unpinned
   list.notes[index] = note;
+  if (moved) {
+    draw();
+    return;
+  }
   const existing = list.container.querySelector(`.note-card[data-id="${note.id}"]`)?.closest("li");
   const hadFocus = existing?.contains(document.activeElement);
   const fresh = noteCard(note, noteActions);
@@ -185,6 +218,53 @@ export function visibleNotes() {
 export function detachList() {
   list.container = null;
 }
+
+// ------------------------------------------------------------ due today
+
+// Reminders sent and waiting for you, and the rest of today's: at the top of the inbox.
+async function dueToday() {
+  try {
+    const [upcoming, sent] = await Promise.all([
+      api("/api/reminders?status=scheduled&limit=50"),
+      api("/api/reminders?status=sent&limit=20"),
+    ]);
+    const zone = tz();
+    const waiting = sent.reminders.filter((r) => Date.now() - new Date(r.sent_at || r.due_at) < 2 * 86400000);
+    const later = upcoming.reminders.filter((r) => dayOffset(new Date(r.due_at), zone) <= 0);
+    return [...waiting, ...later].slice(0, 6);
+  } catch {
+    return []; // the notes matter more: they show without it
+  }
+}
+
+function todayCard(reminders) {
+  return h("section", { class: "card today", "aria-labelledby": "today-title" },
+    h("div", { class: "today-head" },
+      h("h3", { id: "today-title" }, icon("clock"), "Due today"),
+      h("a", { href: "#/scheduled", class: "small" }, "All reminders")),
+    h("ul", { role: "list" }, reminders.map((reminder) => {
+      const sent = reminder.status === "sent";
+      const due = new Date(reminder.due_at);
+      return h("li", { class: sent ? "sent" : "" },
+        h("span", { class: "time" }, clock(due, tz())),
+        h("span", { class: "what", dir: "auto" },
+          reminder.note_id ? h("a", { href: `#/note/${reminder.note_id}` }, reminder.message) : reminder.message,
+          sent ? h("span", { class: "muted small" }, " · sent") : null),
+        h("span", { class: "actions" },
+          iconButton("check", `Done: ${reminder.message}`, () => reminderActions.done(reminder), { class: "icon-btn small", title: "Done" }),
+          h("button", { type: "button", class: "btn small", onclick: () => reminderActions.snooze(reminder), "aria-label": `Snooze for ${snoozeLabel()}: ${reminder.message}` }, `+${snoozeLabel()}`)));
+    })));
+}
+
+// Done or snoozed here or anywhere: the inbox's list of today's reminders follows.
+on("reminders-changed", async () => {
+  if (list.route?.view !== "inbox" || list.q || !list.container?.isConnected) return;
+  const key = list.key;
+  const today = await dueToday();
+  if (key !== list.key) return;
+  list.today = today;
+  draw();
+});
 
 // -------------------------------------------------------------- scheduled
 

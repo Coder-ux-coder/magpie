@@ -103,6 +103,8 @@ src/magpie/
     transcribe.py  Whisper (faster-whisper): writes each note down again from its sound;
                    the models are downloaded in the background (Whisper.choose/tick)
     live.py        LiveWriter: the quick Whisper model writes the note so far for the bar
+    hotkey.py      The keyboard shortcut for a voice note in any program (Windows):
+                   RegisterHotKey on its own thread; tap or hold (Keys stand-ins in tests)
     server.py      EmbeddedServer (uvicorn in a thread, 127.0.0.1) and LocalClient
     ui.py          pywebview windows (notes, the floating bar, reminders) and the tray
     paths.py       Where the app keeps things (%LOCALAPPDATA%\Magpie, or Application
@@ -116,7 +118,8 @@ src/magpie/
   web/             index.html, sw.js, manifest, static/{css,js,icons,desktop}
     static/js/     app.js (boot, routing, the sidebar), capture.js + voice.js (the voice bar),
                    controls.js (AI, email, pop-ups, categories, learning), welcome.js
-                   (first-run screen), settings.js, views.js, cards.js, note-dialog.js, …
+                   (first-run screen), settings.js, views.js, cards.js, note-dialog.js,
+                   text.js (checklist items, search marks, day groups; DOM-free), …
     static/desktop/ The app's own pages: bar.html/js (floating voice bar), reminders.html/js
 artifact/          magpie.html: Magpie as a Claude artifact (the user's own Claude account)
 packaging/         bundle.py (what every build includes), magpie-app.py (entry point),

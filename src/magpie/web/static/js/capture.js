@@ -55,9 +55,10 @@ function app() {
 function appStatus() {
   const { state: now, message } = app();
   const wake = app().wake || wakePhrase();
-  if (now === "standby") return `The Magpie app is listening: say “${wake}” anywhere on this computer, press the mic, or type.`;
+  const keys = app().shortcut?.label;
+  if (now === "standby") return `The Magpie app is listening: say “${wake}” anywhere on this computer${keys ? `, press ${keys}` : ""}, press the mic, or type.`;
   if (now === "recording") return "Taking a note in the Magpie bar at the bottom of the screen…";
-  if (now === "paused") return "The Magpie app isn't listening for the command word. Press the mic, or turn listening on in the voice options.";
+  if (now === "paused") return `The Magpie app isn't listening for the command word. Press the mic${keys ? ` or ${keys}` : ""}, or turn listening on in the voice options.`;
   if (now === "starting") return message || "The Magpie app is getting ready to listen…";
   return message || "The Magpie app can't hear a microphone. Press the mic to try again, or type.";
 }

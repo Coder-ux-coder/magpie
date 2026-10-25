@@ -6,6 +6,29 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-25
+
+### Added
+
+- **A keyboard shortcut for voice notes** (Windows): press **Ctrl+Alt+Space** in any
+  program. Tap it to start a note and again to save it, or hold it down while you talk and
+  let go to save. Choose Ctrl+Shift+Space or Ctrl+Alt+N instead, or none, in Settings →
+  Voice, which says if another program already uses the one you chose. With your own
+  dictation app, pressing it again saves what the app typed. Magpie's menu shows it beside
+  *Start a voice note*.
+- **Lists are checklists.** Open a list and tick things off; the card shows what's left and
+  how many are done. A list said in one go (“shopping list: milk, eggs and bread”) is
+  written with a line for each thing, by the AI and by *No AI* too.
+- **Due today** at the top of the Inbox: what's due, with *Done* and a snooze button.
+- **Notes by day** in the Inbox: *Today*, *Yesterday*, *Last 7 days* and *Earlier*, with
+  pinned notes first.
+- **Search marks the words it found** in each note.
+
+### Fixed
+
+- *No AI* (and the demo AI) ran every note onto one line, so a list typed a line at a time
+  lost its lines.
+
 ## [0.9.0] - 2026-10-24
 
 ### Changed

@@ -49,12 +49,16 @@ up and summarised without filing anything by hand.
    then opens the bar with the keyboard for that app to type into, and the note is saved
    when its words end with the stop phrase, after a pause, or with Enter. Names and words
    the user lists are listened out for by Whisper and the services that take them. The
-   choice is on the welcome screen too. In the notes window a voice bar sits at the
+   choice is on the welcome screen too. On Windows a keyboard shortcut (Ctrl+Alt+Space,
+   or another the user picks in Settings → Voice) takes a voice note in any program: a tap
+   starts it and another saves it, or the user holds it down while talking and lets go to
+   save. In the notes window a voice bar sits at the
    bottom of every view and works the same way. The same note can come from the mic
    button, typed text, a Telegram text or voice message, Claude through MCP, or the
    HTTP API.
 2. **Understand.** The AI cleans the transcript (filler words, recognition
-   mistakes, false starts) without changing its meaning. It gives the note a
+   mistakes, false starts) without changing its meaning, and writes a list said in one
+   go (“shopping list milk, eggs and bread”) with a line for each thing. It gives the note a
    title (which the user can edit), a kind (task, idea, link, journal, meeting,
    reference, list or note), one of the user's own colour-coded categories, and
    tags, and reads any dates and times in it. A note written while a category is
@@ -83,9 +87,12 @@ up and summarised without filing anything by hand.
    user only names something by voice ("that Paul Graham essay about doing things
    that don't scale"), Claude finds it with web search first.
 6. **Dashboard.** Browse (the views and the user's categories in a sidebar, a
-   drawer on narrow screens), search, filter, edit, delete (with Undo) and act on
-   notes; drag them onto categories. See upcoming reminders, reviews, and daily
-   and weekly digests, and ask questions across all of your notes.
+   drawer on narrow screens), search (with the words found marked), filter, edit,
+   delete (with Undo) and act on notes; drag them onto categories. The Inbox starts
+   with what's due today, then the notes by day (today, yesterday, the last 7 days,
+   earlier), pinned ones first. A list note is a checklist to tick off, and its card
+   says what's left. See upcoming reminders, reviews, and daily and weekly digests,
+   and ask questions across all of your notes.
 7. **Make it yours.** Installing asks nothing: on Windows one download, elsewhere
    one command, and the time zone follows the computer. A welcome screen then sets
    up the AI (provider, model, key), pop-ups and email, the command word and

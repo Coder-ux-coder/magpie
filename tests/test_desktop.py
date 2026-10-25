@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import queue
 import sqlite3
 import subprocess
 import sys
@@ -21,7 +22,7 @@ from typing import Any, cast
 import httpx2
 import pytest
 
-from magpie.desktop import migrate, paths, phrases, system, transcribe, update
+from magpie.desktop import hotkey, migrate, paths, phrases, system, transcribe, update
 from magpie.desktop.app import Bridge, DesktopApp
 from magpie.desktop.live import GIVE_UP, LONGEST_STEP, LiveWriter
 from magpie.desktop.speech import (
@@ -884,7 +885,7 @@ class FakeUI:
         self.calls.append(("main", path))
 
     def bar(self, name):
-        return [payload for kind, n, *payload in self.calls if kind == "bar" and n == name]
+        return [list(call[2:]) for call in self.calls if call[:2] == ("bar", name)]
 
 
 class FakeClient:
@@ -928,14 +929,59 @@ class FakeEngine:
         self.commands.append((name, *args))
 
 
+class FakeKeys:
+    """Windows' keyboard calls, played by a test: presses wait in a queue."""
+
+    def __init__(self, free: bool = True) -> None:
+        self.free = free  # False: another program has the shortcut
+        self.presses: queue.Queue[bool] = queue.Queue()
+        self.down = threading.Event()  # the keys are held down
+        self.registered: list[tuple[int, int]] = []
+        self.unregistered = threading.Event()
+        self.waits = 0  # times the listener has waited for a press
+
+    def prepare(self) -> int:
+        return 42
+
+    def register(self, modifiers: int, key: int) -> bool:
+        self.registered.append((modifiers, key))
+        return self.free
+
+    def unregister(self) -> None:
+        self.unregistered.set()
+
+    def wait(self) -> bool:
+        self.waits += 1
+        return self.presses.get(timeout=30)
+
+    def held(self, key: int) -> bool:
+        return self.down.is_set()
+
+    def stop(self, thread_id: int) -> None:
+        assert thread_id == 42
+        self.presses.put(False)
+
+    def press(self, *, hold: bool = False) -> None:
+        if hold:
+            self.down.set()
+        self.presses.put(True)
+
+
 @pytest.fixture
-def app(tmp_path):
+def keys():
+    return FakeKeys()
+
+
+@pytest.fixture
+def app(tmp_path, keys):
     desktop = DesktopApp(paths.AppPaths(tmp_path))
     desktop.ui, desktop.client, desktop.engine = cast(Any, (FakeUI(), FakeClient(), FakeEngine()))
+    desktop.hotkey._keys = lambda: keys  # never the real keyboard, even on Windows
     desktop.ui_ready("bar")
     desktop.ui_ready("alerts")
     yield desktop
     desktop._quitting.set()  # as when the app quits: late timers do nothing
+    desktop.hotkey.stop()
     desktop._work.shutdown(wait=True)
     desktop._ui_queue.shutdown(wait=True)
 
@@ -1522,6 +1568,158 @@ def test_the_dashboard_drives_the_app_through_the_bridge(app):
     assert status["wake"] == "hello magpie" and status["listening"] is False
     bridge.command("listen")
     assert app.listening is True and ("resume",) in app.engine.commands
+
+
+# ------------------------------------------------------------ the keyboard shortcut
+
+
+def shortcut_with(keys: FakeKeys, events: list[str]) -> hotkey.Hotkey:
+    return hotkey.Hotkey(
+        lambda: events.append("press"),
+        lambda: events.append("release"),
+        on_hold=lambda: events.append("hold"),
+        keys=lambda: keys,
+    )
+
+
+def test_the_keyboard_shortcut_is_tapped_or_held_down(monkeypatch):
+    monkeypatch.setattr(hotkey, "HOLD_SECONDS", 0.2)
+    monkeypatch.setattr(hotkey, "POLL_SECONDS", 0.005)
+    keys, events = FakeKeys(), []
+    shortcut = shortcut_with(keys, events)
+    assert shortcut.use("ctrl+alt+space") == ""
+    assert shortcut.shortcut is not None and shortcut.shortcut.label == "Ctrl+Alt+Space"
+    mods = hotkey.MOD_CONTROL | hotkey.MOD_ALT | hotkey.MOD_NOREPEAT
+    assert keys.registered == [(mods, hotkey.VK_SPACE)]  # held down, it isn't repeated
+    keys.press()  # a tap: pressed, and let go at once
+    wait_until(lambda: keys.waits == 2)
+    assert events == ["press"]
+    keys.press(hold=True)  # held down while you talk
+    wait_until(lambda: events == ["press", "press", "hold"])
+    keys.down.clear()  # let go
+    wait_until(lambda: events[-1] == "release" and keys.waits == 3)
+    assert events == ["press", "press", "hold", "release"]
+
+    assert shortcut.use("ctrl+alt+n") == ""  # another one: the first is let go
+    assert keys.unregistered.is_set() and keys.registered[-1] == (mods, ord("N"))
+    shortcut.stop()
+    assert shortcut.use("off") == "" and shortcut.shortcut is None
+    assert shortcut.use("win+x") == "" and shortcut.shortcut is None  # not a choice: none
+    assert len(keys.registered) == 2
+
+
+def test_a_shortcut_another_program_has_is_a_problem_to_show_not_a_crash():
+    keys = FakeKeys(free=False)
+    shortcut = shortcut_with(keys, [])
+    problem = shortcut.use("ctrl+shift+space")
+    assert problem == (
+        "Ctrl+Shift+Space is already used by another program. Choose another shortcut in "
+        "Settings → Voice."
+    )
+    assert shortcut.problem == problem and shortcut.shortcut is None
+
+    def no_keyboard() -> hotkey.Keys:
+        raise OSError("no desktop to listen on")
+
+    broken = hotkey.Hotkey(lambda: None, lambda: None, keys=no_keyboard)
+    assert broken.use("ctrl+alt+space") == (
+        "The keyboard shortcut couldn't be set up: no desktop to listen on"
+    )
+    # Only Windows has it (a Mac would need the user to allow Magpie to watch the keys).
+    plain = hotkey.Hotkey(lambda: None, lambda: None)
+    assert plain.available is (sys.platform == "win32")
+
+
+def test_a_failing_action_does_not_stop_the_shortcut(monkeypatch):
+    keys, events = FakeKeys(), []
+
+    def boom() -> None:
+        events.append("press")
+        raise RuntimeError("the bar has gone")
+
+    shortcut = hotkey.Hotkey(boom, lambda: None, keys=lambda: keys)
+    shortcut.use("ctrl+alt+space")
+    keys.press()
+    keys.press()
+    wait_until(lambda: events == ["press", "press"])
+    shortcut.stop()
+    assert keys.unregistered.is_set()
+
+
+def test_the_shortcut_starts_a_voice_note_and_saves_it(app, keys):
+    app.apply_prefs({"shortcut": "ctrl+alt+n"})
+    assert app.shortcut_status() == {
+        "name": "ctrl+alt+n",
+        "label": "Ctrl+Alt+N",
+        "supported": True,
+        "problem": "",
+    }
+    assert Bridge(app).status()["shortcut"]["label"] == "Ctrl+Alt+N"
+    app.voice_state = "standby"
+    app.shortcut_pressed()  # a tap: a note starts, without the command word
+    assert app.engine.commands[-1] == ("start",) and app.listening
+    app._on_voice("state", {"state": "recording", "by_voice": False})
+    settle(app, lambda: app.ui.bar("recording"))
+    hint = app.ui.bar("recording")[-1][0]["hint"]
+    assert hint == "press Ctrl+Alt+N again to save, say “cancel note” to discard"
+    app.shortcut_pressed()  # tapped again: saved
+    assert app.engine.commands[-1] == ("finish",)
+    app._on_voice("state", {"state": "standby"})
+
+    app.shortcut_pressed()  # held down while you talk
+    app._on_voice("state", {"state": "recording", "by_voice": False})
+    app.shortcut_held()
+    settle(app, lambda: app.ui.bar("hint"))
+    assert app.ui.bar("hint")[-1][0] == {"hint": "let go of Ctrl+Alt+N to save"}
+    app.shortcut_released()  # let go: saved
+    assert app.engine.commands[-1] == ("finish",)
+    app._on_voice("state", {"state": "standby"})
+
+    app._on_voice("state", {"state": "recording", "by_voice": True})  # “notes on”
+    settle(app)
+    assert "notes off" in app.ui.bar("recording")[-1][0]["hint"]
+    before = len(app.engine.commands)
+    app.shortcut_held()
+    app.shortcut_released()  # only a note the shortcut started ends when it's let go
+    assert len(app.engine.commands) == before
+    app.shortcut_pressed()  # but a tap saves any note
+    assert app.engine.commands[-1] == ("finish",)
+
+
+def test_the_shortcut_saves_what_the_bar_has_when_it_has_the_keyboard(app, keys):
+    app.whisper = FakeWhisper(FakeTranscriber("x"))
+    app.apply_prefs({"speech_model": "dictation"})
+    app.shortcut_pressed()  # the bar opens for your dictation app to type into
+    settle(app, lambda: app.ui.bar("dictate") and app.ui.bar_visible)
+    app.shortcut_pressed()  # pressed again: what it typed is saved
+    settle(app, lambda: app.ui.bar("finish"))
+    app.write_note()
+    settle(app, lambda: app.ui.bar("typing"))
+    app.shortcut_pressed()  # typing in the bar: saved too (or, if empty, a voice note)
+    settle(app, lambda: len(app.ui.bar("finish")) == 2)
+    assert Bridge(app).ui("bar", "start", {}) is None
+    settle(app, lambda: len(app.ui.bar("dictate")) == 2)
+    app.hide_bar()
+    settle(app, lambda: not app.ui.bar_visible)
+    app.shortcut_pressed()  # the bar was closed: a new note, nothing saved
+    settle(app, lambda: len(app.ui.bar("dictate")) == 3)
+    assert len(app.ui.bar("finish")) == 2
+
+
+def test_a_shortcut_in_use_elsewhere_is_reported_and_tried_again(app, keys):
+    keys.free = False
+    app.apply_prefs({"shortcut": "ctrl+shift+space"})
+    status = Bridge(app).status()["shortcut"]
+    assert status["problem"].startswith("Ctrl+Shift+Space is already used by another program")
+    assert status["label"] == "" and app.shortcut_label == ""
+    keys.free = True  # the other program let go of it: the next change of settings works
+    app.apply_prefs({"shortcut": "ctrl+shift+space", "wake_phrase": "hello magpie"})
+    assert app.shortcut_label == "Ctrl+Shift+Space" and not app.hotkey.problem
+    app.apply_prefs({"shortcut": "off"})
+    assert app.shortcut_status() == {"name": "off", "label": "", "supported": True, "problem": ""}
+    app._on_voice("state", {"state": "recording", "by_voice": False})
+    settle(app)
+    assert "notes off" in app.ui.bar("recording")[-1][0]["hint"]
 
 
 # ------------------------------------------------------------ moving from Docker

@@ -404,6 +404,22 @@ def test_no_ai_files_notes_with_simple_rules(owner):
     assert note.json()["note"]["reminders"], note.text
 
 
+def test_no_ai_keeps_lists_as_lists_to_tick_off(owner):
+    owner.put("/api/ai", json={"provider": "basic"})
+
+    def filed(text: str) -> dict:
+        return owner.post("/api/notes?wait=true", json={"text": text}).json()["note"]
+
+    said = filed("notes on shopping list milk, eggs, and bread notes off")
+    assert said["kind"] == "list" and said["title"] == "Shopping list"
+    assert said["text"] == "Shopping list:\n- milk\n- eggs\n- bread"
+    typed = filed("- Milk\n-   Eggs  \n- [x] Bread\n\n\n\nFrom the corner shop")
+    assert typed["text"] == "- Milk\n- Eggs\n- [x] Bread\n\nFrom the corner shop"
+    assert typed["kind"] == "list" and typed["title"] == "Milk, Eggs, Bread"
+    assert filed("Shopping list: milk.")["text"] == "Shopping list: milk."  # one thing
+    assert filed("um call James at 5 pm")["text"] == "Call James at 5 pm."  # not a list
+
+
 def test_a_provider_fixed_by_the_server_cannot_be_switched(tmp_path, router):
     settings = Settings(_env_file=None, data_dir=tmp_path, password="pw", brain="openai")
     magpie = Magpie(settings, http=httpx2.AsyncClient(transport=httpx2.MockTransport(router)))

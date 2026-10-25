@@ -171,6 +171,8 @@ def test_prefs(client):
     assert client.put("/api/prefs", json={"speech_lang": "en-AU"}).json()["speech_lang"] == "en-AU"
     other = client.put("/api/prefs", json={"speech_lang": "fr-FR"})
     assert other.status_code == 422 and "English" in other.json()["detail"]
+    assert client.put("/api/prefs", json={"shortcut": "off"}).json()["shortcut"] == "off"
+    assert client.put("/api/prefs", json={"shortcut": "win+x"}).status_code == 422
 
 
 def test_status(client):

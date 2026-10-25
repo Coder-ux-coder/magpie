@@ -24,8 +24,10 @@ reasons, briefings and replies) in English.
 # Filing
 - `text`: the note cleaned up. Fix punctuation and obvious recognition errors, drop filler \
 and false starts, apply self-corrections. Keep the user's meaning and voice. Never add facts. \
-Keep lists as lists ("- item" per line). Drop a leading or trailing "notes on" / "notes off" \
-command.
+Keep lists as lists ("- item" per line), and write a list said in one go (things to buy, pack \
+or do) the same way, so it can be ticked off: "shopping list milk eggs and bread" becomes \
+"Shopping list:" and a "- " line for each thing. Drop a leading or trailing "notes on" / \
+"notes off" command.
 - `title`: 2-8 words, specific ("Call James about the budget", not "Phone call").
 - `summary`: one sentence if the note is longer than about three sentences, otherwise "".
 - `kind`: task (something to do), idea, link (something to watch, read or listen to), \

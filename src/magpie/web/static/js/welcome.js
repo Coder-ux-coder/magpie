@@ -38,6 +38,9 @@ async function finish({ quietly = false } = {}) {
   (returnFocus?.isConnected ? returnFocus : document.getElementById("main"))?.focus?.({ preventScroll: true });
 }
 
+// The Magpie app's keyboard shortcut for a voice note (Windows), if it has one.
+const shortcutLabel = () => (desktopApp() ? state.status?.desktop?.shortcut?.label || "" : "");
+
 function voiceStep() {
   const prefs = state.prefs || {};
   const wake = h("input", { type: "text", id: "welcome-wake", value: prefs.wake_phrase || "notes on", maxlength: 60, dir: "auto" });
@@ -61,6 +64,7 @@ function voiceStep() {
     save({ stop_phrase: value }, `Say “${value}” to save a note.`);
   });
   const inApp = desktopApp();
+  const keys = shortcutLabel();
   const listen = h("input", { type: "checkbox", role: "switch", id: "welcome-listen", checked: inApp ? state.status.desktop.listening !== false : local.autoListen !== false });
   listen.addEventListener("change", async () => {
     if (!inApp) return saveLocal({ autoListen: listen.checked });
@@ -75,7 +79,7 @@ function voiceStep() {
   accent.addEventListener("change", () => save({ speech_lang: accent.value }, "Accent saved."));
   return [
     h("p", {}, inApp
-      ? "Say your command word anywhere on this computer, even with Magpie closed: a small bar shows your words as you talk. Say the stop word to save the note. You can also press the mic or just type."
+      ? `Say your command word anywhere on this computer, even with Magpie closed: a small bar shows your words as you talk. Say the stop word to save the note. ${keys ? `You can also press ${keys} in any program (hold it while you talk, or tap it to start and again to save), press the mic, or just type.` : "You can also press the mic or just type."}`
       : "Say your command word to start a note, talk, then say the stop word to save it. You can also press the mic or just type."),
     h("div", { class: "row" },
       h("div", { class: "field" }, h("label", { for: "welcome-wake" }, "Command word"), wake),
@@ -103,7 +107,7 @@ const STEPS = [
     body: () => [
       h("p", { class: "lead" }, "Say what's on your mind and Magpie files it: it tidies your words, gives the note a title and a category, and reminds you at the right time."),
       h("ul", { class: "welcome-points" },
-        h("li", {}, icon("mic"), h("span", {}, `Say “${state.prefs?.wake_phrase || "notes on"}”, talk, and say “${state.prefs?.stop_phrase || "notes off"}”. Or press the mic, or type.`)),
+        h("li", {}, icon("mic"), h("span", {}, `Say “${state.prefs?.wake_phrase || "notes on"}”, talk, and say “${state.prefs?.stop_phrase || "notes off"}”. ${shortcutLabel() ? `Or press ${shortcutLabel()} in any program, press the mic, or type.` : "Or press the mic, or type."}`)),
         h("li", {}, icon("bell"), h("span", {}, "Reminders pop up on this computer and can come by email to your phone.")),
         h("li", {}, icon("list"), h("span", {}, "Your own categories, in your colours. Drag notes between them.")),
       ),

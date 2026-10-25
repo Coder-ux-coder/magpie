@@ -118,13 +118,21 @@ def test_link_review_roundtrip(store: Store):
 def test_prefs_defaults_and_bad_values(store: Store):
     prefs = store.get_prefs()
     assert prefs.timezone == "America/New_York"
+    assert prefs.shortcut == "ctrl+alt+space"
     store.set_kv(
-        "prefs", {"timezone": "Not/AZone", "proactivity": "proactive", "speech_lang": "fr-FR"}
+        "prefs",
+        {
+            "timezone": "Not/AZone",
+            "proactivity": "proactive",
+            "speech_lang": "fr-FR",
+            "shortcut": "win+x",
+        },
     )
     prefs = store.get_prefs()
     assert prefs.timezone == "America/New_York"  # bad value ignored, not fatal
     assert prefs.speech_lang == ""  # Magpie listens for English only
     assert prefs.proactivity == "proactive"
+    assert prefs.shortcut == "ctrl+alt+space"  # not one of the choices
     store.save_prefs(Prefs(timezone="Europe/London"))
     assert store.get_prefs().timezone == "Europe/London"
 

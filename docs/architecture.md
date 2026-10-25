@@ -122,6 +122,13 @@ flowchart LR
   what the app is doing, `/api/desktop/command` lets the dashboard start a note or turn
   listening off, and the `desktop` notification channel hands reminders to the app's pop-ups.
   Prefs changes (the command word) reach the listener at once.
+- **The keyboard shortcut** (`hotkey.py`, Windows): `RegisterHotKey` on a thread of its
+  own, which runs that thread's message loop, so the keys reach only Magpie. A press starts
+  a note, or saves the one being taken (or what the bar has, when it has the keyboard);
+  the keys still down after 0.45 s (`GetAsyncKeyState`) mean it's held, and letting go
+  saves the note it started. A shortcut another program has is reported in Settings →
+  Voice and tried again when the settings next change. A Mac would need the user to allow
+  Magpie to watch the keyboard (Accessibility), so it has no shortcut yet.
 - **The system** (`system.py`): one copy at a time (a lock file; a second start asks the
   first to show itself), starting with the computer (the `Run` registry key on Windows, a
   LaunchAgent on a Mac), the window or app in front (kept with the note, like the view a

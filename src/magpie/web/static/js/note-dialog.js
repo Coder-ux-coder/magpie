@@ -5,6 +5,7 @@ import { noteActions, reminderActions, watchNote } from "./actions.js";
 import { KINDS, SOURCES, isWorking, kindBadge, noteTitle, reviewBlock, reviewSpeech } from "./cards.js";
 import { speak, stopSpeaking } from "./speech.js";
 import { aiName, categoryOf, emit, on, snoozeLabel, speechLang, state, tz } from "./state.js";
+import { isChecklist, listItems, toggleItem } from "./text.js";
 import { clear, copyText, fullDate, h, icon, iconButton, localInputValue, toast, when } from "./ui.js";
 
 const dialog = () => document.getElementById("note-dialog");
@@ -78,6 +79,8 @@ on("reminders-changed", (noteId) => {
 function render(note, { keepScroll = false, force = false } = {}) {
   const el = dialog();
   const scroll = el.querySelector(".sheet-body")?.scrollTop || 0;
+  // A box just ticked (or any control with an id) keeps the keyboard when it's redrawn.
+  const focused = el.contains(document.activeElement) ? document.activeElement.id : "";
   const editing = el.querySelector("textarea.note-editor");
   if (!force && keepScroll && editing && current?.id === note.id) {
     // Don't wipe out an edit in progress; just refresh the rest next time.
@@ -99,8 +102,12 @@ function render(note, { keepScroll = false, force = false } = {}) {
       h("div", { class: "sheet-foot" }, footer(note)),
     ),
   );
-  if (keepScroll) el.querySelector(".sheet-body").scrollTop = scroll;
-  else el.querySelector(".sheet-head > .icon-btn:last-child").focus();
+  if (keepScroll) {
+    el.querySelector(".sheet-body").scrollTop = scroll;
+    if (focused) el.querySelector(`#${CSS.escape(focused)}`)?.focus({ preventScroll: true });
+  } else {
+    el.querySelector(".sheet-head > .icon-btn:last-child").focus();
+  }
 }
 
 function titleBlock(note, title) {
@@ -225,14 +232,34 @@ function textSection(note) {
   const section = h("section", { class: "section", "aria-labelledby": "note-text-heading" });
   // The newest version of the note: it may have changed while the editor was open.
   const latest = () => (current?.id === note.id ? current : note);
+  // Ticking items off saves each change in turn, starting from the newest text.
+  let saving = Promise.resolve();
+  const tick = (line, done) => {
+    saving = saving.then(async () => {
+      const now = latest().text || latest().raw_text;
+      const text = toggleItem(now, line, done);
+      if (text === now) return;
+      try {
+        const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { text } });
+        emit("note-updated", updated);
+      } catch (error) {
+        toast(error.message, { error: true });
+        show(); // what's really saved
+      }
+    });
+  };
   const show = () => {
     clear(section);
+    const text = latest().text || latest().raw_text;
+    const list = isChecklist(text, latest().kind);
+    const items = list ? listItems(text) : [];
+    const done = items.filter((item) => item.done).length;
     section.append(
       h("div", { class: "row spread" },
-        h("h3", { id: "note-text-heading" }, "Note"),
+        h("h3", { id: "note-text-heading" }, "Note", list ? h("span", { class: "list-count" }, ` · ${done} of ${items.length} done`) : null),
         h("button", { type: "button", class: "btn small", onclick: edit }, icon("edit"), "Edit"),
       ),
-      h("p", { class: "note-text", dir: "auto" }, latest().text || latest().raw_text),
+      list ? checklist(note.id, text, tick) : h("p", { class: "note-text", dir: "auto" }, text),
     );
   };
   const edit = () => {
@@ -267,6 +294,26 @@ function textSection(note) {
   };
   show();
   return section;
+}
+
+// A list to tick off: its items as boxes, any other lines (a heading, a remark) as text.
+function checklist(id, text, tick) {
+  const items = new Map(listItems(text).map((item) => [item.line, item]));
+  const box = h("div", { class: "checklist" });
+  let list = null;
+  text.split("\n").forEach((line, index) => {
+    const item = items.get(index);
+    if (!item) {
+      list = null;
+      if (line.trim()) box.append(h("p", { class: "note-text", dir: "auto" }, line));
+      return;
+    }
+    if (!list) box.append((list = h("ul", { role: "list" })));
+    const input = h("input", { type: "checkbox", id: `item-${id}-${index}`, checked: item.done });
+    input.addEventListener("change", () => tick(index, input.checked));
+    list.append(h("li", { class: item.done ? "done" : null }, input, h("label", { for: input.id, dir: "auto" }, item.text)));
+  });
+  return box;
 }
 
 const REPEATS = [

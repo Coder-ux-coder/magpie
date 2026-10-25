@@ -25,15 +25,19 @@ this page has the rest.
   doesn't take the keyboard from what you're doing. Say **“notes off”** to save the note (or stop talking for a few
   seconds, or press **Save**), or **“cancel note”** to throw it away; **Undo** brings it
   back. “Notes on” in the middle of a sentence (“I took notes on the meeting”) doesn't count.
+- **Or press Ctrl+Alt+Space** (on Windows), in any program: tap it to start a note and tap
+  it again to save it, or hold it down while you talk and let go to save. Choose
+  Ctrl+Shift+Space or Ctrl+Alt+N instead, or none, in **Settings → Voice**, which also says
+  if another program already uses the one you chose.
 - **When you finish**, the bar says *Writing it down…* for a moment while Magpie writes the
   note down again, accurately (see [below](#how-magpie-hears-you)), then *Saved* with what
   the AI made of it.
 - **Click the bar to type** into it: fix a word, or write a whole note. Enter saves,
   Shift+Enter starts a new line, Esc cancels.
 - **Magpie's menu** (right-click the icon on Windows, click it on a Mac): *Open Magpie* (your
-  notes and settings), *Start a voice note*, *Write a note*, *Listen for “notes on”* (untick
-  it to stop listening), *Start Magpie with Windows* (or *with your Mac*), *Check for
-  updates* and *Quit Magpie*.
+  notes and settings), *Start a voice note* (with its shortcut beside it), *Write a note*,
+  *Listen for “notes on”* (untick it to stop listening), *Start Magpie with Windows* (or
+  *with your Mac*), *Check for updates* and *Quit Magpie*.
 - **Reminders pop up** in the bottom-right corner of the screen with *Done*, *Snooze* and
   *Open*, whether Magpie's window is open or not.
 - **Your notes window** lists its views on the left: *Inbox*, *Scheduled*, *To watch & read*,
@@ -41,6 +45,12 @@ this page has the rest.
   *Digests*, *Ask*, *Done* and *Archive*. In a narrow window the **☰** button shows them.
   Point at a note (or move to it with the keyboard) for its buttons: done, pin, archive and
   delete.
+- **The Inbox** starts with what's **due today**, each with *Done* and a snooze button, then
+  your notes by day: *Today*, *Yesterday*, *Last 7 days* and *Earlier*, with pinned notes
+  first. A search marks the words it found.
+- **Lists are checklists.** Say or type a list (“shopping list: milk, eggs and bread”, or a
+  line for each thing) and open it to tick things off as you go. Its card shows what's
+  left, and how many are done.
 - **Closing the notes window** keeps Magpie running and listening. *Quit Magpie* stops it
   until you open it again (from the Start menu or the Desktop on Windows, from Applications
   on a Mac).
@@ -106,10 +116,11 @@ If you already use a dictation app, such as **Glaido**, **Wispr Flow**, **Superw
 **Windows voice typing** (Windows key + H) or **Dictation** on a Mac, choose **Your own
 dictation app**. Then:
 
-1. Say “notes on” (or choose *Start a voice note* in Magpie's menu). The bar opens, with
-   the cursor in it.
+1. Say “notes on”, press Magpie's shortcut (Ctrl+Alt+Space on Windows), or choose *Start a
+   voice note* in Magpie's menu. The bar opens, with the cursor in it.
 2. Start your dictation app with its own shortcut, and talk. It types into the bar.
-3. End with “notes off”, stop for a few seconds, or press **Enter**: the note is saved.
+3. End with “notes off”, stop for a few seconds, press **Enter** or press Magpie's shortcut
+   again: the note is saved.
    Ending with “cancel note” throws it away (**Undo** brings it back).
 
 ## Choosing the AI
@@ -222,6 +233,7 @@ called *magpie*).
 | No Magpie icon by the clock (Windows) | Click the **^** arrow next to the clock; drag the icon onto the taskbar to keep it there. Not there either? Open Magpie from the Start menu. |
 | No Magpie icon in the menu bar (Mac) | A full menu bar hides icons behind the camera notch: quit a menu bar app or two. Not there either? Open Magpie from Applications. |
 | Magpie doesn't hear “notes on” | Point at Magpie's icon (or open its menu): it says what's wrong. *Hears only silence*: on Windows, Settings → Privacy & security → Microphone → *Let desktop apps access your microphone*; on a Mac, System Settings → Privacy & Security → Microphone → Magpie. Check the microphone isn't muted. Say “notes on” at the start of a sentence, or use *Start a voice note* in its menu. |
+| Ctrl+Alt+Space does nothing | Settings → Voice says if another program already uses it: choose another shortcut there. The shortcut is for Windows; on a Mac, say “notes on” or use Magpie's menu. |
 | The meter in the bar doesn't move while you talk | Magpie hears nothing from that microphone. Choose the one you use as the input: on Windows, Settings → System → Sound → *Input*; on a Mac, System Settings → Sound → *Input*. Check it isn't muted, then try again. |
 | A note starts when you didn't say “notes on” | Magpie checks with a second recogniser before it starts a note, so this should be rare. If it still happens, choose a wake phrase that sounds like nothing else you say, such as “hello magpie” (Settings → Voice). |
 | Saved notes have mistakes in them | Check Settings → Voice: *Ready* means Whisper writes notes down. While it's *Downloading*, notes keep the quick words or the faster model's. Try *Most accurate* if *Automatic* chose the faster one, and speak towards the microphone. |

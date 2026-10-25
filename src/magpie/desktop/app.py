@@ -18,6 +18,7 @@ import httpx2
 from magpie import __version__
 from magpie.config import Prefs, Settings
 from magpie.desktop import system
+from magpie.desktop.hotkey import DEFAULT_SHORTCUT, Hotkey
 from magpie.desktop.live import LiveWriter
 from magpie.desktop.paths import AppPaths, DesktopState, find_model, frozen, launch_command
 from magpie.desktop.phrases import DEFAULT_STOP, DEFAULT_WAKE, append_text, tidy
@@ -100,6 +101,7 @@ class Bridge:
             "version": __version__,
             "speech": app.whisper.status() if app.whisper is not None else None,
             "update": app.updater.status() if app.updater is not None else None,
+            "shortcut": app.shortcut_status(),
         }
 
     def command(self, action: str) -> None:
@@ -141,6 +143,7 @@ class Bridge:
                 "save_dictated": lambda: app.save_dictated(text),
                 "discard": lambda: app.discard(text),
                 "focus": lambda: app.ui and app.ui.take_keyboard(),
+                "start": app.start_note,
                 "open_notes": lambda: app.open_notes(),
             }
         else:
@@ -181,6 +184,12 @@ class DesktopApp:
         self.silence_seconds = 8
         self.listening = bool(self.state.get("listening"))
         self.autostart = bool(self.state.get("autostart"))
+        # The keyboard shortcut (Windows): tap to start and save, or hold while you talk.
+        self.hotkey = Hotkey(
+            self.shortcut_pressed, self.shortcut_released, on_hold=self.shortcut_held
+        )
+        self._shortcut = ""  # the one asked for in Settings → Voice
+        self._by_shortcut = False  # the note being taken was started with it
         self._typed = ""  # what was typed into the bar during this recording
         self._said_in = ""  # the window in front when the note was started
         self._live: LiveWriter | None = None  # Whisper's words while you speak
@@ -319,6 +328,7 @@ class DesktopApp:
     def _shutdown(self) -> None:
         self._quitting.set()
         for stop in (
+            self.hotkey.stop,
             lambda: self.updater and self.updater.stop(),
             lambda: self.engine and self.engine.close(),
             lambda: self.server and self.server.stop(),
@@ -361,7 +371,59 @@ class DesktopApp:
             # (and for when the service fails); a dictation app needs no model here.
             local = {"service": QUICK_MODEL, "dictation": OFF}.get(self.speech_mode)
             self.whisper.choose(local or self.speech_mode)
+        self._use_shortcut(str(prefs.get("shortcut") or DEFAULT_SHORTCUT))
         self._update_tray()
+
+    # -------------------------------------------------------- keyboard shortcut
+
+    def _use_shortcut(self, name: str) -> None:
+        if name == self._shortcut and not self.hotkey.problem:
+            return  # unchanged (but one another program had is tried again)
+        self._shortcut = name
+        try:
+            problem = self.hotkey.use(name)
+        except Exception:  # never worth stopping the app for
+            log.exception("The keyboard shortcut couldn't be changed")
+            return
+        if problem:
+            log.warning("%s", problem)
+
+    @property
+    def shortcut_label(self) -> str:
+        shortcut = self.hotkey.shortcut
+        return shortcut.label if shortcut is not None else ""
+
+    def shortcut_status(self) -> dict[str, Any]:
+        return {
+            "name": self._shortcut or DEFAULT_SHORTCUT,
+            "label": self.shortcut_label,
+            "supported": self.hotkey.available,
+            "problem": self.hotkey.problem,
+        }
+
+    def shortcut_pressed(self) -> None:
+        """The keyboard shortcut, in any program: start a note, or save the one being
+        taken."""
+        self._by_shortcut = False
+        if self.voice_state == "recording":
+            self.voice("finish")
+            return
+        self._by_shortcut = True
+        if self._bar_shows("dictate", "typing"):
+            # The bar saves what's in it; with nothing typed yet, it starts a voice note.
+            self._ui_call("bar", "finish", {})
+        else:
+            self.start_note()
+
+    def shortcut_held(self) -> None:
+        """Still held down: the note records until the keys are let go."""
+        if self._by_shortcut and self.voice_state == "recording":
+            self._ui_call("bar", "hint", {"hint": f"let go of {self.shortcut_label} to save"})
+
+    def shortcut_released(self) -> None:
+        """Let go after holding it: what was said is the note."""
+        if self._by_shortcut and self.voice_state == "recording":
+            self.voice("finish")
 
     def _upgrade_speech(self, prefs: dict[str, Any]) -> dict[str, Any]:
         """Once: the smaller model was everyone's default before 0.7; now it's the most
@@ -491,6 +553,8 @@ class DesktopApp:
             state = data.get("state", "")
             self.voice_state = state
             self.voice_message = data.get("message", "")
+            if state != "recording":
+                self._by_shortcut = False
             self._update_tray()
             if state == "recording" and self.speech_mode == "dictation":
                 self._dictate(by_voice=bool(data.get("by_voice")))
@@ -553,6 +617,8 @@ class DesktopApp:
         if whisper is not None and whisper.quick is None and whisper.getting:
             done = round(whisper.progress * 100)
             return f"the words get better once Whisper is downloaded ({done}%)"
+        if self._by_shortcut and self.shortcut_label:
+            return f"press {self.shortcut_label} again to save, say “cancel note” to discard"
         return "say “notes off” to save, “cancel note” to discard"
 
     # ------------------------------------------------------ words as you speak
@@ -652,6 +718,9 @@ class DesktopApp:
             timer.daemon = True
             timer.start()
 
+    def _bar_shows(self, *states: str) -> bool:
+        return self._bar_state in states and self.ui is not None and self.ui.bar_visible
+
     def _hide_if_current(self, token: int) -> None:
         if token == self._bar_token:  # nothing new was shown in the meantime
             self._hide_bar()
@@ -687,7 +756,7 @@ class DesktopApp:
         """The bar takes the keyboard, for the user's own dictation app (Glaido, Wispr
         Flow, voice typing…) to type the note into; it saves itself when the words end
         with the stop phrase, after a pause, or with Enter (bar.js)."""
-        if self._bar_state == "dictate" and self.ui is not None and self.ui.bar_visible:
+        if self._bar_shows("dictate"):
             return  # already waiting for the words
         self._typed = ""
         self._said_in = system.active_window() if by_voice else ""
@@ -721,6 +790,7 @@ class DesktopApp:
     # ------------------------------------------------------------------ saving
 
     def _save(self, text: str, source: str) -> None:
+        self._by_shortcut = False
         self._bar("saving", {"text": text}, show=True)
         self._work.submit(self._submit, text, source, self._said_in)
 

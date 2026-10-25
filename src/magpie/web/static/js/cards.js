@@ -1,7 +1,8 @@
 // Building blocks shared by the lists and the note dialog.
 
 import { ago, append, h, icon, iconButton, when } from "./ui.js";
-import { aiName, categoryOf, tz } from "./state.js";
+import { aiName, categoryOf, state, tz } from "./state.js";
+import { isChecklist, listSummary, markWords, searchWords } from "./text.js";
 
 export const KINDS = {
   task: { label: "Task", icon: "task" },
@@ -109,9 +110,17 @@ export function noteChips(note) {
   return chips;
 }
 
+// The words being searched for, marked wherever they appear.
+function marked(text) {
+  const words = searchWords(state.q);
+  return markWords(text, words).map((piece) => (piece.hit ? h("mark", {}, piece.text) : piece.text));
+}
+
 export function noteCard(note, actions) {
   const title = noteTitle(note);
-  const snippetText = note.summary || note.text || note.raw_text || "";
+  const body = note.text || note.raw_text || "";
+  // A list shows what's left on it; other notes, their summary or their start.
+  const snippetText = isChecklist(body, note.kind) ? listSummary(body) : note.summary || body;
   const titleId = `note-${note.id}-title`;
   const done = note.status === "done";
   const archived = note.status === "archived";
@@ -128,11 +137,11 @@ export function noteCard(note, actions) {
     kindIcon(note.kind),
     h("div", { class: "note-body" },
       h("div", { class: "note-head" },
-        h("h3", { class: "note-title", id: titleId, dir: "auto" }, h("a", { href: `#/note/${note.id}` }, title)),
+        h("h3", { class: "note-title", id: titleId, dir: "auto" }, h("a", { href: `#/note/${note.id}` }, marked(title))),
         note.pinned ? h("span", { class: "pin-mark", title: "Pinned" }, icon("pin"), h("span", { class: "sr-only" }, "Pinned")) : null,
         h("span", { class: "note-time" }, h("time", { datetime: note.created_at, title: new Date(note.created_at).toLocaleString() }, ago(note.created_at))),
       ),
-      snippetText && snippetText !== title ? h("p", { class: "snippet", dir: "auto" }, snippetText) : null,
+      snippetText && snippetText !== title ? h("p", { class: "snippet", dir: "auto" }, marked(snippetText)) : null,
       chips.length ? h("div", { class: "chips" }, chips) : null,
       h("div", { class: "card-actions" },
         iconButton(done ? "undo" : "check", done ? "Mark as not done" : "Mark as done", () => actions.toggleDone(note), { "aria-pressed": String(done) }),

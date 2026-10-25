@@ -86,6 +86,21 @@ window.magpieBar = {
     set("recording", "Recording", { hint: hint || "say “notes off” to save, “cancel note” to discard", keys: "Enter saves · Esc cancels" });
     startClock();
   },
+  // A new hint while recording, such as "let go of Ctrl+Alt+Space to save".
+  hint({ hint = "" } = {}) {
+    if (state !== "recording" || !hint) return;
+    const span = $("status").querySelector(".hint");
+    if (span) span.textContent = ` · ${hint}`;
+  },
+  // The keyboard shortcut, pressed while the bar has the keyboard: save what's in it, or,
+  // with nothing typed yet, take a voice note instead.
+  finish() {
+    if (state === "dictate") save();
+    else if (state === "typing") {
+      if (text.value.trim()) save();
+      else call("start");
+    }
+  },
   // How loud the microphone is (0 to 1), a few times a second while recording.
   level({ level = 0 } = {}) {
     if (state !== "recording") return;

@@ -421,7 +421,11 @@ class Tray:
             system = {"win32": "Windows", "darwin": "your Mac"}.get(sys.platform, "the computer")
             menu = pystray.Menu(
                 item("Open Magpie", lambda: app.open_notes(), default=True),
-                item("Start a voice note", lambda: app.start_note()),
+                item(
+                    # Windows shows what follows a tab as the item's shortcut, on the right.
+                    lambda _: self.text(f"Start a voice note\t{app.shortcut_label}".strip()),
+                    lambda: app.start_note(),
+                ),
                 item("Write a note", lambda: app.write_note()),
                 pystray.Menu.SEPARATOR,
                 item(

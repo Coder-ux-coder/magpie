@@ -191,6 +191,9 @@ class Prefs(BaseModel):
     # Names and words to listen out for ("James, Magpie, Kinnaird Road"), for Whisper and
     # the speech services that take them.
     vocabulary: str = Field(default="", max_length=1000)
+    # The Magpie app's keyboard shortcut for a voice note in any program (Windows; see
+    # desktop/hotkey.py): tap it to start and again to save, or hold it while you talk.
+    shortcut: Literal["ctrl+alt+space", "ctrl+shift+space", "ctrl+alt+n", "off"] = "ctrl+alt+space"
     snooze_minutes: int = Field(default=60, ge=5, le=1440)
     channels: dict[str, bool] = Field(default_factory=dict, max_length=20)
     web_search: bool = True

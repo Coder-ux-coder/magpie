@@ -109,6 +109,7 @@ async def test_triage_request_shape():
     assert call["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert "notes app" in call["system"][0]["text"]
     assert "in English" in call["system"][0]["text"]
+    assert 'a "- " line for each thing' in call["system"][0]["text"]  # lists to tick off
     content = call["messages"][0]["content"]
     assert "<note>\nuh call james at 5\n</note>" in content
     assert "Europe/London" in content and "I live in London." in content

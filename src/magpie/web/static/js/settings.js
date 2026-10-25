@@ -150,6 +150,35 @@ function timeSection() {
   );
 }
 
+// The app's keyboard shortcut for a voice note, in any program (Windows).
+const SHORTCUTS = [["ctrl+alt+space", "Ctrl+Alt+Space"], ["ctrl+shift+space", "Ctrl+Shift+Space"], ["ctrl+alt+n", "Ctrl+Alt+N"], ["off", "Off"]];
+
+function shortcutHint(shortcut) {
+  if (shortcut?.problem) return shortcut.problem.replace(" in Settings → Voice", ""); // it's right here
+  if (!shortcut?.label) return "Choose a shortcut to take a voice note from any program.";
+  return `Press ${shortcut.label} in any program: tap it to start a note and again to save it, or hold it down while you talk.`;
+}
+
+function shortcutField() {
+  const shortcut = state.status.desktop?.shortcut;
+  if (!shortcut?.supported) return null;
+  const chosen = state.prefs.shortcut || "ctrl+alt+space";
+  const select = h("select", { id: "pref-shortcut", "aria-describedby": "pref-shortcut-hint" },
+    SHORTCUTS.map(([value, label]) => h("option", { value, selected: value === chosen }, label)));
+  select.addEventListener("change", async () => {
+    await savePrefs({ shortcut: select.value }, "");
+    if (state.prefs.shortcut !== select.value) return; // not saved: savePrefs said why
+    // Saving waits for the app to take the new shortcut, so the status says how that went.
+    const now = (await refreshStatus().catch(() => null))?.desktop?.shortcut;
+    if (!now) return toast("Saved.");
+    const hint = document.getElementById("pref-shortcut-hint");
+    if (hint) hint.textContent = shortcutHint(now);
+    if (now.problem) toast(now.problem, { error: true });
+    else toast(now.label ? `${now.label} now takes a voice note.` : "The keyboard shortcut is off.");
+  });
+  return field("pref-shortcut", "Keyboard shortcut", select, shortcutHint(shortcut));
+}
+
 function voiceSection() {
   const prefs = state.prefs;
   const accents = ACCENTS.some(([value]) => value === prefs.speech_lang) ? ACCENTS : [...ACCENTS, [prefs.speech_lang, prefs.speech_lang]];
@@ -186,6 +215,7 @@ function voiceSection() {
           hint: "The Magpie app listens on this computer, even when this window is closed. Nothing you say leaves the computer until a note is saved.",
         })
       : null,
+    inApp ? shortcutField() : null,
     inApp ? speechControls() : null,
     !inApp && !speechSupported
       ? h("p", { class: "banner" }, icon("alert"), h("span", {}, stt

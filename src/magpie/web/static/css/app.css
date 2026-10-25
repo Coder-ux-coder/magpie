@@ -27,6 +27,7 @@
   --ok: #157041;
   --ok-soft: #e4f5eb;
   --focus: #2b5fff;
+  --mark: #fde68a;
   --overlay: rgb(12 14 20 / 45%);
   --shadow-1: 0 1px 2px rgb(15 20 35 / 6%);
   --shadow-2: 0 1px 2px rgb(15 20 35 / 5%), 0 6px 18px rgb(15 20 35 / 7%);
@@ -75,6 +76,7 @@
     --ok: #6ee7a0;
     --ok-soft: #12301f;
     --focus: #8fb3ff;
+    --mark: #6b5414;
     --overlay: rgb(0 0 0 / 60%);
     --shadow-1: 0 1px 2px rgb(0 0 0 / 35%);
     --shadow-2: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 30%);
@@ -115,6 +117,7 @@
   --ok: #6ee7a0;
   --ok-soft: #12301f;
   --focus: #8fb3ff;
+  --mark: #6b5414;
   --overlay: rgb(0 0 0 / 60%);
   --shadow-1: 0 1px 2px rgb(0 0 0 / 35%);
   --shadow-2: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 30%);
@@ -1020,6 +1023,73 @@ a.chip { text-decoration: none; min-height: 2rem; }
 .empty .btn { margin-top: 0.5rem; }
 
 .load-more { margin: 1rem auto; display: flex; }
+
+mark {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 0.1em;
+}
+:root[data-contrast="high"] mark { outline: 1px solid currentcolor; }
+
+/* The notes under headings by day: Pinned, Today, Yesterday, … */
+.note-group + .note-group { margin-top: 1.5rem; }
+.group-title {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.5rem 0.25rem;
+}
+
+/* Today's reminders, at the top of the inbox. */
+.today {
+  margin-bottom: 1.5rem;
+  padding: 0.7rem 0.75rem 0.4rem 1rem;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: linear-gradient(to bottom, var(--accent-soft), var(--surface) 3.5rem);
+}
+.today-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.25rem; }
+.today-head h3 { display: flex; align-items: center; gap: 0.45rem; font-size: 0.9375rem; font-weight: 700; }
+.today-head h3 .icon { color: var(--accent-ink); width: 1.1rem; height: 1.1rem; }
+.today-head a { font-weight: 600; margin-right: 0.25rem; }
+.today ul { list-style: none; margin: 0; padding: 0; }
+.today li { display: flex; align-items: center; gap: 0.75rem; min-height: 2.6rem; border-top: 1px solid var(--border); }
+.today li:first-child { border-top: 0; }
+.today .time { min-width: 3.5rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent-ink); }
+.today li.sent .time { color: var(--warn); }
+.today .what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.today .what a { color: inherit; font-weight: 550; text-decoration: none; }
+.today .what a:hover { text-decoration: underline; }
+.today .actions { display: flex; align-items: center; gap: 0.25rem; flex: none; }
+
+/* A list to tick off, in the note window. */
+.checklist { display: grid; gap: 0.5rem; }
+.checklist ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: var(--radius-xs);
+}
+.checklist li:hover { background: var(--surface-2); }
+.checklist input {
+  flex: none;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin: 0.2rem 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.checklist label { flex: 1; font-size: 1.0625rem; font-weight: 400; cursor: pointer; overflow-wrap: anywhere; }
+.checklist li.done label { color: var(--muted); text-decoration: line-through; }
+.list-count { color: var(--muted); font-weight: 600; text-transform: none; letter-spacing: 0; }
+@media (pointer: coarse) {
+  .checklist li { min-height: 2.75rem; align-items: center; }
+  .checklist input { margin-top: 0; }
+}
 
 /* ----------------------------------------------------------- reminders */
 

@@ -36,7 +36,10 @@ class PlannedReminder(BaseModel):
 
 class Triage(BaseModel):
     title: str = Field(description="2-8 word specific title.")
-    text: str = Field(description="The cleaned-up note in the user's own words.")
+    text: str = Field(
+        description='The cleaned-up note in the user\'s own words; a list has a "- item" line '
+        "for each thing."
+    )
     summary: str = Field(description="One-sentence summary for long notes, otherwise empty string.")
     kind: NoteKindLiteral
     tags: list[str] = Field(description="1-4 short lowercase tags.")

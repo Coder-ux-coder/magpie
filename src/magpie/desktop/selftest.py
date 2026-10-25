@@ -3,7 +3,8 @@
 The App workflow runs it on the app it has just built and installed: the server starts
 and saves a note, the speech model loads and takes a note down from a recording, Whisper
 writes that note down as it's said (the quick model) and again once it's over (the chosen
-one), the voice bar opens and answers, and everything the tray needs is there. It never
+one), the voice bar opens and answers, Windows gives Magpie its keyboard shortcut, and
+everything the tray needs is there. It never
 touches the user's own notes (it works in a temporary folder). The results are printed
 and, with ``--report``, written as JSON; the exit code is 1 when a required check failed.
 MAGPIE_WHISPER_MODEL (a downloaded Whisper model, with the quick one next to it) makes the
@@ -34,6 +35,7 @@ PAGES = [
     "/static/desktop/bar.html",
     "/static/desktop/bar.js",
     "/static/js/phrases.js",  # the bar's rules for a dictation app's words
+    "/static/js/text.js",  # the notes window's checklists and search marks
     "/static/desktop/reminders.html",
     "/static/desktop/reminders.js",
     "/static/desktop/desktop.css",
@@ -135,6 +137,8 @@ def self_test(
             lambda: check_whisper(whisper(BEST_MODEL), wav, expect, heard),
             required=downloaded,
         )
+        if windows and sys.platform == "win32":
+            results.run("keyboard shortcut", check_shortcut)
         results.run("tray icon", check_tray, required=frozen())
         results.run("microphone", check_microphone, required=False)
     print("Self-test passed" if results.passed else "Self-test FAILED", flush=True)
@@ -466,6 +470,47 @@ def check_live(folder: Path | None, expect: str | None, heard: dict[str, Any]) -
         f"{text!r} in {len(goes)} goes of {sum(goes) / len(goes):.1f}s on average, the "
         f"longest {max(goes):.1f}s ({folder.name}, {transcriber.threads} threads)"
     )
+
+
+def check_shortcut() -> str:
+    """Windows gives Magpie a keyboard shortcut, and (when the desktop takes simulated
+    keys) a press of it reaches Magpie."""
+    from magpie.desktop.hotkey import SHORTCUTS, Hotkey
+
+    pressed = threading.Event()
+    hotkey = Hotkey(pressed.set, lambda: None)
+    try:
+        chosen, problems = None, []
+        for shortcut in SHORTCUTS.values():  # the first one no other program has
+            problem = hotkey.use(shortcut.name)
+            if not problem:
+                chosen = shortcut
+                break
+            problems.append(problem)
+        if chosen is None:
+            raise RuntimeError(" ".join(problems))
+        _press(chosen.modifiers, chosen.key)
+        heard = "a press of it reached Magpie" if pressed.wait(3) else "a simulated press didn't"
+        return f"{chosen.label} is Magpie's; {heard}"
+    finally:
+        hotkey.stop()
+
+
+def _press(modifiers: int, key: int) -> None:
+    """The keys go down and up as if typed."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    from magpie.desktop.hotkey import MOD_ALT, MOD_CONTROL, MOD_SHIFT
+
+    user32 = ctypes.windll.user32
+    sides = ((MOD_CONTROL, 0x11), (MOD_ALT, 0x12), (MOD_SHIFT, 0x10))
+    keys = [vk for mod, vk in sides if modifiers & mod] + [key]
+    for vk in keys:
+        user32.keybd_event(vk, 0, 0, 0)
+    for vk in reversed(keys):
+        user32.keybd_event(vk, 0, 0x0002, 0)  # KEYEVENTF_KEYUP
 
 
 def check_tray() -> str:

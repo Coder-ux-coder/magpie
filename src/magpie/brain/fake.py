@@ -25,7 +25,7 @@ from magpie.schemas import (
 )
 from magpie.timeutil import get_tz, parse_hhmm
 
-FILLERS = re.compile(r"\b(uh+|um+|erm+|uhm+|hmm+|you know|i mean)\b[,.]?\s*", re.IGNORECASE)
+FILLERS = re.compile(r"\b(uh+|um+|erm+|uhm+|hmm+|you know|i mean)\b[,.]?[ \t]*", re.IGNORECASE)
 COMMANDS = re.compile(r"^\s*notes?\s+on[\s,.:]*|[\s,.]*notes?\s+off[\s.]*$", re.IGNORECASE)
 LEADING = re.compile(
     r"^(please\s+)?(remind me (to|about)|i need to|i have to|i should|i must|don't forget to|"
@@ -53,21 +53,58 @@ TASK_WORDS = re.compile(
     re.IGNORECASE,
 )
 WATCH_WORDS = re.compile(r"\b(watch|read|listen to|check out)\b", re.IGNORECASE)
+LIST_WORDS = re.compile(
+    r"\b(?:shopping list|grocery list|groceries|packing list|things to (?:buy|pack|take))\b",
+    re.IGNORECASE,
+)
+LIST_HEAD = re.compile(rf"^(?:my |the |a )?{LIST_WORDS.pattern}[\s:,-]*", re.IGNORECASE)
+ITEM = re.compile(r"^\s*(?:[-*•]|\d{1,3}[.)])\s+(?:\[[ xX]\]\s*)?(\S.*?)\s*$")
 
 
 def _clean(text: str) -> str:
     text = COMMANDS.sub("", text)
     text = FILLERS.sub("", text)
-    text = re.sub(r"\s+", " ", text).strip(" ,")
+    # Spaces are tidied but the lines kept, so a list stays a list.
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.split("\n")]
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip(" ,\n")
     if not text:
         return ""
     text = text[0].upper() + text[1:]
-    if text[-1] not in ".!?":
+    if "\n" not in text and text[-1] not in ".!?":
         text += "."
     return text
 
 
+def _as_list(text: str) -> str:
+    """A list said in one go ("Shopping list: milk, eggs and bread") with a line for each
+    thing, to tick off."""
+    if "\n" in text:
+        return text  # already in lines
+    body = text.rstrip(".!?")
+    head, colon, rest = body.partition(":")
+    if not colon:
+        match = LIST_HEAD.match(body)
+        if match is None:
+            return text
+        head, rest = body[: match.end()].strip(" ,-"), body[match.end() :]
+    items = [item.strip() for item in re.split(r"[,;]", rest) if item.strip()]
+    if items:
+        first, said_and, last = items[-1].rpartition(" and ")
+        if said_and and first.strip():
+            items[-1:] = [first.strip(), last.strip()]
+    items = [re.sub(r"^and\s+", "", item, flags=re.IGNORECASE) for item in items]
+    if len(items) < 2 or any(len(item) > 80 for item in items):
+        return text
+    lines = [f"- {item}" for item in items if item]
+    return "\n".join([f"{head.strip()}:", *lines] if head.strip() else lines)
+
+
 def _title(text: str) -> str:
+    lines = [line for line in text.split("\n") if line.strip()]
+    if len(lines) > 1:
+        items = [match.group(1) for line in lines if (match := ITEM.match(line))]
+        # A list's heading, or with none, its first few things.
+        text = ", ".join(items[:3]) if ITEM.match(lines[0]) else lines[0].rstrip(":")
     core = LEADING.sub("", text.rstrip(".!?"))
     core = TIME_AT.sub("", core)
     core = re.sub(
@@ -90,7 +127,10 @@ def _guess_kind(text: str, urls: list[str]) -> NoteKindLiteral:
         return "task"
     if re.search(r"\b(today i|i feel|i felt|grateful|had a (great|good|bad))\b", lowered):
         return "journal"
-    if re.search(r"\b(shopping list|groceries|packing list)\b", lowered):
+    lines = [line for line in text.split("\n") if line.strip()]
+    if LIST_WORDS.search(lowered) or (
+        len(lines) > 1 and sum(bool(ITEM.match(line)) for line in lines) >= 2
+    ):
         return "list"
     return "note"
 
@@ -190,6 +230,8 @@ class FakeBrain:
         clean = _clean(text)
         urls = extract_urls(text)
         kind = _guess_kind(clean, urls)
+        if kind == "list":
+            clean = _as_list(clean)
         reminders = _plan_reminders(text, ctx)
         lookup = None
         if kind == "link" and not urls:
