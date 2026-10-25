@@ -3,8 +3,8 @@
 
 import { api } from "./api.js";
 import { isWorking } from "./cards.js";
-import { aiName, emit } from "./state.js";
-import { toast } from "./ui.js";
+import { aiName, emit, tz } from "./state.js";
+import { toast, when } from "./ui.js";
 
 async function guarded(work) {
   try {
@@ -106,10 +106,12 @@ export const reminderActions = {
     busyReminders.add(reminder.id);
     return guarded(async () => {
       const result = await api(`/api/reminders/${reminder.id}/${action}`, { method: "POST", body });
+      // In this device's own way of writing times, like the list beside it.
+      const due = result.due_at ? when(result.due_at, tz()) : result.when;
       const messages = {
-        done: "Done.",
-        snooze: `Snoozed until ${result.when}.`,
-        tomorrow: `Moved to ${result.when}.`,
+        done: result.rrule && result.status === "scheduled" ? `Done. The next one is ${due}.` : "Done.",
+        snooze: `Snoozed until ${due}.`,
+        tomorrow: `Moved to ${due}.`,
         cancel: "Reminder cancelled.",
       };
       toast(messages[action] || "Updated.");
@@ -117,10 +119,12 @@ export const reminderActions = {
       return result;
     }).finally(() => busyReminders.delete(reminder.id));
   },
-  done: (reminder) => reminderActions.run(reminder, "done"),
+  // The due time shown says which occurrence of a repeating reminder is meant: the one to
+  // come (the server otherwise means the one that has just gone off).
+  done: (reminder) => reminderActions.run(reminder, "done", { due: reminder.due_at }),
   // Without minutes the server uses the snooze length from Settings.
-  snooze: (reminder, minutes) => reminderActions.run(reminder, "snooze", minutes ? { minutes } : undefined),
-  tomorrow: (reminder) => reminderActions.run(reminder, "tomorrow"),
+  snooze: (reminder, minutes) => reminderActions.run(reminder, "snooze", minutes ? { minutes, due: reminder.due_at } : { due: reminder.due_at }),
+  tomorrow: (reminder) => reminderActions.run(reminder, "tomorrow", { due: reminder.due_at }),
   cancel: (reminder) => reminderActions.run(reminder, "cancel"),
 };
 

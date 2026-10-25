@@ -617,12 +617,15 @@ function setupSearch() {
     state.q = input.value.trim();
     renderView();
   });
+  // Esc clears the search; Esc again goes back to the notes.
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
+    if (event.key !== "Escape") return;
+    if (input.value || state.q) {
       input.value = "";
       state.q = "";
       renderView();
-      input.blur();
+    } else {
+      $("main").focus();
     }
   });
 }

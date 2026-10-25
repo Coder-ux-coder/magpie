@@ -6,6 +6,7 @@ import contextlib
 import itertools
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -62,6 +63,13 @@ def local_zone() -> str | None:
         return name if is_valid_timezone(name) else None
     except Exception:
         return None
+
+
+def after_saved(reply: str) -> str:
+    """The AI's reply for the bar, under its “Saved: <title>”: “Saved. I'll remind you at
+    5:00 PM.” loses the “Saved.” it would repeat (and “Saved.” alone says nothing more)."""
+    match = re.match(r"\s*saved[.!]\s*", reply, flags=re.IGNORECASE)
+    return reply[match.end() :] if match else reply
 
 
 def hand_over(paths: AppPaths, action: str = "open", wait: float = 60.0) -> bool:
@@ -886,7 +894,9 @@ class DesktopApp:
             return
         reply = note.get("reply") or note.get("error") or result.get("reply", "")
         self._bar(
-            "saved", {"title": note.get("title") or "", "reply": reply}, hide_after=SAVED_SECONDS
+            "saved",
+            {"title": note.get("title") or "", "reply": after_saved(reply)},
+            hide_after=SAVED_SECONDS,
         )
 
     # ----------------------------------------------------------------- pop-ups

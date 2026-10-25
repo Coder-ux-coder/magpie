@@ -67,6 +67,16 @@ export function markWords(text, words) {
   return pieces.length ? pieces : [{ text: value, hit: false }];
 }
 
+// ------------------------------------------------------------------ saved
+
+/** The line once a note is filed: “Saved ✓ Filed under Work.”, but not “Saved ✓ Saved. …”
+ *  when the AI's reply already says so. */
+export function savedLine(reply) {
+  const text = String(reply || "").trim();
+  if (!text) return "Saved ✓";
+  return /^saved\b/i.test(text) ? `✓ ${text}` : `Saved ✓ ${text}`;
+}
+
 // ------------------------------------------------------------------- days
 
 /** Which group a note's day falls in, counted in the user's time zone: today, yesterday,

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { dayGroup, isChecklist, listItems, listSummary, markWords, searchWords, toggleItem } from "../../src/magpie/web/static/js/text.js";
+import { dayGroup, isChecklist, listItems, listSummary, markWords, savedLine, searchWords, toggleItem } from "../../src/magpie/web/static/js/text.js";
 
 const GROCERIES = "Groceries for the weekend:\n- Milk\n- [x] Eggs\n* Bread\n• Lemons\n2. Tea bags";
 
@@ -70,4 +70,13 @@ test("days ago, in groups", () => {
   assert.equal(dayGroup(1), "yesterday");
   assert.equal(dayGroup(6), "week");
   assert.equal(dayGroup(7), "earlier");
+});
+
+test("the line once a note is filed doesn't say Saved twice", () => {
+  assert.equal(savedLine("Saved. I'll remind you Mon 4:00 PM."), "✓ Saved. I'll remind you Mon 4:00 PM.");
+  assert.equal(savedLine("saved to ideas."), "✓ saved to ideas.");
+  assert.equal(savedLine("Filed under Work."), "Saved ✓ Filed under Work.");
+  assert.equal(savedLine(""), "Saved ✓");
+  assert.equal(savedLine(null), "Saved ✓");
+  assert.equal(savedLine("Savedish words"), "Saved ✓ Savedish words");
 });

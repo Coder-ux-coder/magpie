@@ -23,7 +23,7 @@ import httpx2
 import pytest
 
 from magpie.desktop import hotkey, migrate, paths, phrases, system, transcribe, update
-from magpie.desktop.app import Bridge, DesktopApp
+from magpie.desktop.app import Bridge, DesktopApp, after_saved
 from magpie.desktop.live import GIVE_UP, LONGEST_STEP, LiveWriter
 from magpie.desktop.speech import (
     NOTHING_SAID_SECONDS,
@@ -911,10 +911,12 @@ class FakeClient:
         if self.fail:
             raise RuntimeError(self.fail)
         self.notes.append((text, source))
-        return {"note": {"id": 1, "state": "ready", "title": "Buy milk", "reply": "Saved."}}
+        reply = "Saved. I'll remind you tomorrow at 9:00 AM."
+        return {"note": {"id": 1, "state": "ready", "title": "Buy milk", "reply": reply}}
 
     def note(self, note_id):
-        return {"id": note_id, "state": "ready", "title": "Buy milk", "reply": "Saved."}
+        reply = "Saved. I'll remind you tomorrow at 9:00 AM."
+        return {"id": note_id, "state": "ready", "title": "Buy milk", "reply": reply}
 
     def reminder(self, reminder_id, action):
         self.reminders.append((reminder_id, action))
@@ -1042,10 +1044,19 @@ def test_a_voice_note_shows_in_the_bar_and_is_saved(app):
     app._on_voice("state", {"state": "recording", "by_voice": True})
     app._on_voice("words", {"final": "buy milk", "partial": ""})
     app._on_voice("note", {"text": "buy milk", "reason": "phrase"})
-    settle(app, lambda: app.ui.bar("saved") and app.ui.bar("saved")[-1][0]["reply"] == "Saved.")
+    reply = "I'll remind you tomorrow at 9:00 AM."  # under “Saved: Buy milk”, without “Saved.”
+    settle(app, lambda: app.ui.bar("saved") and app.ui.bar("saved")[-1][0]["reply"] == reply)
     assert app.client.notes == [("buy milk", "desktop-voice")]
     assert ("show", False) in app.ui.calls  # shown without taking the keyboard
     assert app.ui.bar("recording") and app.ui.bar("words")
+
+
+def test_the_bar_does_not_say_saved_twice():
+    assert after_saved("Saved. I'll remind you at 5:00 PM.") == "I'll remind you at 5:00 PM."
+    assert after_saved("saved!  Filed under Work.") == "Filed under Work."
+    assert after_saved("Saved.") == ""
+    assert after_saved("Saved to ideas.") == "Saved to ideas."  # says where: kept
+    assert after_saved("") == ""
 
 
 def test_a_note_that_cannot_be_saved_comes_back_to_the_bar(app):

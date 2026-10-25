@@ -5,7 +5,7 @@ import pytest
 from magpie.models import ReminderStatus
 from magpie.notify import Notification
 from magpie.scheduler import RETRY_DELAYS, Scheduler
-from magpie.timeutil import local_to_utc, now_utc
+from magpie.timeutil import local_to_utc, now_utc, to_local, tomorrow_at
 
 from .conftest import TZ
 
@@ -243,3 +243,73 @@ async def test_background_loops_are_restarted_after_a_crash(core, monkeypatch):
     task = core._supervise("test loop", flaky)
     await asyncio.wait_for(task, 2)
     assert len(runs) == 3  # crashed twice, then finished normally
+
+
+# A repeating reminder is one row whose due time moves on as each occurrence goes off.
+
+
+async def test_snoozing_a_repeating_reminder_that_just_went_off_starts_from_now(core, channel):
+    """From the pop-up (or email, or Telegram): the series has already moved on a week."""
+    due = now_utc() - timedelta(minutes=1)
+    series = core.store.add_reminder(None, due, "Bins out", rrule="FREQ=WEEKLY")
+    await core.scheduler.tick()
+    assert core.store.get_reminder(series.id).due_at == due + timedelta(days=7)
+    copy = core.reminders.snooze(series.id, 30)
+    assert abs(copy.due_at - (now_utc() + timedelta(minutes=30))) < timedelta(minutes=1)
+    later = core.reminders.tomorrow(series.id)
+    assert later.due_at - now_utc() < timedelta(days=2)  # tomorrow morning, not next week's
+    acknowledged = core.reminders.done(series.id)
+    assert acknowledged.due_at == due + timedelta(days=7)  # the series goes on as it was
+    assert acknowledged.status == ReminderStatus.SCHEDULED
+
+
+def test_the_occurrence_shown_in_the_list_can_be_skipped_or_moved(core):
+    day = to_local(now_utc() + timedelta(days=2), TZ).date()
+    start = local_to_utc(f"{day}T09:00", TZ)
+    series = core.store.add_reminder(None, start, "Bins out", rrule="FREQ=WEEKLY")
+    # Done before it's due: this week's is skipped, next week's is still coming.
+    skipped = core.reminders.done(series.id, start)
+    assert skipped.due_at == start + timedelta(days=7)
+    assert skipped.status == ReminderStatus.SCHEDULED
+    # Snoozed before it's due: an hour later this time only.
+    following = skipped.due_at
+    copy = core.reminders.snooze(series.id, 60, due=following)
+    assert copy.due_at == following + timedelta(hours=1) and copy.rrule is None
+    assert core.store.get_reminder(series.id).due_at == following + timedelta(days=7)
+    # Moved to the next morning: from that day, not from today.
+    third = following + timedelta(days=7)
+    moved = core.reminders.tomorrow(series.id, due=third)
+    assert moved.due_at == tomorrow_at(core.prefs().morning_time, TZ, now=third)
+    assert core.store.get_reminder(series.id).due_at == third + timedelta(days=7)
+    # A time that isn't the one to come any more (it went off meanwhile) means the one
+    # that went off.
+    copy = core.reminders.snooze(series.id, 30, due=start)
+    assert abs(copy.due_at - (now_utc() + timedelta(minutes=30))) < timedelta(minutes=1)
+    assert core.store.get_reminder(series.id).due_at == third + timedelta(days=7)
+
+
+def test_skipping_the_last_occurrence_ends_the_series(core):
+    start = now_utc() + timedelta(hours=2)
+    series = core.store.add_reminder(None, start, "Physio", rrule="FREQ=DAILY;COUNT=2")
+    second = core.reminders.done(series.id, start)
+    assert second.status == ReminderStatus.SCHEDULED and second.due_at == start + timedelta(days=1)
+    assert core.reminders.done(series.id, second.due_at).status == ReminderStatus.DONE
+
+
+def test_one_off_reminders_ignore_the_occurrence(core):
+    due = now_utc() + timedelta(hours=3)
+    reminder = core.store.add_reminder(None, due, "Dentist")
+    assert core.reminders.snooze(reminder.id, 60, due=due).due_at == due + timedelta(hours=1)
+    assert core.reminders.done(reminder.id, due).status == ReminderStatus.DONE
+
+
+def test_the_api_takes_the_occurrence_meant(client, core):
+    start = now_utc() + timedelta(days=1)
+    series = core.store.add_reminder(None, start, "Bins out", rrule="FREQ=WEEKLY")
+    done = client.post(f"/api/reminders/{series.id}/done", json={"due": start.isoformat()})
+    assert done.status_code == 200
+    assert core.store.get_reminder(series.id).due_at == start + timedelta(days=7)
+    naive = client.post(f"/api/reminders/{series.id}/done", json={"due": "2030-01-01T09:00"})
+    assert naive.status_code == 422  # a time without its zone could be any occurrence
+    assert client.post(f"/api/reminders/{series.id}/snooze").status_code == 200  # no body
+    assert client.post(f"/api/reminders/{series.id}/tomorrow").status_code == 200

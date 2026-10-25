@@ -6,6 +6,33 @@ All notable changes to Magpie are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Repeating reminders.** Snoozing one from its pop-up, email or Telegram brought it back
+  a week (or a day, or a month) later instead of after the snooze, and *Tomorrow* did the
+  same. In the list of reminders and in the note, *Done* now skips the occurrence shown
+  (it did nothing before), and *+1 hour* and *Tomorrow* move just that one, instead of
+  adding a second reminder beside it.
+- Pressing Enter or Esc in a note's title without changing it showed an error and could
+  leave the title box broken.
+- *About you* and *Your instructions*: typing in one and then the other within a moment
+  saved only the second.
+- An empty wake or stop phrase went back to the one from when Settings was opened, not the
+  one saved since.
+- A time zone chosen in Settings went back to the computer's the next time Magpie started.
+  Choosing another zone now stops following the computer's, and *Use this device's zone*
+  appears straight away.
+- Deleting a note with the Delete key left the keyboard nowhere; it now moves to the next
+  note, as Done and Archive do. Esc in the search box clears it, and Esc again goes back
+  to the notes.
+- “Saved ✓ Saved. I'll remind you…”: the confirmation no longer says *Saved* twice, in the
+  notes window or in the app's voice bar.
+- Reminder messages in the notes window use the same clock as the list beside them.
+- The weekly review without an AI said “1 notes this week (2 task)”; it now counts in plain
+  English (“1 note”, “2 tasks”, “3 journal entries”).
+- Settings → Your data said your notes live on your own server; in the app they live on
+  this computer.
+
 ## [0.10.0] - 2026-10-25
 
 ### Added

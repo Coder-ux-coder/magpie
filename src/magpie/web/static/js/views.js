@@ -175,14 +175,7 @@ function replaceCard(note) {
     return;
   }
   if (!keep) {
-    const hadFocus = list.container.querySelector(`.note-card[data-id="${note.id}"]`)?.contains(document.activeElement);
-    list.notes.splice(index, 1);
-    draw();
-    if (hadFocus) {
-      // Keep the keyboard user's place: focus the card that moved up, or the last one.
-      const next = list.notes[Math.min(index, list.notes.length - 1)];
-      if (next) list.container.querySelector(`.note-card[data-id="${next.id}"] .note-title a`)?.focus();
-    }
+    dropCard(index);
     return;
   }
   const moved = !list.q && groupOf(list.notes[index]) !== groupOf(note); // pinned, or unpinned
@@ -199,11 +192,24 @@ function replaceCard(note) {
   if (hadFocus) fresh.querySelector(".note-title a")?.focus();
 }
 
-function removeCard(id) {
-  const index = list.notes.findIndex((n) => n.id === id);
-  if (index === -1) return;
+// A card leaves the list (done, archived, deleted…).
+function dropCard(index) {
+  const id = list.notes[index].id;
+  const hadFocus = list.container.querySelector(`.note-card[data-id="${id}"]`)?.contains(document.activeElement);
   list.notes.splice(index, 1);
   draw();
+  if (hadFocus) {
+    // Keep the keyboard user's place: focus the card that moved up, or the last one.
+    const next = list.notes[Math.min(index, list.notes.length - 1)];
+    const target = next && list.container.querySelector(`.note-card[data-id="${next.id}"] .note-title a`);
+    (target || document.getElementById("main"))?.focus();
+  }
+}
+
+function removeCard(id) {
+  if (!list.container) return;
+  const index = list.notes.findIndex((n) => n.id === id);
+  if (index !== -1) dropCard(index);
 }
 
 on("note-updated", replaceCard);

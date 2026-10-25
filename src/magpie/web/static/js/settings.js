@@ -33,7 +33,17 @@ async function savePrefs(changes, message = "Saved.") {
     if (error.status === 422 && dialog().open) openSettings();
   }
 }
-const savePrefsSoon = debounce(savePrefs, 800);
+// Typing saves after a pause; changes to several boxes in the meantime are saved together.
+let pendingPrefs = {};
+const flushPrefs = debounce(() => {
+  const changes = pendingPrefs;
+  pendingPrefs = {};
+  savePrefs(changes);
+}, 800);
+function savePrefsSoon(changes) {
+  Object.assign(pendingPrefs, changes);
+  flushPrefs();
+}
 
 function field(id, label, control, hint) {
   return h("div", { class: "field" }, h("label", { for: id }, label), control, hint ? h("span", { class: "hint", id: `${id}-hint` }, hint) : null);
@@ -119,14 +129,32 @@ function timeSection() {
   const zones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
   if (!zones.includes("UTC")) zones.unshift("UTC");
   let zone;
+  const device = deviceTimeZone();
+  // A zone other than this computer's, chosen here, stays: following the computer stops.
+  const useDevice = h("button", { type: "button", class: "btn small", hidden: device === prefs.timezone }, `Use this device's zone (${device})`);
+  const chooseZone = async (value) => {
+    await savePrefs({ timezone: value }, "Time zone saved.");
+    if (state.prefs.timezone !== value) return;
+    const follow = value === device;
+    useDevice.hidden = follow;
+    if ((local.followDeviceZone !== false) !== follow) {
+      saveLocal({ followDeviceZone: follow });
+      const box = document.getElementById("local-followzone");
+      if (box) box.checked = follow;
+    }
+  };
+  useDevice.addEventListener("click", async () => {
+    await chooseZone(device);
+    if (zone.value !== state.prefs.timezone) zone.value = state.prefs.timezone;
+    zone.focus();
+  });
   if (zones.length > 1) {
     zone = h("select", { id: "pref-tz" }, zones.map((z) => h("option", { value: z, selected: z === prefs.timezone }, z.replaceAll("_", " "))));
-    zone.addEventListener("change", () => savePrefs({ timezone: zone.value }, "Time zone saved."));
+    zone.addEventListener("change", () => chooseZone(zone.value));
   } else {
     zone = h("input", { type: "text", id: "pref-tz", value: prefs.timezone });
-    zone.addEventListener("change", () => savePrefs({ timezone: zone.value.trim() }, "Time zone saved."));
+    zone.addEventListener("change", () => chooseZone(zone.value.trim()));
   }
-  const device = deviceTimeZone();
   const morning = h("input", { type: "time", id: "pref-morning", value: prefs.morning_time });
   morning.addEventListener("change", () => morning.value && savePrefs({ morning_time: morning.value }));
   const lengths = [5, 10, 15, 30, 60, 120, 180, 1440];
@@ -142,9 +170,7 @@ function timeSection() {
     toggle("local-followzone", "Follow this computer's time zone automatically", local.followDeviceZone !== false, (on) => saveLocal({ followDeviceZone: on }), {
       hint: "When this computer's zone changes (you travel, or the clocks were wrong), Magpie switches to it.",
     }),
-    device !== prefs.timezone
-      ? h("button", { type: "button", class: "btn small", onclick: async () => { await savePrefs({ timezone: device }, `Using ${device}.`); openSettings("time"); } }, `Use this device's zone (${device})`)
-      : null,
+    useDevice,
     field("pref-morning", "Your morning", morning, "Used for “tomorrow morning” and the Tomorrow button."),
     field("pref-snooze", "Snooze for", snooze, "Used by every Snooze button: here, in Telegram, push, ntfy and email."),
   );
@@ -187,13 +213,13 @@ function voiceSection() {
   const wake = h("input", { type: "text", id: "pref-wake", value: prefs.wake_phrase, dir: "auto" });
   wake.addEventListener("change", () => {
     if (wake.value.trim()) return savePrefs({ wake_phrase: wake.value.trim() });
-    wake.value = prefs.wake_phrase;
+    wake.value = state.prefs.wake_phrase;
     toast("The wake phrase can't be empty.", { error: true });
   });
   const stop = h("input", { type: "text", id: "pref-stop", value: prefs.stop_phrase, dir: "auto" });
   stop.addEventListener("change", () => {
     if (stop.value.trim()) return savePrefs({ stop_phrase: stop.value.trim() });
-    stop.value = prefs.stop_phrase;
+    stop.value = state.prefs.stop_phrase;
     toast("The stop phrase can't be empty.", { error: true });
   });
   const silence = h("input", { type: "number", id: "pref-silence", min: 0, max: 120, value: prefs.silence_seconds, inputmode: "numeric" });
@@ -510,7 +536,9 @@ function dataSection() {
     file.value = "";
   });
   return section("data", "Your data",
-    h("p", { class: "muted" }, "Your notes live on your own server. Take them anywhere."),
+    h("p", { class: "muted" }, state.status.login === false
+      ? "Your notes live on this computer. Take them anywhere."
+      : "Your notes live on your own server. Take them anywhere."),
     h("div", { class: "row" },
       h("a", { class: "btn small", href: "/api/export?format=json", download: "" }, icon("download"), "Export JSON"),
       h("a", { class: "btn small", href: "/api/export?format=markdown", download: "" }, icon("download"), "Export Markdown"),

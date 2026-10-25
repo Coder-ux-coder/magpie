@@ -21,7 +21,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, ValidationError, field_validator
 
 from magpie import __version__
 from magpie.auth import RateLimiter
@@ -214,7 +214,15 @@ class RescheduleIn(BaseModel):
     when: str = Field(max_length=40)
 
 
-class SnoozeIn(BaseModel):
+class OccurrenceIn(BaseModel):
+    due: AwareDatetime | None = Field(
+        default=None,
+        description="For a repeating reminder, the occurrence meant (its due time as listed); "
+        "without it, the one that has just gone off",
+    )
+
+
+class SnoozeIn(OccurrenceIn):
     minutes: int | None = Field(
         default=None, ge=1, le=60 * 24 * 30, description="Defaults to the snooze length in Settings"
     )
@@ -654,15 +662,19 @@ async def list_reminders(
 
 
 def _reminder_action(
-    app: Magpie, reminder_id: int, action: str, minutes: int | None = None
+    app: Magpie,
+    reminder_id: int,
+    action: str,
+    minutes: int | None = None,
+    due: datetime | None = None,
 ) -> dict:
     try:
         if action == "done":
-            reminder = app.reminders.done(reminder_id)
+            reminder = app.reminders.done(reminder_id, due)
         elif action == "snooze":
-            reminder = app.reminders.snooze(reminder_id, minutes)
+            reminder = app.reminders.snooze(reminder_id, minutes, due=due)
         elif action == "tomorrow":
-            reminder = app.reminders.tomorrow(reminder_id)
+            reminder = app.reminders.tomorrow(reminder_id, due=due)
         elif action == "cancel":
             reminder = app.reminders.cancel(reminder_id)
         else:
@@ -676,18 +688,20 @@ def _reminder_action(
 
 
 @router.post("/reminders/{reminder_id}/done")
-async def reminder_done(app: User, reminder_id: int) -> dict:
-    return _reminder_action(app, reminder_id, "done")
+async def reminder_done(app: User, reminder_id: int, body: OccurrenceIn | None = None) -> dict:
+    return _reminder_action(app, reminder_id, "done", due=body.due if body else None)
 
 
 @router.post("/reminders/{reminder_id}/snooze")
 async def reminder_snooze(app: User, reminder_id: int, body: SnoozeIn | None = None) -> dict:
-    return _reminder_action(app, reminder_id, "snooze", body.minutes if body else None)
+    if body is None:
+        return _reminder_action(app, reminder_id, "snooze")
+    return _reminder_action(app, reminder_id, "snooze", body.minutes, body.due)
 
 
 @router.post("/reminders/{reminder_id}/tomorrow")
-async def reminder_tomorrow(app: User, reminder_id: int) -> dict:
-    return _reminder_action(app, reminder_id, "tomorrow")
+async def reminder_tomorrow(app: User, reminder_id: int, body: OccurrenceIn | None = None) -> dict:
+    return _reminder_action(app, reminder_id, "tomorrow", due=body.due if body else None)
 
 
 @router.post("/reminders/{reminder_id}/cancel")

@@ -18,6 +18,16 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 VERDICTS = {"must": "must see", "worth_it": "worth it", "skim": "skim it", "skip": "skip"}
+KIND_NAMES = {
+    "journal": ("journal entry", "journal entries"),
+    "note": ("other note", "other notes"),
+}
+
+
+def how_many(count: int, kind: str) -> str:
+    """“1 task”, “2 tasks”, “3 journal entries”."""
+    one, many = KIND_NAMES.get(kind, (kind, f"{kind}s"))
+    return f"{count} {one if count == 1 else many}"
 
 
 def greeting(data: DigestData) -> str:
@@ -55,10 +65,14 @@ def render_plain(data: DigestData) -> str:
         counts: dict[str, int] = {}
         for note in data.week_notes:
             counts[note.kind] = counts.get(note.kind, 0) + 1
-        summary = ", ".join(f"{count} {kind}" for kind, count in sorted(counts.items()))
+        summary = ", ".join(how_many(count, kind) for kind, count in sorted(counts.items()))
+        if set(counts) == {"note"}:
+            summary = ""  # nothing to tell apart
+        total = len(data.week_notes)
         lines.append("")
         lines.append(
-            f"{len(data.week_notes)} notes this week" + (f" ({summary})." if summary else ".")
+            f"{total} {'note' if total == 1 else 'notes'} this week"
+            + (f" ({summary})." if summary else ".")
         )
         section("This week", [f"{n.display_title} (#{n.id})" for n in data.week_notes[:15]])
     section("To revisit", [f"{n.display_title} (#{n.id})" for n in data.digest_notes])

@@ -40,6 +40,32 @@ def test_render_plain_daily():
     assert "Open tasks" not in text  # empty sections are skipped
 
 
+def test_render_plain_weekly_counts_in_plain_english():
+    now = local_to_utc("2026-10-25T18:00", TZ)
+
+    def note(nid, kind):
+        return Note(
+            id=nid,
+            created_at=now,
+            updated_at=now,
+            source="web",
+            raw_text="x",
+            title=f"N{nid}",
+            kind=kind,
+        )
+
+    data = DigestData(
+        kind="weekly",
+        context=Context(timezone=TZ, now=now),
+        week_notes=[note(1, "task"), note(2, "task"), note(3, "journal"), note(4, "idea")],
+    )
+    assert "4 notes this week (1 idea, 1 journal entry, 2 tasks)." in render_plain(data)
+    data.week_notes = [note(5, "note")]
+    assert "1 note this week." in render_plain(data)
+    data.week_notes = [note(5, "note"), note(6, "note"), note(7, "list")]
+    assert "3 notes this week (1 list, 2 other notes)." in render_plain(data)
+
+
 def test_markdown_to_plain():
     text = "## Themes\n- **Budget** talks (#12)\n* Garden\n\n\n\nDone"
     assert markdown_to_plain(text) == "Themes\n• Budget talks (#12)\n• Garden\n\nDone"

@@ -11,6 +11,7 @@ import { openSettings } from "./settings.js";
 import { speak, speaking, stopSpeaking } from "./speech.js";
 import { desktopApp, emit, local, on, saveLocal, speechLang, state } from "./state.js";
 import { h, toast } from "./ui.js";
+import { savedLine } from "./text.js";
 import { Recorder, VoiceCapture, recordingSupported, speechSupported } from "./voice.js";
 
 let el = null; // the bar's elements, found once: they keep working when the bar changes windows
@@ -284,7 +285,7 @@ async function submit(text, source) {
 }
 
 function onFiled(note) {
-  if (note.state === "ready") setNotice(`Saved ✓ ${note.reply || ""}`.trim(), 10000);
+  if (note.state === "ready") setNotice(savedLine(note.reply), 10000);
   else if (note.error) setNotice(`Saved. ${note.error}`, 12000);
   if (local.readAloud && note.reply) {
     voice?.mute(15000);

@@ -112,21 +112,25 @@ function render(note, { keepScroll = false, force = false } = {}) {
 
 function titleBlock(note, title) {
   const block = h("div", { class: "title-block" });
-  const show = () => {
+  const show = (text = title) => {
     clear(block).append(
       kindBadge(note.kind),
-      h("h2", { id: "note-dialog-title", dir: "auto" }, title),
-      iconButton("edit", "Change the title", edit, { class: "icon-btn title-edit" }),
+      h("h2", { id: "note-dialog-title", dir: "auto" }, text),
+      iconButton("edit", "Change the title", edit, { class: "icon-btn title-edit", id: "note-title-edit" }),
     );
   };
   const edit = () => {
     const input = h("input", { type: "text", id: "note-title-input", value: noteTitle(note), maxlength: 200, dir: "auto", "aria-label": "Title" });
-    let saving = false;
-    const save = async () => {
+    let finished = false;
+    // Enter, Esc or leaving the box ends the edit, once: taking the box away blurs it too.
+    const end = async ({ keep, focus }) => {
+      if (finished) return;
+      finished = true;
       const value = input.value.trim();
-      if (saving) return;
-      if (!value || value === noteTitle(note)) return show();
-      saving = true;
+      const changed = keep && value && value !== noteTitle(note);
+      show(changed ? value : title);
+      if (focus) block.querySelector(".title-edit")?.focus();
+      if (!changed) return;
       try {
         const updated = await api(`/api/notes/${note.id}`, { method: "PATCH", body: { title: value } });
         emit("note-updated", updated);
@@ -137,10 +141,10 @@ function titleBlock(note, title) {
       }
     };
     input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") { event.preventDefault(); save(); }
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); show(); block.querySelector(".title-edit")?.focus(); }
+      if (event.key === "Enter") { event.preventDefault(); end({ keep: true, focus: true }); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); end({ keep: false, focus: true }); }
     });
-    input.addEventListener("blur", save);
+    input.addEventListener("blur", () => end({ keep: true, focus: false }));
     clear(block).append(kindBadge(note.kind), h("h2", { id: "note-dialog-title", class: "sr-only" }, title), input);
     input.focus();
     input.select();
