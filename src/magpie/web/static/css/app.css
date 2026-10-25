@@ -1089,6 +1089,7 @@ mark {
 @media (pointer: coarse) {
   .checklist li { min-height: 2.75rem; align-items: center; }
   .checklist input { margin-top: 0; }
+  .today-head a { display: inline-flex; align-items: center; min-height: 2.75rem; }
 }
 
 /* ----------------------------------------------------------- reminders */

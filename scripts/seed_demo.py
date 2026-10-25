@@ -49,7 +49,7 @@ def main() -> None:
         300,
         source="telegram-voice",
         title="Groceries",
-        text="- Milk\n- Eggs\n- Bread\n- Lemons\n- Tea bags",
+        text="- [x] Milk\n- Eggs\n- Bread\n- Lemons\n- Tea bags",
         kind="list",
         tags=["home"],
         category_id=home,
@@ -198,6 +198,27 @@ def main() -> None:
         reply="Saved. I'll remind you tomorrow at 10:00 AM to call James about the Q3 budget.",
     )
     store.add_reminder(budget, at(1, 10), "Call James about the Q3 budget", origin="explicit")
+
+    cleaning = note(
+        "pick up the dry cleaning later",
+        25,
+        title="Pick up the dry cleaning",
+        text="Pick up the dry cleaning later.",
+        kind="task",
+        tags=["errands"],
+        category_id=home,
+        ping="suggested",
+        ping_reason="You said later, so I'll remind you this afternoon.",
+        reply="Saved. I'll remind you later today.",
+    )
+    # Due today, in a couple of hours (on the half hour), for the Inbox's "Due today".
+    soon = local_now(tz).replace(second=0, microsecond=0) + timedelta(hours=2)
+    soon += timedelta(minutes=-soon.minute % 30)
+    if soon.date() != today:
+        soon = soon.replace(year=today.year, month=today.month, day=today.day, hour=23, minute=30)
+    store.add_reminder(
+        cleaning, at(0, soon.hour, soon.minute), "Pick up the dry cleaning", origin="suggested"
+    )
 
     store.add_digest(
         "daily",

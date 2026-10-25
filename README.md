@@ -165,6 +165,8 @@ Good to know:
   bottom of the screen with your words as you speak, without taking the keyboard from what
   you're doing. **“Notes off”** saves the note (so does a pause, or **Save**); **“cancel
   note”** throws it away, with **Undo**. Click the bar to type into it.
+- **Or press Ctrl+Alt+Space** on Windows, in any program: tap it to start and again to
+  save, or hold it down while you talk.
 - **Accurate words:** as you speak, Whisper writes your words in the bar, and when the note
   ends it writes the whole note down again, with punctuation, using its most accurate
   model if your computer is quick enough for it. It copes with accents, and you can give
@@ -182,12 +184,13 @@ Good to know:
   them by **email** or **Telegram** (Settings → Reminders); Telegram can take notes too.
 - **Magpie's icon** (by the clock, or in the Mac's menu bar) opens your notes, starts a
   note, turns listening off and on, and checks for updates.
-- **Your notes:** categories with colours, search, a daily digest, **Ask** (“what did I
-  decide about rent?”), and short reviews of the videos and articles you save. Magpie learns
-  from your corrections.
+- **Your notes:** what's due today at the top, then your notes by day; lists you tick off;
+  categories with colours, search, a daily digest, **Ask** (“what did I decide about
+  rent?”), and short reviews of the videos and articles you save. Magpie learns from your
+  corrections.
 
 <p align="center">
-  <img src="docs/images/dashboard.png" width="80%" alt="Magpie's notes window: the views and colour-coded categories in a sidebar, filed notes, and a note being dictated in the voice bar at the bottom">
+  <img src="docs/images/dashboard.png" width="80%" alt="Magpie's notes window: the views and colour-coded categories in a sidebar; the Inbox with a reminder due today, a pinned grocery checklist with one of five things done, and today's notes; and a note being dictated in the voice bar at the bottom">
 </p>
 
 More in the **[guide](docs/guide.md)**: everyday use, how Magpie hears you, choosing the AI,
